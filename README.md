@@ -100,7 +100,7 @@ test access {
 void main() {
     mut Vec[u32, _] v = global_allocator().alloc();
 
-    // nice inline function syntax :D
+    // nice lambda function syntax :D
     // note this is not a closure (thats too complicated to implement properly)
     // instead it takes in a reference to data
     // in this case its void because it doesn't need anything extra
