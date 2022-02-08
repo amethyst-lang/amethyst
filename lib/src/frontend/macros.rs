@@ -267,6 +267,5 @@ mod test {
         let mut map = HashMap::new();
         extract_macros(&mut map, &asts);
         replace_macros(&map, &mut asts);
-        panic!("{:#?}", asts);
     }
 }

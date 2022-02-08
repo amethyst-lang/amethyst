@@ -39,19 +39,10 @@ Let's look at an example:
     (inst (Vec 'a 'A)
         :alloc alloc))
 
-void push(mut Vec['a, 'A] v, 'a item) {
-    if v.len >= v.vals.len {
-        let usize cap = if v.vals.cap == 0 {
-            8
-        } else v.vals.cap * 2;
-
-        v.vals = v.alloc.array_realloc['a](v.vals, v.cap)
-            catch panic("allocation failed")
-    }
-
-    v.vals.set(v.len, item);
-    v.len += 1
-}
+(defunc (pop 'a) (v (mut (Vec 'a 'A)))
+    (seq
+        // you know what im too lazy to actually do this
+    ))
 
 // enums are error values
 (enum opt
