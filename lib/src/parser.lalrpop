@@ -1,0 +1,117 @@
+use lalrpop_util::ParseError;
+
+use crate::frontend::parsing::{self, Ast, Error};
+use core::str::FromStr;
+
+use crate::{Vec, Box};
+
+grammar;
+
+extern {
+    type Error = Error;
+}
+
+match {
+    r"\s*" => { },
+    r"//[^\n\r]*[\n\r]*" => { },
+    r"/\*([^\*]*\*+[^\*/])*([^\*]*\*+|[^\*])*\*/" => { },
+    _
+}
+
+IntRaw: u64 = {
+    <s:r"0b[01]+"> =>? u64::from_str_radix(&s[2..], 2).map_err(|_| ParseError::User {
+        error: Error::NumberTooBig,
+    }),
+    <s:r"0o[01234567]+"> =>? u64::from_str_radix(&s[2..], 8).map_err(|_| ParseError::User {
+        error: Error::NumberTooBig,
+    }),
+    <s:r"0x[0-9a-fA-F]+"> =>? u64::from_str_radix(&s[2..], 16).map_err(|_| ParseError::User {
+        error: Error::NumberTooBig,
+    }),
+    <s:r"[0-9]+"> =>? u64::from_str(s).map_err(|_| ParseError::User {
+        error: Error::NumberTooBig,
+    }),
+}
+
+Int: Ast<'input> =
+    <IntRaw> => Ast::Int(<>);
+
+FloatRaw: f64 =
+    <s:r"[0-9]+((\.[0-9]+)([eE][+\-]?[0-9]+)?|[eE][+\-]?[0-9]+)"> =>? s.parse().map_err(|_| ParseError::User {
+        error: Error::NumberTooBig,
+    });
+
+Float: Ast<'input> =
+    <FloatRaw> => Ast::Float(<>);
+
+Char: Ast<'input> = {
+    <s:r"'[^\\']'"> => Ast::Int(s.chars().skip(1).next().unwrap() as u64),
+    <s:"'\\n'"> => Ast::Int(b'\n' as u64),
+    <s:"'\\r'"> => Ast::Int(b'\r' as u64),
+    <s:"'\\t'"> => Ast::Int(b'\t' as u64),
+    <s:"'\\0'"> => Ast::Int(b'\0' as u64),
+    <s:"'\\\\'"> => Ast::Int(b'\\' as u64),
+    <s:"'\\''"> => Ast::Int(b'\'' as u64),
+    <s:"'\\\"'"> => Ast::Int(b'\"' as u64),
+}
+
+Bool: Ast<'input> = {
+    <s:"true"> => Ast::Int(1),
+    <s:"false"> => Ast::Int(0),
+}
+
+Str: Ast<'input> = {
+    <s:r#""([^\\"]|\\.)*""#> => Ast::Str(parsing::unescape_sequences(&s[1..s.len() - 1])),
+    <s:r"(\\\\[^\n]*\n*)+"> => Ast::Str(parsing::strip_backslashes(s)),
+}
+
+SymbolRaw =
+    <r#"[^`1234567890\[\]:\\;',\.#(){}|"\s][^`\[\]:\\;',\.#(){}|"\s]*"#>;
+
+Symbol: Ast<'input> =
+    <SymbolRaw> => Ast::Symbol(<>);
+
+KeyRaw =
+    <r#":[^`1234567890\[\]:\\;',\.#(){}|"\s][^`\[\]:\\;',\.#(){}|"\s]*"#>;
+
+Key: Ast<'input> =
+    <KeyRaw> => Ast::Key(&<>[1..]);
+
+SExpr: Ast<'input> =
+    "(" <Attribute*> ")" => Ast::SExpr(<>);
+
+AttributeElement: Ast<'input> = {
+    <Symbol>,
+    <SExpr>
+};
+
+Attribute: Ast<'input> =
+    <s:PrefixOp> <mut a:("." <AttributeElement>)*> => {
+        if a.is_empty() {
+            s
+        } else {
+            a.insert(0, s);
+            Ast::Attribute(a)
+        }
+    };
+
+Value: Ast<'input> = {
+    <Int>,
+    <Float>,
+    <Char>,
+    <Bool>,
+    <Str>,
+    <Symbol>,
+    <Key>,
+    <SExpr>,
+};
+
+PrefixOp: Ast<'input> = {
+    "'" <PrefixOp> => Ast::Quote(Box::new(<>)),
+    "`" <PrefixOp> => Ast::Backtick(Box::new(<>)),
+    "," <PrefixOp> => Ast::Comma(Box::new(<>)),
+    <Value>,
+};
+
+pub Top: Vec<Ast<'input>> =
+    <SExpr*>;
