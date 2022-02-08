@@ -1,6 +1,6 @@
 use std::ops::RangeFrom;
 
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{hash_map::Entry, HashMap};
 
 use super::parsing::Ast;
 
@@ -59,7 +59,11 @@ impl<'input> Macro<'input> {
                     bindings.insert(arg.name, CapturedArg::Single(i));
 
                     ordered_arg += 1;
-                    while let Some(Arg { type_: ArgType::Key, .. }) = self.args.get(ordered_arg) {
+                    while let Some(Arg {
+                        type_: ArgType::Key,
+                        ..
+                    }) = self.args.get(ordered_arg)
+                    {
                         ordered_arg += 1;
                     }
                 } else if let ArgType::Rest = arg.type_ {
@@ -75,7 +79,11 @@ impl<'input> Macro<'input> {
             }
         }
 
-        if let Some(Arg { type_: ArgType::Ordered | ArgType::Optional, .. }) = self.args.get(ordered_arg) {
+        if let Some(Arg {
+            type_: ArgType::Ordered | ArgType::Optional,
+            ..
+        }) = self.args.get(ordered_arg)
+        {
             None
         } else {
             Some(bindings)
@@ -83,7 +91,11 @@ impl<'input> Macro<'input> {
     }
 }
 
-fn replace_macro_args<'input>(ast: &mut Ast<'input>, map: &HashMap<&'input str, CapturedArg>, args: &[Ast<'input>]) {
+fn replace_macro_args<'input>(
+    ast: &mut Ast<'input>,
+    map: &HashMap<&'input str, CapturedArg>,
+    args: &[Ast<'input>],
+) {
     match ast {
         Ast::Int(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Key(_, _) => (),
 
@@ -91,9 +103,15 @@ fn replace_macro_args<'input>(ast: &mut Ast<'input>, map: &HashMap<&'input str, 
             if let Some(cap) = map.get(name) {
                 match cap {
                     CapturedArg::Single(single) => *ast = args[*single].clone(),
-                    CapturedArg::Rest(rest) => *ast = {
-                        let sexpr = args[rest.clone()].to_vec();
-                        Ast::SExpr(sexpr.first().map(|v| v.span().start).unwrap_or(0)..sexpr.last().map(|v| v.span().end).unwrap_or(0), sexpr)
+                    CapturedArg::Rest(rest) => {
+                        *ast = {
+                            let sexpr = args[rest.clone()].to_vec();
+                            Ast::SExpr(
+                                sexpr.first().map(|v| v.span().start).unwrap_or(0)
+                                    ..sexpr.last().map(|v| v.span().end).unwrap_or(0),
+                                sexpr,
+                            )
+                        }
                     }
                 }
             }
@@ -118,44 +136,50 @@ fn replace_macro_args<'input>(ast: &mut Ast<'input>, map: &HashMap<&'input str, 
     }
 }
 
-fn replace_macros_helper<'input>(map: &HashMap<&'input str, Vec<Macro<'input>>>, ast: &mut Ast<'input>) -> bool {
+fn replace_macros_helper<'input>(
+    map: &HashMap<&'input str, Vec<Macro<'input>>>,
+    ast: &mut Ast<'input>,
+) -> bool {
     match ast {
-        Ast::Int(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Symbol(_, _) | Ast::Key(_, _) => false,
+        Ast::Int(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Symbol(_, _) | Ast::Key(_, _) => {
+            false
+        }
 
         Ast::Quote(_, quote) => replace_macros_helper(map, quote),
         Ast::Comma(_, comma) => replace_macros_helper(map, comma),
         Ast::Backtick(_, backtick) => replace_macros_helper(map, backtick),
         Ast::Splice(_, splice) => replace_macros_helper(map, splice),
 
-        Ast::SExpr(_, v) => {
-            match v.first() {
-                Some(Ast::Symbol(_, name)) if map.contains_key(name) => {
-                    for macro_ in map.get(name).unwrap().iter().rev() {
-                        if let Some(bindings) = macro_.args_bind(&v[1..]) {
-                            let mut new = macro_.body.clone().unwrap_or_else(|| Ast::SExpr(0..0, Vec::new()));
+        Ast::SExpr(_, v) => match v.first() {
+            Some(Ast::Symbol(_, name)) if map.contains_key(name) => {
+                for macro_ in map.get(name).unwrap().iter().rev() {
+                    if let Some(bindings) = macro_.args_bind(&v[1..]) {
+                        let mut new = macro_
+                            .body
+                            .clone()
+                            .unwrap_or_else(|| Ast::SExpr(0..0, Vec::new()));
 
-                            replace_macro_args(&mut new, &bindings, &v[1..]);
+                        replace_macro_args(&mut new, &bindings, &v[1..]);
 
-                            *ast = new;
-                            return true;
-                        }
+                        *ast = new;
+                        return true;
                     }
-
-                    false
                 }
 
-                _ => {
-                    let mut updated = false;
-                    for ast in v {
-                        if replace_macros_helper(map, ast) {
-                            updated = true;
-                        }
-                    }
-
-                    updated
-                }
+                false
             }
-        }
+
+            _ => {
+                let mut updated = false;
+                for ast in v {
+                    if replace_macros_helper(map, ast) {
+                        updated = true;
+                    }
+                }
+
+                updated
+            }
+        },
 
         Ast::Attribute(_, attrs) => {
             let mut updated = false;
@@ -170,7 +194,10 @@ fn replace_macros_helper<'input>(map: &HashMap<&'input str, Vec<Macro<'input>>>,
     }
 }
 
-pub fn replace_macros<'input>(map: &HashMap<&'input str, Vec<Macro<'input>>>, asts: &mut [Ast<'input>]) {
+pub fn replace_macros<'input>(
+    map: &HashMap<&'input str, Vec<Macro<'input>>>,
+    asts: &mut [Ast<'input>],
+) {
     while {
         let mut updated = false;
         for ast in asts.iter_mut() {
@@ -220,11 +247,7 @@ pub fn extract_macros<'input>(
                         }
                     }
 
-                    let body = if sexpr.len() > 2 {
-                        sexpr.last()
-                    } else {
-                        None
-                    };
+                    let body = if sexpr.len() > 2 { sexpr.last() } else { None };
 
                     match map.entry(*name) {
                         Entry::Occupied(mut v) => {
@@ -236,7 +259,11 @@ pub fn extract_macros<'input>(
                         }
 
                         Entry::Vacant(v) => {
-                            v.insert(vec![Macro { name: *name, args, body: body.cloned(), }]);
+                            v.insert(vec![Macro {
+                                name: *name,
+                                args,
+                                body: body.cloned(),
+                            }]);
                         }
                     }
                 }
@@ -244,4 +271,3 @@ pub fn extract_macros<'input>(
         }
     }
 }
-

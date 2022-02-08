@@ -25,17 +25,17 @@ pub enum Ast<'a> {
 impl<'a> Ast<'a> {
     pub fn span(&self) -> Range<usize> {
         match self {
-            Ast::Int(s, _) |
-            Ast::Float(s, _) |
-            Ast::Str(s, _) |
-            Ast::Symbol(s, _) |
-            Ast::Key(s, _) |
-            Ast::Quote(s, _) |
-            Ast::Comma(s, _) |
-            Ast::Backtick(s, _) |
-            Ast::Splice(s, _) |
-            Ast::SExpr(s, _) |
-            Ast::Attribute(s, _) => s.clone(),
+            Ast::Int(s, _)
+            | Ast::Float(s, _)
+            | Ast::Str(s, _)
+            | Ast::Symbol(s, _)
+            | Ast::Key(s, _)
+            | Ast::Quote(s, _)
+            | Ast::Comma(s, _)
+            | Ast::Backtick(s, _)
+            | Ast::Splice(s, _)
+            | Ast::SExpr(s, _)
+            | Ast::Attribute(s, _) => s.clone(),
         }
     }
 }
