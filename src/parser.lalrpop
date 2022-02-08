@@ -32,7 +32,7 @@ IntRaw: u64 = {
 }
 
 Int: Ast<'input> =
-    <IntRaw> => Ast::Int(<>);
+    <s:@L> <v:IntRaw> <e:@R> => Ast::Int(s..e, v);
 
 FloatRaw: f64 =
     <s:r"[0-9]+((\.[0-9]+)([eE][+\-]?[0-9]+)?|[eE][+\-]?[0-9]+)"> =>? s.parse().map_err(|_| ParseError::User {
@@ -40,43 +40,43 @@ FloatRaw: f64 =
     });
 
 Float: Ast<'input> =
-    <FloatRaw> => Ast::Float(<>);
+    <s:@L> <v:FloatRaw> <e:@R> => Ast::Float(s..e, v);
 
 Char: Ast<'input> = {
-    <s:r"'[^\\']'"> => Ast::Int(s.chars().skip(1).next().unwrap() as u64),
-    <s:"'\\n'"> => Ast::Int(b'\n' as u64),
-    <s:"'\\r'"> => Ast::Int(b'\r' as u64),
-    <s:"'\\t'"> => Ast::Int(b'\t' as u64),
-    <s:"'\\0'"> => Ast::Int(b'\0' as u64),
-    <s:"'\\\\'"> => Ast::Int(b'\\' as u64),
-    <s:"'\\''"> => Ast::Int(b'\'' as u64),
-    <s:"'\\\"'"> => Ast::Int(b'\"' as u64),
+    <s:@L> <v:r"'[^\\']'"> <e:@R> => Ast::Int(s..e, v.chars().skip(1).next().unwrap() as u64),
+    <s:@L> <v:"'\\n'"> <e:@R> => Ast::Int(s..e, b'\n' as u64),
+    <s:@L> <v:"'\\r'"> <e:@R> => Ast::Int(s..e, b'\r' as u64),
+    <s:@L> <v:"'\\t'"> <e:@R> => Ast::Int(s..e, b'\t' as u64),
+    <s:@L> <v:"'\\0'"> <e:@R> => Ast::Int(s..e, b'\0' as u64),
+    <s:@L> <v:"'\\\\'"> <e:@R> => Ast::Int(s..e, b'\\' as u64),
+    <s:@L> <v:"'\\''"> <e:@R> => Ast::Int(s..e, b'\'' as u64),
+    <s:@L> <v:"'\\\"'"> <e:@R> => Ast::Int(s..e, b'\"' as u64),
 }
 
 Bool: Ast<'input> = {
-    <s:"true"> => Ast::Int(1),
-    <s:"false"> => Ast::Int(0),
+    <s:@L> <v:"true"> <e:@R> => Ast::Int(s..e, 1),
+    <s:@L> <v:"false"> <e:@R> => Ast::Int(s..e, 0),
 }
 
 Str: Ast<'input> = {
-    <s:r#""([^\\"]|\\.)*""#> => Ast::Str(parsing::unescape_sequences(&s[1..s.len() - 1])),
-    <s:r"(\\\\[^\n]*\n*)+"> => Ast::Str(parsing::strip_backslashes(s)),
+    <s:@L> <v:r#""([^\\"]|\\.)*""#> <e:@R> => Ast::Str(s..e, parsing::unescape_sequences(&v[1..v.len() - 1])),
+    <s:@L> <v:r"(\\\\[^\n]*\n*)+"> <e:@R> => Ast::Str(s..e, parsing::strip_backslashes(v)),
 }
 
 SymbolRaw =
-    <r#"[^`1234567890\[\]:\\;',\.#(){}|"\s][^`\[\]:\\;',\.#(){}|"\s]*"#>;
+    <r#"[^`1234567890\[\]:\\;',\.@#(){}|"\s][^`\[\]:\\;',\.@#(){}|"\s]*"#>;
 
 Symbol: Ast<'input> =
-    <SymbolRaw> => Ast::Symbol(<>);
+    <s:@L> <v:SymbolRaw> <e:@R> => Ast::Symbol(s..e, v);
 
 KeyRaw =
-    <r#":[^`1234567890\[\]:\\;',\.#(){}|"\s][^`\[\]:\\;',\.#(){}|"\s]*"#>;
+    <r#":[^`1234567890\[\]:\\;',\.@#(){}|"\s][^`\[\]:\\;',\.@#(){}|"\s]*"#>;
 
 Key: Ast<'input> =
-    <KeyRaw> => Ast::Key(&<>[1..]);
+    <s:@L> <v:KeyRaw> <e:@R> => Ast::Key(s..e, &v[1..]);
 
 SExpr: Ast<'input> =
-    "(" <Attribute*> ")" => Ast::SExpr(<>);
+    <s:@L> "(" <v:Attribute*> ")" <e:@R> => Ast::SExpr(s..e, v);
 
 AttributeElement: Ast<'input> = {
     <Symbol>,
@@ -89,7 +89,7 @@ Attribute: Ast<'input> =
             s
         } else {
             a.insert(0, s);
-            Ast::Attribute(a)
+            Ast::Attribute(a.first().unwrap().span().start..a.last().unwrap().span().end, a)
         }
     };
 
@@ -105,9 +105,10 @@ Value: Ast<'input> = {
 };
 
 PrefixOp: Ast<'input> = {
-    "'" <PrefixOp> => Ast::Quote(Box::new(<>)),
-    "`" <PrefixOp> => Ast::Backtick(Box::new(<>)),
-    "," <PrefixOp> => Ast::Comma(Box::new(<>)),
+    <s:@L> "'" <v:PrefixOp> <e:@R> => Ast::Quote(s..e, Box::new(v)),
+    <s:@L> "`" <v:PrefixOp> <e:@R> => Ast::Backtick(s..e, Box::new(v)),
+    <s:@L> "," <v:PrefixOp> <e:@R> => Ast::Comma(s..e, Box::new(v)),
+    <s:@L> ",@" <v:PrefixOp> <e:@R> => Ast::Splice(s..e, Box::new(v)),
     <Value>,
 };
 

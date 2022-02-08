@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 #[derive(Debug)]
 pub enum Error {
     NumberTooBig,
@@ -5,18 +7,37 @@ pub enum Error {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Ast<'a> {
-    Int(u64),
-    Float(f64),
-    Str(String),
-    Symbol(&'a str),
-    Key(&'a str),
+    Int(Range<usize>, u64),
+    Float(Range<usize>, f64),
+    Str(Range<usize>, String),
+    Symbol(Range<usize>, &'a str),
+    Key(Range<usize>, &'a str),
 
-    Quote(Box<Ast<'a>>),
-    Comma(Box<Ast<'a>>),
-    Backtick(Box<Ast<'a>>),
+    Quote(Range<usize>, Box<Ast<'a>>),
+    Comma(Range<usize>, Box<Ast<'a>>),
+    Backtick(Range<usize>, Box<Ast<'a>>),
+    Splice(Range<usize>, Box<Ast<'a>>),
 
-    SExpr(Vec<Ast<'a>>),
-    Attribute(Vec<Ast<'a>>),
+    SExpr(Range<usize>, Vec<Ast<'a>>),
+    Attribute(Range<usize>, Vec<Ast<'a>>),
+}
+
+impl<'a> Ast<'a> {
+    pub fn span(&self) -> Range<usize> {
+        match self {
+            Ast::Int(s, _) |
+            Ast::Float(s, _) |
+            Ast::Str(s, _) |
+            Ast::Symbol(s, _) |
+            Ast::Key(s, _) |
+            Ast::Quote(s, _) |
+            Ast::Comma(s, _) |
+            Ast::Backtick(s, _) |
+            Ast::Splice(s, _) |
+            Ast::SExpr(s, _) |
+            Ast::Attribute(s, _) => s.clone(),
+        }
+    }
 }
 
 pub fn unescape_sequences(s: &str) -> String {
