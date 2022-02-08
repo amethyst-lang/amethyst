@@ -1,10 +1,7 @@
 # amethyst
 Amethyst is a systems language aimed at being simple, small, portable, and safe.
 
-## STOP MAKING LANGUAGES!!!!
-Nope. Never will. I love making languages that are unfinished and you can't stop me.
-
-## Hhhh fine, so what is this language?
+## What is this language?
 From the r/ProgLangs discord server:
  - simple: implementing this language should be super simple. the design of this language should be super simple. it should be super simple to learn this language if youre familiar with other system langs
  - small: the base implementation should be small and with few external dependencies. the stdlib should be small but expandable, with no external dependencies
