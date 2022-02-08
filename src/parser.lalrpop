@@ -1,9 +1,7 @@
 use lalrpop_util::ParseError;
 
 use crate::frontend::parsing::{self, Ast, Error};
-use core::str::FromStr;
-
-use crate::{Vec, Box};
+use std::str::FromStr;
 
 grammar;
 

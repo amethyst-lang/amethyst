@@ -1,6 +1,3 @@
-#[cfg(not(feature = "std"))]
-use crate::*;
-
 #[derive(Debug)]
 pub enum Error {
     NumberTooBig,

@@ -1,9 +1,6 @@
 use core::ops::RangeFrom;
 
-#[cfg(not(feature = "std"))]
-use crate::*;
-
-use hashbrown::{HashMap, hash_map::Entry};
+use std::collections::{HashMap, hash_map::Entry};
 
 use super::parsing::Ast;
 
@@ -243,29 +240,3 @@ pub fn extract_macros<'input>(
     }
 }
 
-#[cfg(test)]
-mod test {
-    use crate::parser::TopParser;
-    use super::*;
-
-    #[test]
-    fn macro_print() {
-        use hashbrown::HashMap;
-
-        let mut asts = TopParser::new().parse(r#"
-        (defmacro while con stats &key else
-            (loop
-                (cond
-                    con stats
-                    :else (break else))))
-        (while true
-            (seq
-                (println "uwu"))
-            :else
-                (+ 1 2))
-        "#).unwrap();
-        let mut map = HashMap::new();
-        extract_macros(&mut map, &asts);
-        replace_macros(&map, &mut asts);
-    }
-}
