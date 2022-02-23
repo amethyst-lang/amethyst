@@ -2,11 +2,13 @@ use std::{collections::HashMap, ops::Range};
 
 use super::parsing::Ast;
 
+#[derive(Debug)]
 pub struct Metadata<'a> {
     pub range: Range<usize>,
     pub type_: Type<'a>,
 }
 
+#[derive(Debug)]
 pub enum Type<'a> {
     Unknown,
     UnknownInt,
@@ -32,6 +34,7 @@ pub enum Type<'a> {
     Generic(&'a str),
 }
 
+#[derive(Debug)]
 pub enum SExpr<'a> {
     Int {
         meta: Metadata<'a>,
@@ -52,11 +55,6 @@ pub enum SExpr<'a> {
     List {
         meta: Metadata<'a>,
         values: Vec<SExpr<'a>>,
-    },
-
-    Key {
-        meta: Metadata<'a>,
-        value: &'a str,
     },
 
     Quote {
@@ -101,6 +99,12 @@ pub enum SExpr<'a> {
 
     Nil {
         meta: Metadata<'a>,
+    },
+
+    Type {
+        meta: Metadata<'a>,
+        value: Box<SExpr<'a>>,
+        type_: Type<'a>,
     },
 
     FuncDef {
@@ -156,7 +160,6 @@ impl<'a> SExpr<'a> {
             | SExpr::Str { meta, .. }
             | SExpr::Symbol { meta, .. }
             | SExpr::List { meta, .. }
-            | SExpr::Key { meta, .. }
             | SExpr::Quote { meta, .. }
             | SExpr::Comma { meta, .. }
             | SExpr::Backtick { meta, .. }
@@ -166,6 +169,7 @@ impl<'a> SExpr<'a> {
             | SExpr::Loop { meta, .. }
             | SExpr::Break { meta, .. }
             | SExpr::Nil { meta }
+            | SExpr::Type { meta, .. }
             | SExpr::FuncDef { meta, .. }
             | SExpr::FuncCall { meta, .. }
             | SExpr::StructDef { meta, .. }
@@ -183,7 +187,6 @@ impl<'a> SExpr<'a> {
             | SExpr::Str { meta, .. }
             | SExpr::Symbol { meta, .. }
             | SExpr::List { meta, .. }
-            | SExpr::Key { meta, .. }
             | SExpr::Quote { meta, .. }
             | SExpr::Comma { meta, .. }
             | SExpr::Backtick { meta, .. }
@@ -193,6 +196,7 @@ impl<'a> SExpr<'a> {
             | SExpr::Loop { meta, .. }
             | SExpr::Break { meta, .. }
             | SExpr::Nil { meta }
+            | SExpr::Type { meta, .. }
             | SExpr::FuncDef { meta, .. }
             | SExpr::FuncCall { meta, .. }
             | SExpr::StructDef { meta, .. }
@@ -204,6 +208,7 @@ impl<'a> SExpr<'a> {
     }
 }
 
+#[derive(Debug)]
 pub enum LoweringError {
     InvalidAttribute,
     TooManyQuoted,
@@ -211,6 +216,12 @@ pub enum LoweringError {
     InvalidLoop,
     InvalidBreak,
     InvalidSet,
+    InvalidTypeSpecifier,
+}
+
+fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
+    // TODO
+    Ok(Type::Unknown)
 }
 
 fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError> {
@@ -299,6 +310,13 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                 }
             } else {
                 match &sexpr[0] {
+                    Ast::Symbol(_, "defmacro") => SExpr::Nil {
+                        meta: Metadata {
+                            range,
+                            type_: Type::Tuple(vec![]),
+                        },
+                    },
+
                     Ast::Symbol(_, "list") => SExpr::List {
                         meta: Metadata {
                             range,
@@ -382,6 +400,21 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         }
                     }
 
+                    Ast::Symbol(_, ":") => {
+                        if sexpr.len() == 3 {
+                            SExpr::Type {
+                                meta: Metadata {
+                                    range,
+                                    type_: Type::Unknown,
+                                },
+                                value: Box::new(lower_helper(sexpr.swap_remove(1), false)?),
+                                type_: parse_type(sexpr.swap_remove(1))?,
+                            }
+                        } else {
+                            return Err(LoweringError::InvalidTypeSpecifier);
+                        }
+                    }
+
                     Ast::Symbol(_, "defun") => todo!(),
                     Ast::Symbol(_, "defstruct") => todo!(),
                     Ast::Symbol(_, "inst") => todo!(),
@@ -407,13 +440,17 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         }
                     }
 
-                    Ast::Key(_, _) => todo!(),
-                    Ast::Quote(_, _) => todo!(),
-                    Ast::Comma(_, _) => todo!(),
-                    Ast::Backtick(_, _) => todo!(),
-                    Ast::Splice(_, _) => todo!(),
-                    Ast::SExpr(_, _) => todo!(),
-                    _ => todo!(),
+                    // Function call
+                    _ => {
+                        SExpr::FuncCall {
+                            meta: Metadata {
+                                range,
+                                type_: Type::Unknown,
+                            },
+                            func: Box::new(lower_helper(sexpr.remove(0), false)?),
+                            values: sexpr.into_iter().map(|v| lower_helper(v, false)).collect::<Result<Vec<SExpr>, LoweringError>>()?,
+                        }
+                    }
                 }
             }
         }

@@ -27,6 +27,7 @@ pub struct Macro<'input> {
 }
 
 enum CapturedArg {
+    None,
     Single(usize),
     Rest(RangeFrom<usize>),
 }
@@ -34,6 +35,10 @@ enum CapturedArg {
 impl<'input> Macro<'input> {
     fn args_bind(&self, ast: &[Ast<'input>]) -> Option<HashMap<&'input str, CapturedArg>> {
         let mut bindings = HashMap::new();
+
+        for arg in self.args.iter() {
+            bindings.insert(arg.name, CapturedArg::None);
+        }
 
         let mut ordered_arg = 0;
         let mut last_key = None;
@@ -102,6 +107,7 @@ fn replace_macro_args<'input>(
         Ast::Symbol(_, name) => {
             if let Some(cap) = map.get(name) {
                 match cap {
+                    CapturedArg::None => *ast = Ast::SExpr(ast.span(), vec![]),
                     CapturedArg::Single(single) => *ast = args[*single].clone(),
                     CapturedArg::Rest(rest) => {
                         *ast = {
