@@ -8,7 +8,7 @@ pub struct Metadata<'a> {
     pub type_: Type<'a>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Type<'a> {
     Unknown,
     UnknownInt,
@@ -32,6 +32,11 @@ pub enum Type<'a> {
     Struct(&'a str, Vec<Type<'a>>),
 
     Generic(&'a str),
+
+    // argument types, return type
+    Function(Vec<Type<'a>>, Box<Type<'a>>),
+
+    TypeVariable(u64),
 }
 
 #[derive(Debug)]

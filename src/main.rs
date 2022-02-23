@@ -1,29 +1,24 @@
 use std::collections::HashMap;
 
-use amethyst::frontend::{macros, ast_lowering};
+use amethyst::frontend::{macros, ast_lowering, correctness};
 use amethyst::parser::TopParser;
 
 fn main() {
     let mut asts = TopParser::new()
         .parse(
-            r#"
-    (defmacro while con stats &key else
-        (loop
-            (cond
-                (con stats)
-                (true (break else)))))
-    (while true
+    r#"
         (seq
-            (println "uwu"))
-        :else
-            (+ 1 2))
+            0
+            3.4
+            "uwu")
     "#,
         )
         .unwrap();
     let mut map = HashMap::new();
     macros::extract_macros(&mut map, &asts);
     macros::replace_macros(&map, &mut asts);
-    let sexprs = ast_lowering::lower(asts).unwrap();
+    let mut sexprs = ast_lowering::lower(asts).unwrap();
+    correctness::check(&mut sexprs).unwrap();
 
     println!("{:#?}", sexprs);
 }
