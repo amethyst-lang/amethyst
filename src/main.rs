@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use amethyst::frontend::{macros, correctness};
+use amethyst::frontend::{macros, ast_lowering};
 use amethyst::parser::TopParser;
 
 fn main() {
@@ -23,7 +23,7 @@ fn main() {
     let mut map = HashMap::new();
     macros::extract_macros(&mut map, &asts);
     macros::replace_macros(&map, &mut asts);
-    let sexprs = correctness::lower(asts).unwrap();
+    let sexprs = ast_lowering::lower(asts).unwrap();
 
     println!("{:#?}", sexprs);
 }
