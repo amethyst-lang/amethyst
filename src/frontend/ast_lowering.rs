@@ -388,7 +388,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             SExpr::Break {
                                 meta: Metadata {
                                     range,
-                                    type_: Type::Unknown,
+                                    type_: Type::Tuple(vec![]),
                                 },
                                 value: Some(Box::new(lower_helper(sexpr.swap_remove(1), false)?)),
                             }
@@ -396,7 +396,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             SExpr::Break {
                                 meta: Metadata {
                                     range,
-                                    type_: Type::Unknown,
+                                    type_: Type::Tuple(vec![]),
                                 },
                                 value: None,
                             }

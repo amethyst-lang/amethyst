@@ -8,6 +8,54 @@ enum TypeConstraint<'a> {
     Int(Type<'a>),
     Float(Type<'a>),
     Equals(Type<'a>, Type<'a>),
+    Nillable(Type<'a>),
+}
+
+#[allow(unused)]
+fn create_loop_constraints<'a>(type_: &Type<'a>, sexpr: &mut SExpr<'a>, constraints: &mut Vec<TypeConstraint<'a>>) {
+    match sexpr {
+        SExpr::List { values, .. } => {
+            for value in values {
+                create_loop_constraints(type_, value, constraints);
+            }
+        }
+
+        SExpr::Quote { value, .. } => create_loop_constraints(type_, value, constraints),
+        SExpr::Comma { value, .. } => create_loop_constraints(type_, value, constraints),
+        SExpr::Backtick { value, .. } => create_loop_constraints(type_, value, constraints),
+        SExpr::Splice { value, .. } => create_loop_constraints(type_, value, constraints),
+
+        SExpr::Seq { values, .. } => {
+            for value in values {
+                create_loop_constraints(type_, value, constraints);
+            }
+        }
+
+        SExpr::Cond { values, .. } => {
+            for (cond, then) in values {
+                create_loop_constraints(type_, cond, constraints);
+                create_loop_constraints(type_, then, constraints);
+            }
+        }
+
+        SExpr::Break { value, .. } => {
+            if let Some(value) = value {
+                create_loop_constraints(type_, &mut **value, constraints);
+                constraints.push(TypeConstraint::Equals(value.meta().type_.clone(), type_.clone()));
+            } else {
+                constraints.push(TypeConstraint::Equals(type_.clone(), Type::Tuple(vec![])));
+            }
+        }
+
+        SExpr::Type { value, .. } => create_loop_constraints(type_, value, constraints),
+        SExpr::FuncCall { func, values, .. } => todo!(),
+        SExpr::StructSet { values, .. } => todo!(),
+        SExpr::Declare { value, .. } => create_loop_constraints(type_, value, constraints),
+        SExpr::Assign { value, .. } => create_loop_constraints(type_, value, constraints),
+        SExpr::Attribute { top, attrs, .. } => todo!(),
+
+        _ => (),
+    }
 }
 
 fn create_constraints<'a>(sexpr: &mut SExpr<'a>, type_var_counter: &mut u64, constraints: &mut Vec<TypeConstraint<'a>>) {
@@ -55,8 +103,17 @@ fn create_constraints<'a>(sexpr: &mut SExpr<'a>, type_var_counter: &mut u64, con
             }
         }
 
-        SExpr::Loop { meta, value } => todo!(),
-        SExpr::Break { meta, value } => todo!(),
+        SExpr::Loop { meta, value } => {
+            create_constraints(value, type_var_counter, constraints);
+            create_loop_constraints(&meta.type_, value, constraints);
+            constraints.push(TypeConstraint::Nillable(meta.type_.clone()));
+        }
+
+        SExpr::Break { meta, value } => {
+            if let Some(value) = value {
+                create_constraints(&mut **value, type_var_counter, constraints);
+            }
+        }
 
         SExpr::Nil { meta } => (),
 
@@ -148,10 +205,11 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: Type<'a>, t2: Type<'a>) {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 enum FloatOrInt {
     Float,
     Int,
+    Nil,
     Neither,
 }
 
@@ -167,7 +225,7 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
         match constraint {
             TypeConstraint::Int(t) => {
                 match t {
-                    Type::TypeVariable(i) if !matches!(float_or_int[i as usize], FloatOrInt::Int | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Int,
+                    Type::TypeVariable(i) if matches!(float_or_int[i as usize], FloatOrInt::Int | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Int,
                     Type::Int(_, _) => (),
                     _ => todo!("error handling"),
                 }
@@ -175,27 +233,56 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
 
             TypeConstraint::Float(t) => {
                 match t {
-                    Type::TypeVariable(i) if !matches!(float_or_int[i as usize], FloatOrInt::Float | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Float,
-                    Type::Int(_, _) => (),
+                    Type::TypeVariable(i) if matches!(float_or_int[i as usize], FloatOrInt::Float | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Float,
+                    Type::F32 | Type::F64 => (),
                     _ => todo!("error handling"),
                 }
             }
 
             TypeConstraint::Equals(t1, t2) => unify(&mut substitutions, t1, t2),
+
+            TypeConstraint::Nillable(t) => {
+                match t {
+                    Type::TypeVariable(i) if matches!(float_or_int[i as usize], FloatOrInt::Nil | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Nil,
+                    _ => (),
+                }
+            }
         }
     }
 
-    for (mut i, foi) in float_or_int.iter_mut().enumerate() {
+    for i in 0..substitutions.len() {
+        let mut j = i;
+        while let Type::TypeVariable(k) = substitutions[j] {
+            if j == k as usize {
+                break;
+            }
+
+            j = k as usize;
+        }
+
+        if j != i {
+            substitutions[i] = substitutions[j].clone();
+
+            match (float_or_int[i], float_or_int[j]) {
+                (FloatOrInt::Neither, _) => float_or_int[i] = float_or_int[j],
+                (_, FloatOrInt::Neither) => float_or_int[j] = float_or_int[i],
+                (FloatOrInt::Nil, foi) if !matches!(foi, FloatOrInt::Neither) => float_or_int[i] = float_or_int[j],
+                (foi, FloatOrInt::Nil) if !matches!(foi, FloatOrInt::Neither) => float_or_int[j] = float_or_int[i],
+                (a, b) if a == b => (),
+                _ => todo!("error handling"),
+            }
+
+            if matches!(float_or_int[j], FloatOrInt::Nil) && !matches!(float_or_int[i], FloatOrInt::Nil | FloatOrInt::Neither) {
+                float_or_int[j] = float_or_int[i];
+            } else {
+                float_or_int[i] = float_or_int[j];
+            }
+        }
+    }
+
+    for (i, foi) in float_or_int.iter_mut().enumerate() {
         match foi {
             FloatOrInt::Float => {
-                while let Type::TypeVariable(j) = substitutions[i] {
-                    if i == j as usize {
-                        break;
-                    }
-
-                    i = j as usize;
-                }
-
                 match &substitutions[i] {
                     Type::TypeVariable(_) => {
                         substitutions[i] = Type::F64;
@@ -208,14 +295,6 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
             }
 
             FloatOrInt::Int => {
-                while let Type::TypeVariable(j) = substitutions[i] {
-                    if i == j as usize {
-                        break;
-                    }
-
-                    i = j as usize;
-                }
-
                 match &substitutions[i] {
                     Type::TypeVariable(_) => {
                         substitutions[i] = Type::Int(true, 32);
@@ -228,6 +307,18 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
             }
 
             FloatOrInt::Neither => (),
+
+            FloatOrInt::Nil => {
+                if let Type::TypeVariable(_) = substitutions[i] {
+                    substitutions[i] = Type::Tuple(vec![])
+                }
+            }
+        }
+    }
+
+    for sub in substitutions.iter() {
+        if let Type::TypeVariable(_) = sub {
+            todo!("error handling");
         }
     }
 
