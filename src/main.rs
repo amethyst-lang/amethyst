@@ -7,10 +7,10 @@ fn main() {
     let mut asts = TopParser::new()
         .parse(
     r#"
-        (seq
-            0
-            3.4
-            "uwu")
+        (cond
+            (1 "uwu")
+            (0.3 "")
+        )
     "#,
         )
         .unwrap();

@@ -46,7 +46,15 @@ fn create_constraints<'a>(sexpr: &mut SExpr<'a>, type_var_counter: &mut u64, con
             constraints.push(TypeConstraint::Equals(meta.type_.clone(), values.last().unwrap().meta().type_.clone()));
         }
 
-        SExpr::Cond { meta, values } => todo!(),
+        SExpr::Cond { meta, values } => {
+            for (cond, then) in values {
+                create_constraints(cond, type_var_counter, constraints);
+                constraints.push(TypeConstraint::Int(cond.meta().type_.clone()));
+                create_constraints(then, type_var_counter, constraints);
+                constraints.push(TypeConstraint::Equals(meta.type_.clone(), then.meta().type_.clone()));
+            }
+        }
+
         SExpr::Loop { meta, value } => todo!(),
         SExpr::Break { meta, value } => todo!(),
 
@@ -159,7 +167,7 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
         match constraint {
             TypeConstraint::Int(t) => {
                 match t {
-                    Type::TypeVariable(i) => float_or_int[i as usize] = FloatOrInt::Int,
+                    Type::TypeVariable(i) if !matches!(float_or_int[i as usize], FloatOrInt::Int | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Int,
                     Type::Int(_, _) => (),
                     _ => todo!("error handling"),
                 }
@@ -167,7 +175,7 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
 
             TypeConstraint::Float(t) => {
                 match t {
-                    Type::TypeVariable(i) => float_or_int[i as usize] = FloatOrInt::Float,
+                    Type::TypeVariable(i) if !matches!(float_or_int[i as usize], FloatOrInt::Float | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Float,
                     Type::Int(_, _) => (),
                     _ => todo!("error handling"),
                 }
