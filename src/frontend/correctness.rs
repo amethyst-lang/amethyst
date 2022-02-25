@@ -399,7 +399,6 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, constraints: &[Type<'a>]) {
         sexpr.meta_mut().type_ = constraints[i as usize].clone();
     }
 
-    #[allow(unused)]
     match sexpr {
         //SExpr::List { meta, values } => todo!(),
         //SExpr::Quote { meta, value } => todo!(),
@@ -436,7 +435,7 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, constraints: &[Type<'a>]) {
 
         //SExpr::StructDef { meta, name, fields } => todo!(),
         //SExpr::StructSet { meta, struct_name, values } => todo!(),
-        SExpr::Attribute { top, attrs, .. } => apply_substitutions(top, constraints),
+        SExpr::Attribute { top, .. } => apply_substitutions(top, constraints),
         _ => (),
     }
 }
