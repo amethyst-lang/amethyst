@@ -135,7 +135,11 @@ fn create_constraints<'a>(
 
         SExpr::Nil { meta } => (),
 
-        SExpr::Type { meta, value, type_ } => todo!(),
+        SExpr::Type { meta, value } => {
+            create_constraints(&mut **value, type_var_counter, constraints);
+            constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
+        }
+
         SExpr::FuncDef {
             meta,
             name,
@@ -143,6 +147,7 @@ fn create_constraints<'a>(
             args,
             expr,
         } => todo!(),
+
         SExpr::FuncCall { meta, func, values } => todo!(),
         SExpr::StructDef { meta, name, fields } => todo!(),
         SExpr::StructSet {
@@ -389,16 +394,65 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
     substitutions
 }
 
+fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, constraints: &[Type<'a>]) {
+    if let Type::TypeVariable(i) = sexpr.meta().type_ {
+        sexpr.meta_mut().type_ = constraints[i as usize].clone();
+    }
+
+    #[allow(unused)]
+    match sexpr {
+        //SExpr::List { meta, values } => todo!(),
+        //SExpr::Quote { meta, value } => todo!(),
+        //SExpr::Comma { meta, value } => todo!(),
+        //SExpr::Backtick { meta, value } => todo!(),
+        //SExpr::Splice { meta, value } => todo!(),
+        SExpr::Seq { values, .. } => {
+            for value in values {
+                apply_substitutions(value, constraints);
+            }
+        }
+
+        SExpr::Cond { values, .. } => {
+            for (cond, then) in values {
+                apply_substitutions(cond, constraints);
+                apply_substitutions(then, constraints);
+            }
+        }
+
+        SExpr::Loop { value, .. }
+            | SExpr::Type { value, .. }
+            | SExpr::Declare { value, .. }
+            | SExpr::Assign { value, .. }
+            | SExpr::Break { value: Some(value), .. } => apply_substitutions(value, constraints),
+
+        SExpr::FuncDef { expr, .. } => apply_substitutions(expr, constraints),
+
+        SExpr::FuncCall { func, values, .. } => {
+            apply_substitutions(func, constraints);
+            for value in values {
+                apply_substitutions(value, constraints);
+            }
+        }
+
+        //SExpr::StructDef { meta, name, fields } => todo!(),
+        //SExpr::StructSet { meta, struct_name, values } => todo!(),
+        SExpr::Attribute { top, attrs, .. } => apply_substitutions(top, constraints),
+        _ => (),
+    }
+}
+
 pub fn check(sexprs: &mut [SExpr<'_>]) -> Result<(), CorrectnessError> {
     let mut type_var_counter = 0;
     let mut constraints = vec![];
 
-    for sexpr in sexprs {
+    for sexpr in sexprs.iter_mut() {
         create_constraints(sexpr, &mut type_var_counter, &mut constraints);
     }
 
     let unified = unify_types(type_var_counter, constraints);
-    println!("{:?}", unified);
+    for sexpr in sexprs.iter_mut() {
+        apply_substitutions(sexpr, &unified);
+    }
 
     Ok(())
 }

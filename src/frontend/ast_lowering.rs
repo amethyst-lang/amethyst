@@ -109,7 +109,6 @@ pub enum SExpr<'a> {
     Type {
         meta: Metadata<'a>,
         value: Box<SExpr<'a>>,
-        type_: Type<'a>,
     },
 
     FuncDef {
@@ -487,10 +486,9 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             SExpr::Type {
                                 meta: Metadata {
                                     range,
-                                    type_: Type::Unknown,
+                                    type_: parse_type(sexpr.swap_remove(1))?,
                                 },
                                 value: Box::new(lower_helper(sexpr.swap_remove(1), false)?),
-                                type_: parse_type(sexpr.swap_remove(1))?,
                             }
                         } else {
                             return Err(LoweringError::InvalidTypeSpecifier);

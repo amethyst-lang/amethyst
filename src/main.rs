@@ -6,11 +6,8 @@ use amethyst::parser::TopParser;
 fn main() {
     let mut asts = TopParser::new()
         .parse(
-            r#"
-        (defun add (a i32) (b i32) : i32
-            5)
-        (defun add (a f32) (b f32) : f32
-            2.3)
+    r#"
+        (: i53 3)
     "#,
         )
         .unwrap();
@@ -20,9 +17,6 @@ fn main() {
     let mut sexprs = ast_lowering::lower(asts).unwrap();
     let mut func_map = HashMap::new();
     correctness::extract_signatures(&sexprs, &mut func_map);
-    println!("{:#?}", sexprs);
-    println!("{:#?}", func_map);
     correctness::check(&mut sexprs).unwrap();
-
     println!("{:#?}", sexprs);
 }
