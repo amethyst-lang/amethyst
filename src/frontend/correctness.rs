@@ -135,7 +135,7 @@ fn occurs_in(substitutions: &[Type<'_>], index: u64, t: &Type<'_>) -> bool {
 
         Type::Tuple(v) => v.iter().any(|v| occurs_in(substitutions, index, v)),
         Type::Pointer(_, t) => occurs_in(substitutions, index, t),
-        Type::FatPointer(_, t) => occurs_in(substitutions, index, t),
+        Type::Slice(_, t) => occurs_in(substitutions, index, t),
         Type::Struct(_, v) => v.iter().any(|v| occurs_in(substitutions, index, v)),
         Type::Function(v, t) => v.iter().any(|v| occurs_in(substitutions, index, v)) || occurs_in(substitutions, index, t),
         _ => false,
@@ -175,7 +175,7 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: Type<'a>, t2: Type<'a>) {
         }
 
         (Type::Pointer(_, t1), Type::Pointer(_, t2)) => unify(substitutions, *t1, *t2),
-        (Type::FatPointer(_, t1), Type::FatPointer(_, t2)) => unify(substitutions, *t1, *t2),
+        (Type::Slice(_, t1), Type::Slice(_, t2)) => unify(substitutions, *t1, *t2),
 
         (Type::Struct(name1, v1), Type::Struct(name2, v2)) if name1 == name2 => {
             if v1.len() != v2.len() {

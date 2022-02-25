@@ -26,7 +26,7 @@ pub enum Type<'a> {
     Pointer(bool, Box<Type<'a>>),
 
     // mutable, type
-    FatPointer(bool, Box<Type<'a>>),
+    Slice(bool, Box<Type<'a>>),
 
     // name, generics
     Struct(&'a str, Vec<Type<'a>>),
@@ -270,9 +270,9 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
 
                 Ast::Symbol(_, "@") => {
                     if ast.len() == 3 && matches!(ast[1], Ast::Symbol(_, "mut")) {
-                        Ok(Type::FatPointer(true, Box::new(parse_type(ast.remove(2))?)))
+                        Ok(Type::Slice(true, Box::new(parse_type(ast.remove(2))?)))
                     } else if ast.len() == 2 {
-                        Ok(Type::FatPointer(false, Box::new(parse_type(ast.remove(1))?)))
+                        Ok(Type::Slice(false, Box::new(parse_type(ast.remove(1))?)))
                     } else {
                         Err(LoweringError::InvalidType)
                     }
@@ -313,7 +313,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
         Ast::Str(range, value) => SExpr::Str {
             meta: Metadata {
                 range,
-                type_: Type::FatPointer(false, Box::new(Type::Int(false, 8))),
+                type_: Type::Slice(false, Box::new(Type::Int(false, 8))),
             },
             value,
         },
