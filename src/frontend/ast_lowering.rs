@@ -117,6 +117,7 @@ pub enum SExpr<'a> {
         name: &'a str,
         ret_type: Type<'a>,
         args: Vec<(&'a str, Type<'a>)>,
+        expr: Box<SExpr<'a>>,
     },
 
     FuncCall {
@@ -222,11 +223,73 @@ pub enum LoweringError {
     InvalidBreak,
     InvalidSet,
     InvalidTypeSpecifier,
+    InvalidDefun,
+    InvalidType,
 }
 
 fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
-    // TODO
-    Ok(Type::Unknown)
+    match ast {
+        Ast::Symbol(_, "f32") => Ok(Type::F32),
+        Ast::Symbol(_, "f64") => Ok(Type::F64),
+
+        Ast::Symbol(_, int) if int.starts_with('i') || int.starts_with('u') => {
+            if let Ok(v) = int[1..].parse() {
+                Ok(Type::Int(int.starts_with('i'), v))
+            } else {
+                Err(LoweringError::InvalidType)
+            }
+        }
+
+        Ast::Symbol(_, v) => {
+            Ok(Type::Struct(v, vec![]))
+        }
+
+        Ast::SExpr(_, v) if v.is_empty() => {
+            Ok(Type::Tuple(vec![]))
+        }
+
+        Ast::Quote(_, ast) => {
+            match *ast {
+                Ast::Symbol(_, v) => Ok(Type::Generic(v)),
+                Ast::SExpr(_, v) => Ok(Type::Tuple(v.into_iter().map(parse_type).collect::<Result<_, _>>()?)),
+                _ => Err(LoweringError::InvalidType),
+            }
+        }
+
+        Ast::SExpr(_, mut ast) => {
+            match ast[0] {
+                Ast::Symbol(_, "*") => {
+                    if ast.len() == 3 && matches!(ast[1], Ast::Symbol(_, "mut")) {
+                        Ok(Type::Pointer(true, Box::new(parse_type(ast.remove(2))?)))
+                    } else if ast.len() == 2 {
+                        Ok(Type::Pointer(false, Box::new(parse_type(ast.remove(1))?)))
+                    } else {
+                        Err(LoweringError::InvalidType)
+                    }
+                }
+
+                Ast::Symbol(_, "@") => {
+                    if ast.len() == 3 && matches!(ast[1], Ast::Symbol(_, "mut")) {
+                        Ok(Type::FatPointer(true, Box::new(parse_type(ast.remove(2))?)))
+                    } else if ast.len() == 2 {
+                        Ok(Type::FatPointer(false, Box::new(parse_type(ast.remove(1))?)))
+                    } else {
+                        Err(LoweringError::InvalidType)
+                    }
+                }
+
+                Ast::Symbol(_, "fn") => {
+                    todo!()
+                }
+
+                Ast::Symbol(_, v) => Ok(Type::Struct(v, ast.into_iter().skip(1).map(parse_type).collect::<Result<_, _>>()?)),
+
+                _ => Err(LoweringError::InvalidType),
+            }
+        }
+
+        _ => Err(LoweringError::InvalidType)
+    }
 }
 
 fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError> {
@@ -420,7 +483,54 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         }
                     }
 
-                    Ast::Symbol(_, "defun") => todo!(),
+                    // (defun add (a i32) (b i32) : i32
+                    //     (+ a b))
+                    Ast::Symbol(_, "defun") => {
+                        if sexpr.len() < 3 {
+                            return Err(LoweringError::InvalidDefun);
+                        }
+
+                        let name = match sexpr[1] {
+                            Ast::Symbol(_, name) => name,
+                            _ => return Err(LoweringError::InvalidDefun),
+                        };
+
+                        let expr = lower_helper(sexpr.remove(sexpr.len() - 1), quoting)?;
+                        let ret_type = if let Ast::Symbol(_, ":") = sexpr[sexpr.len() - 2] {
+                            sexpr.remove(sexpr.len() - 2);
+                            parse_type(sexpr.remove(sexpr.len() - 1))?
+                        } else {
+                            Type::Tuple(vec![])
+                        };
+
+                        let mut args = vec![];
+
+                        for arg in sexpr.into_iter().skip(2) {
+                            match arg {
+                                Ast::SExpr(_, mut arg) if arg.len() == 2 => {
+                                    if let Ast::Symbol(_, name) = arg[0] {
+                                        args.push((name, parse_type(arg.remove(1))?));
+                                    } else {
+                                        return Err(LoweringError::InvalidDefun);
+                                    }
+                                }
+
+                                _ => return Err(LoweringError::InvalidDefun),
+                            }
+                        }
+
+                        SExpr::FuncDef {
+                            meta: Metadata {
+                                range,
+                                type_: Type::Function(args.iter().map(|(_, v)| v.clone()).collect(), Box::new(ret_type.clone())),
+                            },
+                            name,
+                            ret_type,
+                            args,
+                            expr: Box::new(expr),
+                        }
+                    }
+
                     Ast::Symbol(_, "defstruct") => todo!(),
                     Ast::Symbol(_, "inst") => todo!(),
 

@@ -84,7 +84,7 @@ AttributeElement: Ast<'input> = {
 };
 
 Attribute: Ast<'input> =
-    <s:Value> <mut a:("." <AttributeElement>)*> => {
+    <s:PrefixOp> <mut a:("." <AttributeElement>)*> => {
         if a.is_empty() {
             s
         } else {

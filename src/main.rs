@@ -7,9 +7,8 @@ fn main() {
     let mut asts = TopParser::new()
         .parse(
     r#"
-        (loop (cond
-            (0 (break 2))
-            (1 (break 3))))
+        (defun add (a i32) (b i32) : i32
+            (+ a b))
     "#,
         )
         .unwrap();
@@ -17,6 +16,7 @@ fn main() {
     macros::extract_macros(&mut map, &asts);
     macros::replace_macros(&map, &mut asts);
     let mut sexprs = ast_lowering::lower(asts).unwrap();
+    println!("{:#?}", sexprs);
     correctness::check(&mut sexprs).unwrap();
 
     println!("{:#?}", sexprs);

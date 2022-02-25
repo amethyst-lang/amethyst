@@ -75,11 +75,11 @@ fn create_constraints<'a>(sexpr: &mut SExpr<'a>, type_var_counter: &mut u64, con
 
     #[allow(unused)]
     match sexpr {
-        SExpr::Int { meta, value } => (),
-        SExpr::Float { meta, value } => (),
-        SExpr::Str { meta, value } => (),
+        SExpr::Int { .. } => (),
+        SExpr::Float { .. } => (),
+        SExpr::Str { .. } => (),
+        SExpr::Symbol { meta, value } => (),
 
-        SExpr::Symbol { meta, value } => todo!(),
         SExpr::List { meta, values } => todo!(),
         SExpr::Quote { meta, value } => todo!(),
         SExpr::Comma { meta, value } => todo!(),
@@ -118,7 +118,7 @@ fn create_constraints<'a>(sexpr: &mut SExpr<'a>, type_var_counter: &mut u64, con
         SExpr::Nil { meta } => (),
 
         SExpr::Type { meta, value, type_ } => todo!(),
-        SExpr::FuncDef { meta, name, ret_type, args } => todo!(),
+        SExpr::FuncDef { meta, name, ret_type, args, expr } => todo!(),
         SExpr::FuncCall { meta, func, values } => todo!(),
         SExpr::StructDef { meta, name, fields } => todo!(),
         SExpr::StructSet { meta, struct_name, values } => todo!(),
