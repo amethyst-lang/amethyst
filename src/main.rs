@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use amethyst::frontend::{macros, ast_lowering, correctness};
+use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
 
 fn main() {
     let mut asts = TopParser::new()
         .parse(
-    r#"
+            r#"
         (defun add (a i32) (b i32) : i32
             (+ a b))
     "#,

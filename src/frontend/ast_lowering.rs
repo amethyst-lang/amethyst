@@ -240,55 +240,55 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
             }
         }
 
-        Ast::Symbol(_, v) => {
-            Ok(Type::Struct(v, vec![]))
-        }
+        Ast::Symbol(_, v) => Ok(Type::Struct(v, vec![])),
 
-        Ast::SExpr(_, v) if v.is_empty() => {
-            Ok(Type::Tuple(vec![]))
-        }
+        Ast::SExpr(_, v) if v.is_empty() => Ok(Type::Tuple(vec![])),
 
-        Ast::Quote(_, ast) => {
-            match *ast {
-                Ast::Symbol(_, v) => Ok(Type::Generic(v)),
-                Ast::SExpr(_, v) => Ok(Type::Tuple(v.into_iter().map(parse_type).collect::<Result<_, _>>()?)),
-                _ => Err(LoweringError::InvalidType),
+        Ast::Quote(_, ast) => match *ast {
+            Ast::Symbol(_, v) => Ok(Type::Generic(v)),
+            Ast::SExpr(_, v) => Ok(Type::Tuple(
+                v.into_iter().map(parse_type).collect::<Result<_, _>>()?,
+            )),
+            _ => Err(LoweringError::InvalidType),
+        },
+
+        Ast::SExpr(_, mut ast) => match ast[0] {
+            Ast::Symbol(_, "*") => {
+                if ast.len() == 3 && matches!(ast[1], Ast::Symbol(_, "mut")) {
+                    Ok(Type::Pointer(true, Box::new(parse_type(ast.remove(2))?)))
+                } else if ast.len() == 2 {
+                    Ok(Type::Pointer(false, Box::new(parse_type(ast.remove(1))?)))
+                } else {
+                    Err(LoweringError::InvalidType)
+                }
             }
-        }
 
-        Ast::SExpr(_, mut ast) => {
-            match ast[0] {
-                Ast::Symbol(_, "*") => {
-                    if ast.len() == 3 && matches!(ast[1], Ast::Symbol(_, "mut")) {
-                        Ok(Type::Pointer(true, Box::new(parse_type(ast.remove(2))?)))
-                    } else if ast.len() == 2 {
-                        Ok(Type::Pointer(false, Box::new(parse_type(ast.remove(1))?)))
-                    } else {
-                        Err(LoweringError::InvalidType)
-                    }
+            Ast::Symbol(_, "@") => {
+                if ast.len() == 3 && matches!(ast[1], Ast::Symbol(_, "mut")) {
+                    Ok(Type::Slice(true, Box::new(parse_type(ast.remove(2))?)))
+                } else if ast.len() == 2 {
+                    Ok(Type::Slice(false, Box::new(parse_type(ast.remove(1))?)))
+                } else {
+                    Err(LoweringError::InvalidType)
                 }
-
-                Ast::Symbol(_, "@") => {
-                    if ast.len() == 3 && matches!(ast[1], Ast::Symbol(_, "mut")) {
-                        Ok(Type::Slice(true, Box::new(parse_type(ast.remove(2))?)))
-                    } else if ast.len() == 2 {
-                        Ok(Type::Slice(false, Box::new(parse_type(ast.remove(1))?)))
-                    } else {
-                        Err(LoweringError::InvalidType)
-                    }
-                }
-
-                Ast::Symbol(_, "fn") => {
-                    todo!()
-                }
-
-                Ast::Symbol(_, v) => Ok(Type::Struct(v, ast.into_iter().skip(1).map(parse_type).collect::<Result<_, _>>()?)),
-
-                _ => Err(LoweringError::InvalidType),
             }
-        }
 
-        _ => Err(LoweringError::InvalidType)
+            Ast::Symbol(_, "fn") => {
+                todo!()
+            }
+
+            Ast::Symbol(_, v) => Ok(Type::Struct(
+                v,
+                ast.into_iter()
+                    .skip(1)
+                    .map(parse_type)
+                    .collect::<Result<_, _>>()?,
+            )),
+
+            _ => Err(LoweringError::InvalidType),
+        },
+
+        _ => Err(LoweringError::InvalidType),
     }
 }
 
@@ -374,7 +374,10 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         range,
                         type_: Type::Unknown,
                     },
-                    values: sexpr.into_iter().map(|v| lower_helper(v, false)).collect::<Result<Vec<SExpr>, LoweringError>>()?,
+                    values: sexpr
+                        .into_iter()
+                        .map(|v| lower_helper(v, false))
+                        .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                 }
             } else {
                 match &sexpr[0] {
@@ -390,7 +393,11 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             range,
                             type_: Type::Unknown,
                         },
-                        values: sexpr.into_iter().skip(1).map(|v| lower_helper(v, false)).collect::<Result<Vec<SExpr>, LoweringError>>()?,
+                        values: sexpr
+                            .into_iter()
+                            .skip(1)
+                            .map(|v| lower_helper(v, false))
+                            .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
                     Ast::Symbol(_, "quote") => {
@@ -412,7 +419,11 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             range,
                             type_: Type::Unknown,
                         },
-                        values: sexpr.into_iter().skip(1).map(|v| lower_helper(v, false)).collect::<Result<Vec<SExpr>, LoweringError>>()?,
+                        values: sexpr
+                            .into_iter()
+                            .skip(1)
+                            .map(|v| lower_helper(v, false))
+                            .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
                     Ast::Symbol(_, "cond") => SExpr::Cond {
@@ -421,15 +432,18 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             type_: Type::Unknown,
                         },
 
-                        values: sexpr.into_iter().skip(1).map(|v| {
-                            match v {
-                                Ast::SExpr(_, mut v) if v.len() == 2 => {
-                                    Ok((lower_helper(v.swap_remove(0), false)?, lower_helper(v.remove(0), false)?))
-                                }
+                        values: sexpr
+                            .into_iter()
+                            .skip(1)
+                            .map(|v| match v {
+                                Ast::SExpr(_, mut v) if v.len() == 2 => Ok((
+                                    lower_helper(v.swap_remove(0), false)?,
+                                    lower_helper(v.remove(0), false)?,
+                                )),
 
-                                _ => Err(LoweringError::InvalidCondBranch)
-                            }
-                        }).collect::<Result<_, LoweringError>>()?,
+                                _ => Err(LoweringError::InvalidCondBranch),
+                            })
+                            .collect::<Result<_, LoweringError>>()?,
                     },
 
                     Ast::Symbol(_, "loop") => {
@@ -522,7 +536,10 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         SExpr::FuncDef {
                             meta: Metadata {
                                 range,
-                                type_: Type::Function(args.iter().map(|(_, v)| v.clone()).collect(), Box::new(ret_type.clone())),
+                                type_: Type::Function(
+                                    args.iter().map(|(_, v)| v.clone()).collect(),
+                                    Box::new(ret_type.clone()),
+                                ),
                             },
                             name,
                             ret_type,
@@ -556,16 +573,17 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                     }
 
                     // Function call
-                    _ => {
-                        SExpr::FuncCall {
-                            meta: Metadata {
-                                range,
-                                type_: Type::Unknown,
-                            },
-                            func: Box::new(lower_helper(sexpr.remove(0), false)?),
-                            values: sexpr.into_iter().map(|v| lower_helper(v, false)).collect::<Result<Vec<SExpr>, LoweringError>>()?,
-                        }
-                    }
+                    _ => SExpr::FuncCall {
+                        meta: Metadata {
+                            range,
+                            type_: Type::Unknown,
+                        },
+                        func: Box::new(lower_helper(sexpr.remove(0), false)?),
+                        values: sexpr
+                            .into_iter()
+                            .map(|v| lower_helper(v, false))
+                            .collect::<Result<Vec<SExpr>, LoweringError>>()?,
+                    },
                 }
             }
         }
@@ -600,7 +618,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                 top = parent;
                             }
 
-                            _ => return Err(LoweringError::InvalidAttribute)
+                            _ => return Err(LoweringError::InvalidAttribute),
                         }
 
                         attrs = vec![];

@@ -1,8 +1,7 @@
 use super::ast_lowering::{SExpr, Type};
 
 #[derive(Debug)]
-pub enum CorrectnessError {
-}
+pub enum CorrectnessError {}
 
 enum TypeConstraint<'a> {
     Int(Type<'a>),
@@ -12,7 +11,11 @@ enum TypeConstraint<'a> {
 }
 
 #[allow(unused)]
-fn create_loop_constraints<'a>(type_: &Type<'a>, sexpr: &mut SExpr<'a>, constraints: &mut Vec<TypeConstraint<'a>>) {
+fn create_loop_constraints<'a>(
+    type_: &Type<'a>,
+    sexpr: &mut SExpr<'a>,
+    constraints: &mut Vec<TypeConstraint<'a>>,
+) {
     match sexpr {
         SExpr::List { values, .. } => {
             for value in values {
@@ -41,7 +44,10 @@ fn create_loop_constraints<'a>(type_: &Type<'a>, sexpr: &mut SExpr<'a>, constrai
         SExpr::Break { value, .. } => {
             if let Some(value) = value {
                 create_loop_constraints(type_, &mut **value, constraints);
-                constraints.push(TypeConstraint::Equals(value.meta().type_.clone(), type_.clone()));
+                constraints.push(TypeConstraint::Equals(
+                    value.meta().type_.clone(),
+                    type_.clone(),
+                ));
             } else {
                 constraints.push(TypeConstraint::Equals(type_.clone(), Type::Tuple(vec![])));
             }
@@ -58,7 +64,11 @@ fn create_loop_constraints<'a>(type_: &Type<'a>, sexpr: &mut SExpr<'a>, constrai
     }
 }
 
-fn create_constraints<'a>(sexpr: &mut SExpr<'a>, type_var_counter: &mut u64, constraints: &mut Vec<TypeConstraint<'a>>) {
+fn create_constraints<'a>(
+    sexpr: &mut SExpr<'a>,
+    type_var_counter: &mut u64,
+    constraints: &mut Vec<TypeConstraint<'a>>,
+) {
     let meta = sexpr.meta_mut();
     if meta.type_ == Type::Unknown {
         meta.type_ = Type::TypeVariable(*type_var_counter);
@@ -91,7 +101,10 @@ fn create_constraints<'a>(sexpr: &mut SExpr<'a>, type_var_counter: &mut u64, con
                 create_constraints(value, type_var_counter, constraints);
             }
 
-            constraints.push(TypeConstraint::Equals(meta.type_.clone(), values.last().unwrap().meta().type_.clone()));
+            constraints.push(TypeConstraint::Equals(
+                meta.type_.clone(),
+                values.last().unwrap().meta().type_.clone(),
+            ));
         }
 
         SExpr::Cond { meta, values } => {
@@ -99,7 +112,10 @@ fn create_constraints<'a>(sexpr: &mut SExpr<'a>, type_var_counter: &mut u64, con
                 create_constraints(cond, type_var_counter, constraints);
                 constraints.push(TypeConstraint::Int(cond.meta().type_.clone()));
                 create_constraints(then, type_var_counter, constraints);
-                constraints.push(TypeConstraint::Equals(meta.type_.clone(), then.meta().type_.clone()));
+                constraints.push(TypeConstraint::Equals(
+                    meta.type_.clone(),
+                    then.meta().type_.clone(),
+                ));
             }
         }
 
@@ -118,26 +134,50 @@ fn create_constraints<'a>(sexpr: &mut SExpr<'a>, type_var_counter: &mut u64, con
         SExpr::Nil { meta } => (),
 
         SExpr::Type { meta, value, type_ } => todo!(),
-        SExpr::FuncDef { meta, name, ret_type, args, expr } => todo!(),
+        SExpr::FuncDef {
+            meta,
+            name,
+            ret_type,
+            args,
+            expr,
+        } => todo!(),
         SExpr::FuncCall { meta, func, values } => todo!(),
         SExpr::StructDef { meta, name, fields } => todo!(),
-        SExpr::StructSet { meta, struct_name, values } => todo!(),
-        SExpr::Declare { meta, mutable, variable, value } => todo!(),
-        SExpr::Assign { meta, variable, value } => todo!(),
+        SExpr::StructSet {
+            meta,
+            struct_name,
+            values,
+        } => todo!(),
+        SExpr::Declare {
+            meta,
+            mutable,
+            variable,
+            value,
+        } => todo!(),
+        SExpr::Assign {
+            meta,
+            variable,
+            value,
+        } => todo!(),
         SExpr::Attribute { meta, top, attrs } => todo!(),
     }
 }
 
 fn occurs_in(substitutions: &[Type<'_>], index: u64, t: &Type<'_>) -> bool {
     match t {
-        Type::TypeVariable(i) if substitutions[*i as usize] != Type::TypeVariable(*i) => occurs_in(substitutions, index, &substitutions[*i as usize]),
+        Type::TypeVariable(i) if substitutions[*i as usize] != Type::TypeVariable(*i) => {
+            occurs_in(substitutions, index, &substitutions[*i as usize])
+        }
         Type::TypeVariable(i) => *i == index,
 
         Type::Tuple(v) => v.iter().any(|v| occurs_in(substitutions, index, v)),
         Type::Pointer(_, t) => occurs_in(substitutions, index, t),
         Type::Slice(_, t) => occurs_in(substitutions, index, t),
         Type::Struct(_, v) => v.iter().any(|v| occurs_in(substitutions, index, v)),
-        Type::Function(v, t) => v.iter().any(|v| occurs_in(substitutions, index, v)) || occurs_in(substitutions, index, t),
+        Type::Function(v, t) => {
+            v.iter().any(|v| occurs_in(substitutions, index, v))
+                || occurs_in(substitutions, index, t)
+        }
         _ => false,
     }
 }
@@ -146,8 +186,12 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: Type<'a>, t2: Type<'a>) {
     match (t1, t2) {
         (Type::TypeVariable(i), Type::TypeVariable(j)) if i == j => (),
 
-        (Type::TypeVariable(i), t2) if Type::TypeVariable(i) != substitutions[i as usize] => unify(substitutions, substitutions[i as usize].clone(), t2),
-        (t1, Type::TypeVariable(i)) if Type::TypeVariable(i) != substitutions[i as usize] => unify(substitutions, t1, substitutions[i as usize].clone()),
+        (Type::TypeVariable(i), t2) if Type::TypeVariable(i) != substitutions[i as usize] => {
+            unify(substitutions, substitutions[i as usize].clone(), t2)
+        }
+        (t1, Type::TypeVariable(i)) if Type::TypeVariable(i) != substitutions[i as usize] => {
+            unify(substitutions, t1, substitutions[i as usize].clone())
+        }
 
         (Type::TypeVariable(i), t2) => {
             assert!(!occurs_in(substitutions, i, &t2));
@@ -158,7 +202,11 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: Type<'a>, t2: Type<'a>) {
             assert!(!occurs_in(substitutions, i, &t1));
             substitutions[i as usize] = t1;
         }
-        (Type::Int(signed1, width1), Type::Int(signed2, width2)) if signed1 == signed2 && width1 == width2 => (),
+        (Type::Int(signed1, width1), Type::Int(signed2, width2))
+            if signed1 == signed2 && width1 == width2 =>
+        {
+            ()
+        }
 
         (Type::F32, Type::F32) => (),
 
@@ -223,30 +271,45 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
 
     for constraint in constraints {
         match constraint {
-            TypeConstraint::Int(t) => {
-                match t {
-                    Type::TypeVariable(i) if matches!(float_or_int[i as usize], FloatOrInt::Int | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Int,
-                    Type::Int(_, _) => (),
-                    _ => todo!("error handling"),
+            TypeConstraint::Int(t) => match t {
+                Type::TypeVariable(i)
+                    if matches!(
+                        float_or_int[i as usize],
+                        FloatOrInt::Int | FloatOrInt::Neither
+                    ) =>
+                {
+                    float_or_int[i as usize] = FloatOrInt::Int
                 }
-            }
+                Type::Int(_, _) => (),
+                _ => todo!("error handling"),
+            },
 
-            TypeConstraint::Float(t) => {
-                match t {
-                    Type::TypeVariable(i) if matches!(float_or_int[i as usize], FloatOrInt::Float | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Float,
-                    Type::F32 | Type::F64 => (),
-                    _ => todo!("error handling"),
+            TypeConstraint::Float(t) => match t {
+                Type::TypeVariable(i)
+                    if matches!(
+                        float_or_int[i as usize],
+                        FloatOrInt::Float | FloatOrInt::Neither
+                    ) =>
+                {
+                    float_or_int[i as usize] = FloatOrInt::Float
                 }
-            }
+                Type::F32 | Type::F64 => (),
+                _ => todo!("error handling"),
+            },
 
             TypeConstraint::Equals(t1, t2) => unify(&mut substitutions, t1, t2),
 
-            TypeConstraint::Nillable(t) => {
-                match t {
-                    Type::TypeVariable(i) if matches!(float_or_int[i as usize], FloatOrInt::Nil | FloatOrInt::Neither) => float_or_int[i as usize] = FloatOrInt::Nil,
-                    _ => (),
+            TypeConstraint::Nillable(t) => match t {
+                Type::TypeVariable(i)
+                    if matches!(
+                        float_or_int[i as usize],
+                        FloatOrInt::Nil | FloatOrInt::Neither
+                    ) =>
+                {
+                    float_or_int[i as usize] = FloatOrInt::Nil
                 }
-            }
+                _ => (),
+            },
         }
     }
 
@@ -266,13 +329,19 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
             match (float_or_int[i], float_or_int[j]) {
                 (FloatOrInt::Neither, _) => float_or_int[i] = float_or_int[j],
                 (_, FloatOrInt::Neither) => float_or_int[j] = float_or_int[i],
-                (FloatOrInt::Nil, foi) if !matches!(foi, FloatOrInt::Neither) => float_or_int[i] = float_or_int[j],
-                (foi, FloatOrInt::Nil) if !matches!(foi, FloatOrInt::Neither) => float_or_int[j] = float_or_int[i],
+                (FloatOrInt::Nil, foi) if !matches!(foi, FloatOrInt::Neither) => {
+                    float_or_int[i] = float_or_int[j]
+                }
+                (foi, FloatOrInt::Nil) if !matches!(foi, FloatOrInt::Neither) => {
+                    float_or_int[j] = float_or_int[i]
+                }
                 (a, b) if a == b => (),
                 _ => todo!("error handling"),
             }
 
-            if matches!(float_or_int[j], FloatOrInt::Nil) && !matches!(float_or_int[i], FloatOrInt::Nil | FloatOrInt::Neither) {
+            if matches!(float_or_int[j], FloatOrInt::Nil)
+                && !matches!(float_or_int[i], FloatOrInt::Nil | FloatOrInt::Neither)
+            {
                 float_or_int[j] = float_or_int[i];
             } else {
                 float_or_int[i] = float_or_int[j];
@@ -282,29 +351,25 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
 
     for (i, foi) in float_or_int.iter_mut().enumerate() {
         match foi {
-            FloatOrInt::Float => {
-                match &substitutions[i] {
-                    Type::TypeVariable(_) => {
-                        substitutions[i] = Type::F64;
-                    }
-
-                    Type::F32 | Type::F64 => (),
-
-                    _ => todo!("error handling"),
+            FloatOrInt::Float => match &substitutions[i] {
+                Type::TypeVariable(_) => {
+                    substitutions[i] = Type::F64;
                 }
-            }
 
-            FloatOrInt::Int => {
-                match &substitutions[i] {
-                    Type::TypeVariable(_) => {
-                        substitutions[i] = Type::Int(true, 32);
-                    }
+                Type::F32 | Type::F64 => (),
 
-                    Type::Int(_, _) => (),
+                _ => todo!("error handling"),
+            },
 
-                    _ => todo!("error handling"),
+            FloatOrInt::Int => match &substitutions[i] {
+                Type::TypeVariable(_) => {
+                    substitutions[i] = Type::Int(true, 32);
                 }
-            }
+
+                Type::Int(_, _) => (),
+
+                _ => todo!("error handling"),
+            },
 
             FloatOrInt::Neither => (),
 
