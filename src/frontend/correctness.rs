@@ -1,3 +1,5 @@
+use std::collections::{HashMap, hash_map::Entry};
+
 use super::ast_lowering::{SExpr, Type};
 
 #[derive(Debug)]
@@ -203,10 +205,7 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: Type<'a>, t2: Type<'a>) {
             substitutions[i as usize] = t1;
         }
         (Type::Int(signed1, width1), Type::Int(signed2, width2))
-            if signed1 == signed2 && width1 == width2 =>
-        {
-            ()
-        }
+            if signed1 == signed2 && width1 == width2 => (),
 
         (Type::F32, Type::F32) => (),
 
@@ -402,4 +401,47 @@ pub fn check(sexprs: &mut [SExpr<'_>]) -> Result<(), CorrectnessError> {
     println!("{:?}", unified);
 
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct Signature<'a> {
+    pub arg_types: Vec<Type<'a>>,
+    pub ret_type: Type<'a>,
+    pub index: Option<usize>,
+}
+
+pub fn extract_signatures<'a>(sexprs: &[SExpr<'a>], map: &mut HashMap<&'a str, Vec<Signature<'a>>>) {
+    for (i, sexpr) in sexprs.iter().enumerate() {
+        if let SExpr::FuncDef { meta, name, .. } = sexpr {
+            let (arg_types, ret_type) = match &meta.type_ {
+                Type::Function(a, r) => (a.clone(), (**r).clone()),
+                _ => unreachable!(),
+            };
+            let index = Some(i);
+
+            match map.entry(*name) {
+                Entry::Occupied(mut entry) => {
+                    for sig in entry.get() {
+                        if sig.arg_types == arg_types && sig.ret_type == ret_type {
+                            todo!("error handling");
+                        }
+                    }
+
+                    entry.get_mut().push(Signature {
+                        arg_types,
+                        ret_type,
+                        index,
+                    });
+                }
+
+                Entry::Vacant(entry) => {
+                    entry.insert(vec![Signature {
+                        arg_types,
+                        ret_type,
+                        index
+                    }]);
+                }
+            }
+        }
+    }
 }
