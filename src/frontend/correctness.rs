@@ -9,6 +9,7 @@ enum TypeConstraint<'a> {
     Int(Type<'a>),
     Float(Type<'a>),
     Equals(Type<'a>, Type<'a>),
+    Options(Type<'a>, Vec<Type<'a>>),
     Nillable(Type<'a>),
 }
 
@@ -56,7 +57,14 @@ fn create_loop_constraints<'a>(
         }
 
         SExpr::Type { value, .. } => create_loop_constraints(type_, value, constraints),
-        SExpr::FuncCall { func, values, .. } => todo!(),
+
+        SExpr::FuncCall { func, values, .. } => {
+            create_loop_constraints(type_, &mut **func, constraints);
+            for value in values.iter_mut() {
+                create_loop_constraints(type_, value, constraints);
+            }
+        }
+
         SExpr::StructSet { values, .. } => todo!(),
         SExpr::Declare { value, .. } => create_loop_constraints(type_, value, constraints),
         SExpr::Assign { value, .. } => create_loop_constraints(type_, value, constraints),
@@ -70,6 +78,7 @@ fn create_constraints<'a>(
     sexpr: &mut SExpr<'a>,
     type_var_counter: &mut u64,
     constraints: &mut Vec<TypeConstraint<'a>>,
+    func_map: &HashMap<&'a str, Vec<Signature<'a>>>,
 ) {
     let meta = sexpr.meta_mut();
     if meta.type_ == Type::Unknown {
@@ -90,7 +99,7 @@ fn create_constraints<'a>(
         SExpr::Int { .. } => (),
         SExpr::Float { .. } => (),
         SExpr::Str { .. } => (),
-        SExpr::Symbol { meta, value } => (),
+        SExpr::Symbol { .. } => (),
 
         SExpr::List { meta, values } => todo!(),
         SExpr::Quote { meta, value } => todo!(),
@@ -100,7 +109,7 @@ fn create_constraints<'a>(
 
         SExpr::Seq { meta, values } => {
             for value in values.iter_mut() {
-                create_constraints(value, type_var_counter, constraints);
+                create_constraints(value, type_var_counter, constraints, func_map);
             }
 
             constraints.push(TypeConstraint::Equals(
@@ -111,9 +120,9 @@ fn create_constraints<'a>(
 
         SExpr::Cond { meta, values } => {
             for (cond, then) in values {
-                create_constraints(cond, type_var_counter, constraints);
+                create_constraints(cond, type_var_counter, constraints, func_map);
                 constraints.push(TypeConstraint::Int(cond.meta().type_.clone()));
-                create_constraints(then, type_var_counter, constraints);
+                create_constraints(then, type_var_counter, constraints, func_map);
                 constraints.push(TypeConstraint::Equals(
                     meta.type_.clone(),
                     then.meta().type_.clone(),
@@ -122,33 +131,63 @@ fn create_constraints<'a>(
         }
 
         SExpr::Loop { meta, value } => {
-            create_constraints(value, type_var_counter, constraints);
+            create_constraints(value, type_var_counter, constraints, func_map);
             create_loop_constraints(&meta.type_, value, constraints);
             constraints.push(TypeConstraint::Nillable(meta.type_.clone()));
         }
 
-        SExpr::Break { meta, value } => {
+        SExpr::Break { value, .. } => {
             if let Some(value) = value {
-                create_constraints(&mut **value, type_var_counter, constraints);
+                create_constraints(&mut **value, type_var_counter, constraints, func_map);
             }
         }
 
-        SExpr::Nil { meta } => (),
+        SExpr::Nil { .. } => (),
 
         SExpr::Type { meta, value } => {
-            create_constraints(&mut **value, type_var_counter, constraints);
+            create_constraints(&mut **value, type_var_counter, constraints, func_map);
             constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
         }
 
         SExpr::FuncDef {
-            meta,
-            name,
             ret_type,
-            args,
             expr,
-        } => todo!(),
+            ..
+        } => {
+            create_constraints(&mut **expr, type_var_counter, constraints, func_map);
+            constraints.push(TypeConstraint::Equals(ret_type.clone(), expr.meta().type_.clone()));
+        }
 
-        SExpr::FuncCall { meta, func, values } => todo!(),
+        SExpr::FuncCall { meta, func, values } => {
+            create_constraints(&mut **func, type_var_counter, constraints, func_map);
+            let mut args = vec![];
+            for value in values.iter_mut() {
+                create_constraints(value, type_var_counter, constraints, func_map);
+                args.push(value.meta().type_.clone());
+            }
+            let func_type_var = Type::Function(args, Box::new(meta.type_.clone()));
+
+            constraints.push(TypeConstraint::Equals(func.meta().type_.clone(), func_type_var.clone()));
+
+            if let SExpr::Symbol { value, .. } = **func {
+                if let Some(signatures) = func_map.get(value) {
+                    let mut valid_sigs: Vec<_> = signatures.iter().filter_map(|v| if v.arg_types.len() == values.len() {
+                        Some(Type::Function(v.arg_types.clone(), Box::new(v.ret_type.clone())))
+                    } else {
+                        None
+                    }).collect();
+
+                    if !valid_sigs.is_empty() {
+                        if valid_sigs.len() == 1 {
+                            constraints.push(TypeConstraint::Equals(func_type_var, valid_sigs.remove(0)));
+                        } else {
+                            constraints.push(TypeConstraint::Options(func_type_var, valid_sigs));
+                        }
+                    }
+                }
+            }
+        }
+
         SExpr::StructDef { meta, name, fields } => todo!(),
         SExpr::StructSet {
             meta,
@@ -314,6 +353,8 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
                 }
                 _ => (),
             },
+
+            TypeConstraint::Options(_, _) => todo!(),
         }
     }
 
@@ -394,9 +435,41 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> V
     substitutions
 }
 
-fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, constraints: &[Type<'a>]) {
+fn flatten_substitution<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
+    while let Type::TypeVariable(i) = t {
+        *t = substitutions[*i as usize].clone();
+    }
+
+    match t {
+        Type::Tuple(v) => {
+            for v in v {
+                flatten_substitution(v, substitutions);
+            }
+        }
+
+        Type::Pointer(_, v) => flatten_substitution(v, substitutions),
+        Type::Slice(_, v) => flatten_substitution(v, substitutions),
+        Type::Struct(_, v) => {
+            for v in v {
+                flatten_substitution(v, substitutions);
+            }
+        }
+
+        Type::Function(a, r) => {
+            for a in a {
+                flatten_substitution(a, substitutions);
+            }
+            flatten_substitution(r, substitutions);
+        }
+
+        _ => (),
+    }
+}
+
+fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
     if let Type::TypeVariable(i) = sexpr.meta().type_ {
-        sexpr.meta_mut().type_ = constraints[i as usize].clone();
+        sexpr.meta_mut().type_ = substitutions[i as usize].clone();
+        flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
     }
 
     match sexpr {
@@ -407,14 +480,14 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, constraints: &[Type<'a>]) {
         //SExpr::Splice { meta, value } => todo!(),
         SExpr::Seq { values, .. } => {
             for value in values {
-                apply_substitutions(value, constraints);
+                apply_substitutions(value, substitutions);
             }
         }
 
         SExpr::Cond { values, .. } => {
             for (cond, then) in values {
-                apply_substitutions(cond, constraints);
-                apply_substitutions(then, constraints);
+                apply_substitutions(cond, substitutions);
+                apply_substitutions(then, substitutions);
             }
         }
 
@@ -422,30 +495,30 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, constraints: &[Type<'a>]) {
             | SExpr::Type { value, .. }
             | SExpr::Declare { value, .. }
             | SExpr::Assign { value, .. }
-            | SExpr::Break { value: Some(value), .. } => apply_substitutions(value, constraints),
+            | SExpr::Break { value: Some(value), .. } => apply_substitutions(value, substitutions),
 
-        SExpr::FuncDef { expr, .. } => apply_substitutions(expr, constraints),
+        SExpr::FuncDef { expr, .. } => apply_substitutions(expr, substitutions),
 
         SExpr::FuncCall { func, values, .. } => {
-            apply_substitutions(func, constraints);
+            apply_substitutions(func, substitutions);
             for value in values {
-                apply_substitutions(value, constraints);
+                apply_substitutions(value, substitutions);
             }
         }
 
         //SExpr::StructDef { meta, name, fields } => todo!(),
         //SExpr::StructSet { meta, struct_name, values } => todo!(),
-        SExpr::Attribute { top, .. } => apply_substitutions(top, constraints),
+        SExpr::Attribute { top, .. } => apply_substitutions(top, substitutions),
         _ => (),
     }
 }
 
-pub fn check(sexprs: &mut [SExpr<'_>]) -> Result<(), CorrectnessError> {
+pub fn check<'a>(sexprs: &mut [SExpr<'a>], func_map: &HashMap<&'a str, Vec<Signature<'a>>>) -> Result<(), CorrectnessError> {
     let mut type_var_counter = 0;
     let mut constraints = vec![];
 
     for sexpr in sexprs.iter_mut() {
-        create_constraints(sexpr, &mut type_var_counter, &mut constraints);
+        create_constraints(sexpr, &mut type_var_counter, &mut constraints, func_map);
     }
 
     let unified = unify_types(type_var_counter, constraints);

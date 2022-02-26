@@ -7,7 +7,9 @@ fn main() {
     let mut asts = TopParser::new()
         .parse(
     r#"
-        (: i53 3)
+        (defun add (a i69) (b i42) : i32
+            3)
+        (add 3 4)
     "#,
         )
         .unwrap();
@@ -17,6 +19,6 @@ fn main() {
     let mut sexprs = ast_lowering::lower(asts).unwrap();
     let mut func_map = HashMap::new();
     correctness::extract_signatures(&sexprs, &mut func_map);
-    correctness::check(&mut sexprs).unwrap();
+    correctness::check(&mut sexprs, &func_map).unwrap();
     println!("{:#?}", sexprs);
 }

@@ -495,8 +495,6 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         }
                     }
 
-                    // (defun add (a i32) (b i32) : i32
-                    //     (+ a b))
                     Ast::Symbol(_, "defun") => {
                         if sexpr.len() < 3 {
                             return Err(LoweringError::InvalidDefun);
