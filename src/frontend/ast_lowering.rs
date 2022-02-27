@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range};
+use std::{collections::{HashMap, hash_map::Entry}, ops::Range};
 
 use super::parsing::Ast;
 
@@ -37,6 +37,86 @@ pub enum Type<'a> {
     Function(Vec<Type<'a>>, Box<Type<'a>>),
 
     TypeVariable(u64),
+}
+
+impl<'a> Type<'a> {
+    pub fn has_generic(&self) -> bool {
+        match self {
+            Type::Tuple(v) => {
+                for v in v {
+                    if v.has_generic() {
+                        return true;
+                    }
+                }
+                false
+            }
+
+            Type::Pointer(_, v) => v.has_generic(),
+            Type::Slice(_, v) => v.has_generic(),
+
+            Type::Struct(_, v) => {
+                for v in v {
+                    if v.has_generic() {
+                        return true;
+                    }
+                }
+                false
+            }
+
+            Type::Generic(_) => true,
+            Type::Function(a, r) => {
+                for a in a {
+                    if a.has_generic() {
+                        return true;
+                    }
+                }
+                r.has_generic()
+            }
+            _ => false,
+        }
+    }
+
+    pub fn replace_generics(&mut self, type_var_counter: &mut u64, map: &mut HashMap<&'a str, Self>) {
+        match self {
+            Type::Tuple(v) => {
+                for v in v {
+                    v.replace_generics(type_var_counter, map);
+                }
+            }
+
+            Type::Pointer(_, v) => v.replace_generics(type_var_counter, map),
+            Type::Slice(_, v) => v.replace_generics(type_var_counter, map),
+
+            Type::Struct(_, v) => {
+                for v in v {
+                    v.replace_generics(type_var_counter, map);
+                }
+            }
+
+            Type::Generic(n) => {
+                match map.entry(*n) {
+                    Entry::Occupied(entry) => {
+                        *self = entry.get().clone();
+                    }
+
+                    Entry::Vacant(entry) => {
+                        *self = Type::TypeVariable(*type_var_counter);
+                        *type_var_counter += 1;
+                        entry.insert(self.clone());
+                    }
+                }
+            }
+
+            Type::Function(a, r) => {
+                for a in a {
+                    a.replace_generics(type_var_counter, map);
+                }
+                r.replace_generics(type_var_counter, map);
+            }
+
+            _ => (),
+        }
+    }
 }
 
 #[derive(Debug)]

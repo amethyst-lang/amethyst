@@ -150,10 +150,15 @@ fn create_constraints<'a>(
         }
 
         SExpr::FuncDef {
+            args,
             ret_type,
             expr,
             ..
         } => {
+            if args.iter().any(|(_, v)| v.has_generic()) || ret_type.has_generic() {
+                return;
+            }
+
             create_constraints(&mut **expr, type_var_counter, constraints, func_map);
             constraints.push(TypeConstraint::Equals(ret_type.clone(), expr.meta().type_.clone()));
         }
@@ -172,7 +177,13 @@ fn create_constraints<'a>(
             if let SExpr::Symbol { value, .. } = **func {
                 if let Some(signatures) = func_map.get(value) {
                     let mut valid_sigs: Vec<_> = signatures.iter().filter_map(|v| if v.arg_types.len() == values.len() {
-                        Some(Type::Function(v.arg_types.clone(), Box::new(v.ret_type.clone())))
+                        let mut map = HashMap::new();
+                        let mut ret_type = v.ret_type.clone();
+                        ret_type.replace_generics(type_var_counter, &mut map);
+                        Some(Type::Function(v.arg_types.iter().cloned().map(|mut v| {
+                            v.replace_generics(type_var_counter, &mut map);
+                            v
+                        }).collect(), Box::new(ret_type)))
                     } else {
                         None
                     }).collect();
