@@ -76,6 +76,40 @@ impl<'a> Type<'a> {
         }
     }
 
+    fn find_generics(&self, generics: &mut Vec<Self>) {
+        match self {
+            Type::Tuple(v) => {
+                for v in v {
+                    v.find_generics(generics);
+                }
+            }
+
+            Type::Pointer(_, v) => v.find_generics(generics),
+            Type::Slice(_, v) => v.find_generics(generics),
+
+            Type::Struct(_, v) => {
+                for v in v {
+                    v.find_generics(generics);
+                }
+            }
+
+            Type::Generic(_) => {
+                if !generics.contains(self) {
+                    generics.push(self.clone());
+                }
+            }
+
+            Type::Function(a, r) => {
+                for a in a {
+                    a.find_generics(generics);
+                }
+                r.find_generics(generics)
+            }
+
+            _ => (),
+        }
+    }
+
     pub fn replace_generics(&mut self, type_var_counter: &mut u64, map: &mut HashMap<&'a str, Self>) {
         match self {
             Type::Tuple(v) => {
@@ -213,8 +247,8 @@ pub enum SExpr<'a> {
 
     StructSet {
         meta: Metadata<'a>,
-        struct_name: &'a str,
-        values: HashMap<&'a str, SExpr<'a>>,
+        name: &'a str,
+        values: Vec<(&'a str, SExpr<'a>)>,
     },
 
     Declare {
@@ -305,6 +339,8 @@ pub enum LoweringError {
     InvalidDefun,
     InvalidType,
     InvalidLet,
+    InvalidDefStruct,
+    InvalidInst,
 }
 
 fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
@@ -626,8 +662,77 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         }
                     }
 
-                    Ast::Symbol(_, "defstruct") => todo!(),
-                    Ast::Symbol(_, "inst") => todo!(),
+                    Ast::Symbol(_, "defstruct") => {
+                        let name = match sexpr.remove(1) {
+                            Ast::Symbol(_, name) => {
+                                name
+                            }
+
+                            _ => return Err(LoweringError::InvalidDefStruct),
+                        };
+
+                        let mut fields = vec![];
+                        let mut generics = vec![];
+                        for field in sexpr.into_iter().skip(1) {
+                            match field {
+                                Ast::SExpr(_, mut v) if v.len() == 2 => {
+                                    match v.swap_remove(0) {
+                                        Ast::Symbol(_, name) => {
+                                            let type_ = parse_type(v.swap_remove(0))?;
+                                            type_.find_generics(&mut generics);
+                                            fields.push((name, type_));
+                                        }
+
+                                        _ => return Err(LoweringError::InvalidDefStruct),
+                                    }
+                                }
+
+                                _ => return Err(LoweringError::InvalidDefStruct),
+                            }
+                        }
+
+                        SExpr::StructDef {
+                            meta: Metadata {
+                                range,
+                                type_: Type::Struct(name, generics),
+                            },
+                            name,
+                            fields,
+                        }
+                    }
+
+                    Ast::Symbol(_, "inst") => {
+                        let name = match sexpr.remove(1) {
+                            Ast::Symbol(_, name) => name,
+                            _ => return Err(LoweringError::InvalidInst),
+                        };
+
+                        let mut values = vec![];
+                        for field in sexpr.into_iter().skip(1) {
+                            match field {
+                                Ast::SExpr(_, mut v) if v.len() == 2 => {
+                                    match v.swap_remove(0) {
+                                        Ast::Symbol(_, name) => {
+                                            values.push((name, lower_helper(v.remove(0), false)?));
+                                        }
+
+                                        _ => return Err(LoweringError::InvalidInst),
+                                    }
+                                }
+
+                                _ => return Err(LoweringError::InvalidInst),
+                            }
+                        }
+
+                        SExpr::StructSet {
+                            meta: Metadata {
+                                range,
+                                type_: Type::Unknown,
+                            },
+                            name,
+                            values,
+                        }
+                    }
 
                     Ast::Symbol(_, "let") => {
                         if sexpr.len() == 4 {

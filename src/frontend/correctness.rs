@@ -224,10 +224,10 @@ fn create_constraints<'a>(
             }
         }
 
-        SExpr::StructDef { meta, name, fields } => todo!(),
+        SExpr::StructDef { meta, name, fields } => (),
         SExpr::StructSet {
             meta,
-            struct_name,
+            name,
             values,
         } => todo!(),
 

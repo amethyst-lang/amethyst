@@ -7,24 +7,18 @@ fn main() {
     let mut asts = TopParser::new()
         .parse(
     r#"
-        //(defun add (a i69) (b i42) : i32 3)
-        //(defun add (a f32) (b f32) : f32 3.0)
-        //(defun add (a f32) (b f32) : i32 3)
-        //(: i32 (add 3.0 4.2))
+        (defstruct IntFloat
+            (int i32)
+            (float f64))
 
-        //(defun take (a 'a) : i32 2)
-        //(defun take (a 'a) : f32 2.0)
-        //(: f32 (take 2))
-        //(: i32 (take (: i3 3)))
-        //(: i32 (take 4.5))
+        (defstruct Pair
+            (first 'a)
+            (second 'b))
 
-        (defun id (a 'a) : 'a
-            (seq
-                (let a = a)
-                (set a = a)
-                a))
-
-        (id 2)
+        (let int-float =
+            (inst IntFloat
+                (int 69)
+                (float 420.0)))
     "#,
         )
         .unwrap();
