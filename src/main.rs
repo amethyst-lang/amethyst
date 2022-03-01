@@ -23,6 +23,8 @@ fn main() {
                 (let a = a)
                 (set a = a)
                 a))
+
+        (id 2)
     "#,
         )
         .unwrap();

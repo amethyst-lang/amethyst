@@ -2,7 +2,7 @@ use std::{collections::{HashMap, hash_map::Entry}, ops::Range};
 
 use super::parsing::Ast;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Metadata<'a> {
     pub range: Range<usize>,
     pub type_: Type<'a>,
@@ -119,7 +119,7 @@ impl<'a> Type<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SExpr<'a> {
     Int {
         meta: Metadata<'a>,

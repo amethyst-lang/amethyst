@@ -81,6 +81,7 @@ fn create_constraints<'a>(
     type_var_counter: &mut u64,
     constraints: &mut Vec<TypeConstraint<'a>>,
     func_map: &HashMap<&'a str, Vec<Signature<'a>>>,
+    monomorphisms: &mut Vec<(Type<'a>, usize)>,
 ) {
     let meta = sexpr.meta_mut();
     if meta.type_ == Type::Unknown {
@@ -111,7 +112,7 @@ fn create_constraints<'a>(
 
         SExpr::Seq { meta, values } => {
             for value in values.iter_mut() {
-                create_constraints(value, type_var_counter, constraints, func_map);
+                create_constraints(value, type_var_counter, constraints, func_map, monomorphisms);
             }
 
             constraints.push(TypeConstraint::Equals(
@@ -122,9 +123,9 @@ fn create_constraints<'a>(
 
         SExpr::Cond { meta, values } => {
             for (cond, then) in values {
-                create_constraints(cond, type_var_counter, constraints, func_map);
+                create_constraints(cond, type_var_counter, constraints, func_map, monomorphisms);
                 constraints.push(TypeConstraint::Int(cond.meta().type_.clone()));
-                create_constraints(then, type_var_counter, constraints, func_map);
+                create_constraints(then, type_var_counter, constraints, func_map, monomorphisms);
                 constraints.push(TypeConstraint::Equals(
                     meta.type_.clone(),
                     then.meta().type_.clone(),
@@ -133,21 +134,21 @@ fn create_constraints<'a>(
         }
 
         SExpr::Loop { meta, value } => {
-            create_constraints(value, type_var_counter, constraints, func_map);
+            create_constraints(value, type_var_counter, constraints, func_map, monomorphisms);
             create_loop_constraints(&meta.type_, value, constraints);
             constraints.push(TypeConstraint::Nillable(meta.type_.clone()));
         }
 
         SExpr::Break { value, .. } => {
             if let Some(value) = value {
-                create_constraints(&mut **value, type_var_counter, constraints, func_map);
+                create_constraints(&mut **value, type_var_counter, constraints, func_map, monomorphisms);
             }
         }
 
         SExpr::Nil { .. } => (),
 
         SExpr::Type { meta, value } => {
-            create_constraints(&mut **value, type_var_counter, constraints, func_map);
+            create_constraints(&mut **value, type_var_counter, constraints, func_map, monomorphisms);
             constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
         }
 
@@ -161,15 +162,15 @@ fn create_constraints<'a>(
                 return;
             }
 
-            create_constraints(&mut **expr, type_var_counter, constraints, func_map);
+            create_constraints(&mut **expr, type_var_counter, constraints, func_map, monomorphisms);
             constraints.push(TypeConstraint::Equals(ret_type.clone(), expr.meta().type_.clone()));
         }
 
         SExpr::FuncCall { meta, func, values } => {
-            create_constraints(&mut **func, type_var_counter, constraints, func_map);
+            create_constraints(&mut **func, type_var_counter, constraints, func_map, monomorphisms);
             let mut args = vec![];
             for value in values.iter_mut() {
-                create_constraints(value, type_var_counter, constraints, func_map);
+                create_constraints(value, type_var_counter, constraints, func_map, monomorphisms);
                 args.push(value.meta().type_.clone());
             }
             let func_type_var = Type::Function(args, Box::new(meta.type_.clone()));
@@ -178,23 +179,23 @@ fn create_constraints<'a>(
 
             if let SExpr::Symbol { value, .. } = **func {
                 if let Some(signatures) = func_map.get(value) {
-                    let mut valid_sigs: Vec<_> = signatures.iter().filter_map(|v| if v.arg_types.len() == values.len() {
-                        let mut map = HashMap::new();
-                        let mut ret_type = v.ret_type.clone();
-                        ret_type.replace_generics(type_var_counter, &mut map);
-                        Some(Type::Function(v.arg_types.iter().cloned().map(|mut v| {
-                            v.replace_generics(type_var_counter, &mut map);
-                            v
-                        }).collect(), Box::new(ret_type)))
-                    } else {
-                        None
-                    }).collect();
+                    let mut valid_sigs: Vec<_> = signatures.iter().filter(|v| v.arg_types.len() == values.len()).cloned().collect();
 
                     if !valid_sigs.is_empty() {
                         if valid_sigs.len() == 1 {
-                            constraints.push(TypeConstraint::Equals(func_type_var, valid_sigs.remove(0)));
+                            let Signature { arg_types, ret_type, index } = valid_sigs.remove(0);
+                            let mut sig = Type::Function(arg_types, Box::new(ret_type));
+                            if sig.has_generic() {
+                                let mut map = HashMap::new();
+                                sig.replace_generics(type_var_counter, &mut map);
+
+                                if let Some(index) = index {
+                                    monomorphisms.push((sig.clone(), index));
+                                }
+                            }
+                            constraints.push(TypeConstraint::Equals(func_type_var, sig));
                         } else {
-                            constraints.push(TypeConstraint::Options(func_type_var, valid_sigs));
+                            constraints.push(TypeConstraint::Options(func_type_var, valid_sigs.into_iter().map(|v| Type::Function(v.arg_types, Box::new(v.ret_type))).collect()));
                         }
                     }
                 }
@@ -412,7 +413,7 @@ fn unify_type_variable_propagator(substitutions: &mut Vec<Type<'_>>, float_or_in
 fn check_float_or_int(substitutions: &mut Vec<Type<'_>>, float_or_int: &[FloatOrInt]) -> Result<(), CorrectnessError> {
     for (i, foi) in float_or_int.iter().enumerate() {
         match foi {
-            FloatOrInt::Float => match &substitutions[i] {
+            FloatOrInt::Float => match substitutions[i] {
                 Type::TypeVariable(_) => {
                     substitutions[i] = Type::F64;
                 }
@@ -422,7 +423,7 @@ fn check_float_or_int(substitutions: &mut Vec<Type<'_>>, float_or_int: &[FloatOr
                 _ => return Err(CorrectnessError::UnificationError),
             },
 
-            FloatOrInt::Int => match &substitutions[i] {
+            FloatOrInt::Int => match substitutions[i] {
                 Type::TypeVariable(_) => {
                     substitutions[i] = Type::Int(true, 32);
                 }
@@ -544,6 +545,7 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> R
     } else {
         unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
         check_float_or_int(&mut substitutions, &float_or_int)?;
+        unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
     }
 
     for sub in substitutions.iter() {
@@ -633,23 +635,55 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
     }
 }
 
-pub fn check<'a>(sexprs: &mut [SExpr<'a>], func_map: &HashMap<&'a str, Vec<Signature<'a>>>) -> Result<(), CorrectnessError> {
-    let mut type_var_counter = 0;
-    let mut constraints = vec![];
+pub fn check<'a>(sexprs: &mut Vec<SExpr<'a>>, func_map: &HashMap<&'a str, Vec<Signature<'a>>>) -> Result<(), CorrectnessError> {
+    let mut monomorphisms;
+    let mut skip = 0;
 
-    for sexpr in sexprs.iter_mut() {
-        create_constraints(sexpr, &mut type_var_counter, &mut constraints, func_map);
-    }
+    while {
+        let mut type_var_counter = 0;
+        let mut constraints = vec![];
+        monomorphisms = vec![];
 
-    let unified = unify_types(type_var_counter, constraints)?;
-    for sexpr in sexprs.iter_mut() {
-        apply_substitutions(sexpr, &unified);
-    }
+        for sexpr in sexprs.iter_mut().skip(skip) {
+            create_constraints(sexpr, &mut type_var_counter, &mut constraints, func_map, &mut monomorphisms);
+        }
+
+        let unified = unify_types(type_var_counter, constraints)?;
+        for sexpr in sexprs.iter_mut().skip(skip) {
+            apply_substitutions(sexpr, &unified);
+        }
+
+        skip = sexprs.len();
+
+        if !monomorphisms.is_empty() {
+            for (mut t, index) in monomorphisms {
+                let mut monomorphised = sexprs[index].clone();
+
+                if let SExpr::FuncDef { meta, args, ret_type, .. } = &mut monomorphised {
+                    flatten_substitution(&mut t, &unified);
+                    meta.type_ = t.clone();
+                    if let Type::Function(a, r) = t {
+                        for (i, (_, arg)) in args.iter_mut().enumerate() {
+                            *arg = a[i].clone();
+                        }
+
+                        *ret_type = *r;
+
+                        sexprs.push(monomorphised);
+                    }
+                }
+            }
+
+            true
+        } else {
+            false
+        }
+    } {}
 
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Signature<'a> {
     pub arg_types: Vec<Type<'a>>,
     pub ret_type: Type<'a>,
