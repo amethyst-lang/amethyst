@@ -82,6 +82,7 @@ fn create_constraints<'a>(
     constraints: &mut Vec<TypeConstraint<'a>>,
     func_map: &HashMap<&'a str, Vec<Signature<'a>>>,
     monomorphisms: &mut Vec<(Type<'a>, usize)>,
+    scopes: &mut Vec<HashMap<&'a str, Type<'a>>>,
 ) {
     let meta = sexpr.meta_mut();
     if meta.type_ == Type::Unknown {
@@ -102,7 +103,14 @@ fn create_constraints<'a>(
         SExpr::Int { .. } => (),
         SExpr::Float { .. } => (),
         SExpr::Str { .. } => (),
-        SExpr::Symbol { .. } => (),
+
+        SExpr::Symbol { meta, value } => {
+            for scope in scopes.iter().rev() {
+                if let Some(t) = scope.get(value) {
+                    constraints.push(TypeConstraint::Equals(meta.type_.clone(), t.clone()));
+                }
+            }
+        }
 
         SExpr::List { meta, values } => todo!(),
         SExpr::Quote { meta, value } => todo!(),
@@ -111,9 +119,11 @@ fn create_constraints<'a>(
         SExpr::Splice { meta, value } => todo!(),
 
         SExpr::Seq { meta, values } => {
+            scopes.push(HashMap::new());
             for value in values.iter_mut() {
-                create_constraints(value, type_var_counter, constraints, func_map, monomorphisms);
+                create_constraints(value, type_var_counter, constraints, func_map, monomorphisms, scopes);
             }
+            scopes.pop();
 
             constraints.push(TypeConstraint::Equals(
                 meta.type_.clone(),
@@ -123,9 +133,12 @@ fn create_constraints<'a>(
 
         SExpr::Cond { meta, values } => {
             for (cond, then) in values {
-                create_constraints(cond, type_var_counter, constraints, func_map, monomorphisms);
+                scopes.push(HashMap::new());
+                create_constraints(cond, type_var_counter, constraints, func_map, monomorphisms, scopes);
                 constraints.push(TypeConstraint::Int(cond.meta().type_.clone()));
-                create_constraints(then, type_var_counter, constraints, func_map, monomorphisms);
+                create_constraints(then, type_var_counter, constraints, func_map, monomorphisms, scopes);
+                scopes.pop();
+
                 constraints.push(TypeConstraint::Equals(
                     meta.type_.clone(),
                     then.meta().type_.clone(),
@@ -134,21 +147,23 @@ fn create_constraints<'a>(
         }
 
         SExpr::Loop { meta, value } => {
-            create_constraints(value, type_var_counter, constraints, func_map, monomorphisms);
+            scopes.push(HashMap::new());
+            create_constraints(value, type_var_counter, constraints, func_map, monomorphisms, scopes);
             create_loop_constraints(&meta.type_, value, constraints);
             constraints.push(TypeConstraint::Nillable(meta.type_.clone()));
+            scopes.pop();
         }
 
         SExpr::Break { value, .. } => {
             if let Some(value) = value {
-                create_constraints(&mut **value, type_var_counter, constraints, func_map, monomorphisms);
+                create_constraints(&mut **value, type_var_counter, constraints, func_map, monomorphisms, scopes);
             }
         }
 
         SExpr::Nil { .. } => (),
 
         SExpr::Type { meta, value } => {
-            create_constraints(&mut **value, type_var_counter, constraints, func_map, monomorphisms);
+            create_constraints(&mut **value, type_var_counter, constraints, func_map, monomorphisms, scopes);
             constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
         }
 
@@ -162,15 +177,22 @@ fn create_constraints<'a>(
                 return;
             }
 
-            create_constraints(&mut **expr, type_var_counter, constraints, func_map, monomorphisms);
+            let mut scope = HashMap::new();
+            for (name, type_) in args.iter() {
+                scope.insert(*name, type_.clone());
+            }
+
+            scopes.push(scope);
+            create_constraints(&mut **expr, type_var_counter, constraints, func_map, monomorphisms, scopes);
             constraints.push(TypeConstraint::Equals(ret_type.clone(), expr.meta().type_.clone()));
+            scopes.pop();
         }
 
         SExpr::FuncCall { meta, func, values } => {
-            create_constraints(&mut **func, type_var_counter, constraints, func_map, monomorphisms);
+            create_constraints(&mut **func, type_var_counter, constraints, func_map, monomorphisms, scopes);
             let mut args = vec![];
             for value in values.iter_mut() {
-                create_constraints(value, type_var_counter, constraints, func_map, monomorphisms);
+                create_constraints(value, type_var_counter, constraints, func_map, monomorphisms, scopes);
                 args.push(value.meta().type_.clone());
             }
             let func_type_var = Type::Function(args, Box::new(meta.type_.clone()));
@@ -208,17 +230,34 @@ fn create_constraints<'a>(
             struct_name,
             values,
         } => todo!(),
+
         SExpr::Declare {
             meta,
-            mutable,
+            mutable: _,
             variable,
             value,
-        } => todo!(),
+        } => {
+            create_constraints(&mut **value, type_var_counter, constraints, func_map, monomorphisms, scopes);
+            if let Some(scope) = scopes.last_mut() {
+                scope.insert(*variable, value.meta().type_.clone());
+            }
+            constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
+        }
+
         SExpr::Assign {
             meta,
             variable,
             value,
-        } => todo!(),
+        } => {
+            create_constraints(&mut **value, type_var_counter, constraints, func_map, monomorphisms, scopes);
+            for scope in scopes.iter().rev() {
+                if let Some(t) = scope.get(variable) {
+                    constraints.push(TypeConstraint::Equals(value.meta().type_.clone(), t.clone()));
+                    constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
+                }
+            }
+        }
+
         SExpr::Attribute { meta, top, attrs } => todo!(),
     }
 }
@@ -638,6 +677,7 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
 pub fn check<'a>(sexprs: &mut Vec<SExpr<'a>>, func_map: &HashMap<&'a str, Vec<Signature<'a>>>) -> Result<(), CorrectnessError> {
     let mut monomorphisms;
     let mut skip = 0;
+    let mut scopes = vec![HashMap::new()];
 
     while {
         let mut type_var_counter = 0;
@@ -645,7 +685,7 @@ pub fn check<'a>(sexprs: &mut Vec<SExpr<'a>>, func_map: &HashMap<&'a str, Vec<Si
         monomorphisms = vec![];
 
         for sexpr in sexprs.iter_mut().skip(skip) {
-            create_constraints(sexpr, &mut type_var_counter, &mut constraints, func_map, &mut monomorphisms);
+            create_constraints(sexpr, &mut type_var_counter, &mut constraints, func_map, &mut monomorphisms, &mut scopes);
         }
 
         let unified = unify_types(type_var_counter, constraints)?;
