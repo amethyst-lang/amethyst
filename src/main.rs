@@ -15,10 +15,19 @@ fn main() {
             (first 'a)
             (second 'b))
 
-        (let int-float =
-            (inst IntFloat
-                (int 69)
-                (float 420.0)))
+        (seq
+            (let int-float =
+                (inst IntFloat
+                    (int 69)
+                    (float 420.0)))
+
+            (let pair =
+                (inst Pair
+                    (first 69)
+                    (second 420.0)))
+
+            //int-float.int.(id)
+            )
     "#,
         )
         .unwrap();
@@ -28,6 +37,8 @@ fn main() {
     let mut sexprs = ast_lowering::lower(asts).unwrap();
     let mut func_map = HashMap::new();
     correctness::extract_signatures(&sexprs, &mut func_map);
-    correctness::check(&mut sexprs, &func_map).unwrap();
+    let mut struct_map = HashMap::new();
+    correctness::extract_structs(&sexprs, &mut struct_map);
+    correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
     println!("{:#?}", sexprs);
 }

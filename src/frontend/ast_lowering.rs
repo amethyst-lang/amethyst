@@ -76,7 +76,7 @@ impl<'a> Type<'a> {
         }
     }
 
-    fn find_generics(&self, generics: &mut Vec<Self>) {
+    pub fn find_generics(&self, generics: &mut Vec<Self>) {
         match self {
             Type::Tuple(v) => {
                 for v in v {
@@ -820,14 +820,18 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                     Ast::Symbol(_, v) => attrs.push(v),
 
                     Ast::SExpr(..) => {
-                        top = SExpr::Attribute {
-                            meta: Metadata {
-                                range: range.start..end,
-                                type_: Type::Unknown,
-                            },
-                            top: Box::new(top),
-                            attrs,
-                        };
+                        if !attrs.is_empty() {
+                            top = SExpr::Attribute {
+                                meta: Metadata {
+                                    range: range.start..end,
+                                    type_: Type::Unknown,
+                                },
+                                top: Box::new(top),
+                                attrs,
+                            };
+
+                            attrs = vec![];
+                        }
 
                         let mut parent = lower_helper(attr, quoting)?;
 
@@ -839,21 +843,23 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
 
                             _ => return Err(LoweringError::InvalidAttribute),
                         }
-
-                        attrs = vec![];
                     }
 
                     _ => unreachable!("parser emits only symbols and s expressions"),
                 }
             }
 
-            SExpr::Attribute {
-                meta: Metadata {
-                    range,
-                    type_: Type::Unknown,
-                },
-                top: Box::new(top),
-                attrs,
+            if attrs.is_empty() {
+                top
+            } else {
+                SExpr::Attribute {
+                    meta: Metadata {
+                        range,
+                        type_: Type::Unknown,
+                    },
+                    top: Box::new(top),
+                    attrs,
+                }
             }
         }
     };
