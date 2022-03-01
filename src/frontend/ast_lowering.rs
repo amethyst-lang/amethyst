@@ -304,6 +304,7 @@ pub enum LoweringError {
     InvalidTypeSpecifier,
     InvalidDefun,
     InvalidType,
+    InvalidLet,
 }
 
 fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
@@ -353,6 +354,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
             }
 
             Ast::Symbol(_, "fn") => {
+                // TODO
                 todo!()
             }
 
@@ -627,18 +629,54 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                     Ast::Symbol(_, "defstruct") => todo!(),
                     Ast::Symbol(_, "inst") => todo!(),
 
-                    Ast::Symbol(_, "let" | "mut") => todo!(),
+                    Ast::Symbol(_, "let") => {
+                        if sexpr.len() == 4 {
+                            match (&sexpr[1], &sexpr[2]) {
+                                (&Ast::Symbol(_, variable), &Ast::Symbol(_, "=")) => {
+                                    SExpr::Declare {
+                                        meta: Metadata {
+                                            range,
+                                            type_: Type::Unknown,
+                                        },
+                                        mutable: false,
+                                        variable,
+                                        value: Box::new(lower_helper(sexpr.remove(3), false)?),
+                                    }
+                                }
+
+                                _ => return Err(LoweringError::InvalidLet),
+                            }
+                        } else if sexpr.len() == 5 {
+                            match (&sexpr[1], &sexpr[2], &sexpr[3]) {
+                                (&Ast::Symbol(_, "mut"), &Ast::Symbol(_, variable), &Ast::Symbol(_, "=")) => {
+                                    SExpr::Declare {
+                                        meta: Metadata {
+                                            range,
+                                            type_: Type::Unknown,
+                                        },
+                                        mutable: true,
+                                        variable,
+                                        value: Box::new(lower_helper(sexpr.remove(4), false)?),
+                                    }
+                                }
+
+                                _ => return Err(LoweringError::InvalidLet),
+                            }
+                        } else {
+                            return Err(LoweringError::InvalidLet);
+                        }
+                    }
 
                     Ast::Symbol(_, "set") => {
-                        if sexpr.len() == 3 {
-                            match sexpr[1] {
-                                Ast::Symbol(_, variable) => SExpr::Assign {
+                        if sexpr.len() == 4 {
+                            match (&sexpr[1], &sexpr[2]) {
+                                (&Ast::Symbol(_, variable), &Ast::Symbol(_, "=")) => SExpr::Assign {
                                     meta: Metadata {
                                         range,
                                         type_: Type::Unknown,
                                     },
                                     variable,
-                                    value: Box::new(lower_helper(sexpr.swap_remove(2), false)?),
+                                    value: Box::new(lower_helper(sexpr.swap_remove(3), false)?),
                                 },
 
                                 _ => return Err(LoweringError::InvalidSet),

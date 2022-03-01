@@ -355,7 +355,7 @@ fn propagator_helper<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
             propagator_helper(r, substitutions);
         }
 
-        Type::TypeVariable(i) => {
+        Type::TypeVariable(i) if !matches!(&substitutions[*i as usize], Type::Unknown) && !matches!(&substitutions[*i as usize], Type::TypeVariable(j) if *i == *j) => {
             *t = substitutions[*i as usize].clone();
             propagator_helper(t, substitutions);
         }
@@ -589,7 +589,7 @@ fn flatten_substitution<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
 fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
     if let Type::TypeVariable(i) = sexpr.meta().type_ {
         sexpr.meta_mut().type_ = substitutions[i as usize].clone();
-        flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
+        //flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
     }
 
     match sexpr {
