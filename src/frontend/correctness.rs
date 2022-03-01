@@ -800,14 +800,11 @@ pub struct Struct<'a> {
     pub name: &'a str,
     pub generics: Vec<Type<'a>>,
     pub fields: Vec<(&'a str, Type<'a>)>,
-    pub index: Option<usize>,
 }
 
 pub fn extract_structs<'a>(sexprs: &[SExpr<'a>], map: &mut HashMap<&'a str, Struct<'a>>) {
-    for (i, sexpr) in sexprs.iter().enumerate() {
+    for sexpr in sexprs.iter() {
         if let SExpr::StructDef { name, fields, .. } = sexpr {
-            let index = Some(i);
-
             let mut generics = vec![];
 
             for (_, t) in fields {
@@ -818,7 +815,6 @@ pub fn extract_structs<'a>(sexprs: &[SExpr<'a>], map: &mut HashMap<&'a str, Stru
                 name: *name,
                 generics,
                 fields: fields.clone(),
-                index,
             };
 
             if map.insert(*name, struct_).is_some() {
