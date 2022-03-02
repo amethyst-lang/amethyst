@@ -244,7 +244,7 @@ fn create_constraints<'a>(
                         let mut t = t.clone();
                         t.find_generics(&mut generics);
                         t.replace_generics(type_var_counter, &mut map);
-                        constraints.push(TypeConstraint::Equals(value.meta().type_.clone(), t));
+                        constraints.push(TypeConstraint::Equals(t, value.meta().type_.clone()));
                     }
                 }
 
@@ -388,7 +388,7 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: &Type<'a>, t2: &Type<'a>) ->
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 enum FloatOrInt {
     Float,
     Int,
@@ -619,7 +619,7 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> R
 fn flatten_substitution<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
     while let Type::TypeVariable(i) = t {
         match &substitutions[*i as usize] {
-            Type::TypeVariable(j) if *i == *j => todo!("error handling"),
+            Type::TypeVariable(j) if *i == *j => todo!("error handling for {}", j),
             _ => *t = substitutions[*i as usize].clone(),
         }
     }
@@ -651,11 +651,7 @@ fn flatten_substitution<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
 }
 
 fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
-    if let Type::TypeVariable(i) = sexpr.meta().type_ {
-        sexpr.meta_mut().type_ = substitutions[i as usize].clone();
-    } else {
-        flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
-    }
+    flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
 
     match sexpr {
         //SExpr::List { meta, values } => todo!(),
