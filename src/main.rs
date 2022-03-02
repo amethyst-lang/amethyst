@@ -7,6 +7,7 @@ fn main() {
     let mut asts = TopParser::new()
         .parse(
     r#"
+    /*
         (defstruct IntFloat
             (int i32)
             (float f64))
@@ -26,8 +27,10 @@ fn main() {
                     (first 69)
                     (second 420.0)))
 
-            //int-float.int.(id)
-            )
+            int-float.int
+            pair.first)
+            */
+    (: (* mut u8) (alloca 2))
     "#,
         )
         .unwrap();
@@ -35,7 +38,7 @@ fn main() {
     macros::extract_macros(&mut map, &asts);
     macros::replace_macros(&map, &mut asts);
     let mut sexprs = ast_lowering::lower(asts).unwrap();
-    let mut func_map = HashMap::new();
+    let mut func_map = correctness::create_default_signatures();
     correctness::extract_signatures(&sexprs, &mut func_map);
     let mut struct_map = HashMap::new();
     correctness::extract_structs(&sexprs, &mut struct_map);

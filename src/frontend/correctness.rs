@@ -202,23 +202,24 @@ fn create_constraints<'a>(
 
             if let SExpr::Symbol { value, .. } = **func {
                 if let Some(signatures) = func_map.get(value) {
-                    let mut valid_sigs: Vec<_> = signatures.iter().filter(|v| v.arg_types.len() == values.len()).cloned().collect();
-
-                    if !valid_sigs.is_empty() {
-                        if valid_sigs.len() == 1 {
-                            let Signature { arg_types, ret_type, index } = valid_sigs.remove(0);
-                            let mut sig = Type::Function(arg_types, Box::new(ret_type));
+                    let mut valid_sigs: Vec<_> = signatures.iter().filter_map(|v| {
+                        if v.arg_types.len() == values.len() {
+                            let mut sig = Type::Function(v.arg_types.clone(), Box::new(v.ret_type.clone()));
                             if sig.has_generic() {
                                 let mut map = HashMap::new();
                                 sig.replace_generics(type_var_counter, &mut map);
-
-                                if let Some(index) = index {
-                                    monomorphisms.push((sig.clone(), index));
-                                }
                             }
-                            constraints.push(TypeConstraint::Equals(func_type_var, sig));
+                            Some(sig)
                         } else {
-                            constraints.push(TypeConstraint::Options(func_type_var, valid_sigs.into_iter().map(|v| Type::Function(v.arg_types, Box::new(v.ret_type))).collect()));
+                            None
+                        }
+                    }).collect();
+
+                    if !valid_sigs.is_empty() {
+                        if valid_sigs.len() == 1 {
+                            constraints.push(TypeConstraint::Equals(func_type_var, valid_sigs.remove(0)));
+                        } else {
+                            constraints.push(TypeConstraint::Options(func_type_var, valid_sigs));
                         }
                     }
                 }
@@ -612,18 +613,15 @@ fn unify_types(type_var_counter: u64, constraints: Vec<TypeConstraint<'_>>) -> R
         unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
     }
 
-    for sub in substitutions.iter() {
-        if let Type::TypeVariable(_) = sub {
-            return Err(CorrectnessError::UnificationError);
-        }
-    }
-
     Ok(substitutions)
 }
 
 fn flatten_substitution<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
     while let Type::TypeVariable(i) = t {
-        *t = substitutions[*i as usize].clone();
+        match &substitutions[*i as usize] {
+            Type::TypeVariable(j) if *i == *j => todo!("error handling"),
+            _ => *t = substitutions[*i as usize].clone(),
+        }
     }
 
     match t {
@@ -757,6 +755,230 @@ pub struct Signature<'a> {
     pub arg_types: Vec<Type<'a>>,
     pub ret_type: Type<'a>,
     pub index: Option<usize>,
+}
+
+fn create_one_signature<'a>(map: &mut HashMap<&'a str, Vec<Signature<'a>>>, name: &'a str, include_floats: bool, rets_bool: bool) {
+    let mut sigs = vec![
+        Signature {
+            arg_types: vec![Type::Int(false, 8), Type::Int(false, 8)],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::Int(false, 8)
+            },
+            index: None,
+        },
+        Signature {
+            arg_types: vec![Type::Int(false, 16), Type::Int(false, 16)],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::Int(false, 16)
+            },
+            index: None,
+        },
+        Signature {
+            arg_types: vec![Type::Int(false, 32), Type::Int(false, 32)],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::Int(false, 32)
+            },
+            index: None,
+        },
+        Signature {
+            arg_types: vec![Type::Int(false, 64), Type::Int(false, 64)],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::Int(false, 64)
+            },
+            index: None,
+        },
+        Signature {
+            arg_types: vec![Type::Int(true, 8), Type::Int(true, 8)],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::Int(true, 8)
+            },
+            index: None,
+        },
+        Signature {
+            arg_types: vec![Type::Int(true, 16), Type::Int(true, 16)],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::Int(true, 16)
+            },
+            index: None,
+        },
+        Signature {
+            arg_types: vec![Type::Int(true, 32), Type::Int(true, 32)],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::Int(true, 32)
+            },
+            index: None,
+        },
+        Signature {
+            arg_types: vec![Type::Int(true, 64), Type::Int(true, 64)],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::Int(true, 64)
+            },
+            index: None,
+        },
+    ];
+
+    if include_floats {
+        sigs.push(Signature {
+            arg_types: vec![Type::F32, Type::F32],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::F32
+            },
+            index: None,
+        });
+        sigs.push(Signature {
+            arg_types: vec![Type::F64, Type::F64],
+            ret_type: if rets_bool {
+                Type::Int(false, 1)
+            } else {
+                Type::F64
+            },
+            index: None,
+        });
+    }
+
+    map.insert(name, sigs);
+}
+
+pub fn create_default_signatures<'a>() -> HashMap<&'a str, Vec<Signature<'a>>> {
+    let mut map = HashMap::new();
+    create_one_signature(&mut map, "+", true, false);
+    create_one_signature(&mut map, "-", true, false);
+    create_one_signature(&mut map, "*", true, false);
+    create_one_signature(&mut map, "/", true, false);
+    create_one_signature(&mut map, "<", true, true);
+    create_one_signature(&mut map, ">", true, true);
+    create_one_signature(&mut map, "<=", true, true);
+    create_one_signature(&mut map, ">=", true, true);
+    create_one_signature(&mut map, "<<", false, false);
+    create_one_signature(&mut map, ">>", false, false);
+    create_one_signature(&mut map, "&", false, false);
+    create_one_signature(&mut map, "|", false, false);
+    create_one_signature(&mut map, "^", false, false);
+    create_one_signature(&mut map, "==", true, true);
+    map.get_mut("==").unwrap().push(Signature {
+        arg_types: vec![Type::Int(false, 1), Type::Int(false, 1)],
+        ret_type: Type::Int(false, 1),
+        index: None,
+    });
+    create_one_signature(&mut map, "!=", true, true);
+    map.get_mut("!=").unwrap().push(Signature {
+        arg_types: vec![Type::Int(false, 1), Type::Int(false, 1)],
+        ret_type: Type::Int(false, 1),
+        index: None,
+    });
+    map.insert("and", vec![
+        Signature {
+            arg_types: vec![Type::Int(false, 1), Type::Int(false, 1)],
+            ret_type: Type::Int(false, 1),
+            index: None,
+        },
+    ]);
+    map.insert("or", vec![
+        Signature {
+            arg_types: vec![Type::Int(false, 1), Type::Int(false, 1)],
+            ret_type: Type::Int(false, 1),
+            index: None,
+        },
+    ]);
+    map.insert("xor", vec![
+        Signature {
+            arg_types: vec![Type::Int(false, 1), Type::Int(false, 1)],
+            ret_type: Type::Int(false, 1),
+            index: None,
+        },
+    ]);
+
+    let mut sigs = vec![];
+    for a in [Type::Int(false, 8), Type::Int(false, 16), Type::Int(false, 32), Type::Int(false, 64), Type::Int(true, 8), Type::Int(true, 16), Type::Int(true, 32), Type::Int(true, 64)] {
+        for r in [Type::Int(false, 8), Type::Int(false, 16), Type::Int(false, 32), Type::Int(false, 64), Type::Int(true, 8), Type::Int(true, 16), Type::Int(true, 32), Type::Int(true, 64)] {
+            if a != r {
+                sigs.push(Signature {
+                    arg_types: vec![a.clone()],
+                    ret_type: r,
+                    index: None,
+                });
+            }
+        }
+    }
+    sigs.push(Signature {
+        arg_types: vec![Type::Pointer(false, Box::new(Type::Generic("a")))],
+        ret_type: Type::Int(false, 64),
+        index: None,
+    });
+    sigs.push(Signature {
+        arg_types: vec![Type::Pointer(true, Box::new(Type::Generic("a")))],
+        ret_type: Type::Int(false, 64),
+        index: None,
+    });
+    sigs.push(Signature {
+        arg_types: vec![Type::Int(false, 64)],
+        ret_type: Type::Pointer(false, Box::new(Type::Generic("a"))),
+        index: None,
+    });
+    sigs.push(Signature {
+        arg_types: vec![Type::Int(false, 64)],
+        ret_type: Type::Pointer(false, Box::new(Type::Generic("a"))),
+        index: None,
+    });
+    map.insert("cast", sigs);
+    map.insert("alloca", vec![
+        Signature {
+            arg_types: vec![Type::Int(false, 64)],
+            ret_type: Type::Slice(true, Box::new(Type::Generic("a"))),
+            index: None,
+        },
+        Signature {
+            arg_types: vec![Type::Int(false, 64)],
+            ret_type: Type::Pointer(true, Box::new(Type::Generic("a"))),
+            index: None,
+        },
+    ]);
+    map.insert("ref", vec![
+        Signature {
+            arg_types: vec![Type::Generic("a")],
+            ret_type: Type::Pointer(true, Box::new(Type::Generic("a"))),
+            index: None,
+        },
+    ]);
+    map.insert("deref", vec![
+        Signature {
+            arg_types: vec![Type::Pointer(true, Box::new(Type::Generic("a")))],
+            ret_type: Type::Generic("a"),
+            index: None,
+        },
+        Signature {
+            arg_types: vec![Type::Slice(true, Box::new(Type::Generic("a")))],
+            ret_type: Type::Generic("a"),
+            index: None,
+        },
+    ]);
+    map.insert("slice", vec![
+        Signature {
+            arg_types: vec![Type::Int(false, 64), Type::Pointer(true, Box::new(Type::Generic("a")))],
+            ret_type: Type::Slice(true, Box::new(Type::Generic("a"))),
+            index: None,
+        },
+    ]);
+
+    map
 }
 
 pub fn extract_signatures<'a>(sexprs: &[SExpr<'a>], map: &mut HashMap<&'a str, Vec<Signature<'a>>>) {
