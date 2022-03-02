@@ -24,9 +24,12 @@ fn main() {
             (let pair =
                 (inst Pair
                     (first 69)
-                    (second 420.0))))
+                    (second 420.0)))
 
-    (: (* mut u8) (alloca 2))
+            (+ int-float.int pair.first)
+            (+ int-float.float pair.second))
+
+        (: (* mut u8) (alloca 2))
     "#,
         )
         .unwrap();
