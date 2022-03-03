@@ -390,8 +390,31 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
             }
 
             Ast::Symbol(_, "fn") => {
-                // TODO
-                todo!()
+                if ast.len() >= 2 {
+                    let args = if let Ast::SExpr(_, v) = ast.remove(1) {
+                        let mut args = vec![];
+                        for v in v {
+                            args.push(parse_type(v)?);
+                        }
+                        args
+                    } else {
+                        return Err(LoweringError::InvalidType)
+                    };
+
+                    if ast.len() == 3 {
+                        if let Ast::Symbol(_, ":") = ast[1] {
+                            Ok(Type::Function(args, Box::new(parse_type(ast.remove(2))?)))
+                        } else {
+                            Err(LoweringError::InvalidType)
+                        }
+                    } else if ast.len() == 1 {
+                        Ok(Type::Function(args, Box::new(Type::Tuple(vec![]))))
+                    } else {
+                        Err(LoweringError::InvalidType)
+                    }
+                } else {
+                    Err(LoweringError::InvalidType)
+                }
             }
 
             Ast::Symbol(_, v) => Ok(Type::Struct(

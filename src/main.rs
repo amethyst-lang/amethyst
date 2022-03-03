@@ -7,29 +7,16 @@ fn main() {
     let mut asts = TopParser::new()
         .parse(
     r#"
-        (defstruct IntFloat
-            (int i32)
-            (float f64))
+        (defun succ (x i32) : i32
+            (+ x 1))
 
-        (defstruct Pair
-            (first 'a)
-            (second 'b))
+        (defun apply (f (fn ('a) : 'a)) (x 'a) : 'a
+            (f x))
 
-        (seq
-            (let int-float =
-                (inst IntFloat
-                    (int 69)
-                    (float 420.0)))
+        (apply succ 2)
 
-            (let pair =
-                (inst Pair
-                    (first 69)
-                    (second 420.0)))
-
-            (+ int-float.int pair.first)
-            (+ int-float.float pair.second))
-
-        (: (* mut u8) (alloca 2))
+        (defun add (a i32) (b i32) : i32
+            (+ a b))
     "#,
         )
         .unwrap();
