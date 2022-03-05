@@ -78,7 +78,7 @@ impl Generator {
         }
     }
 
-    fn translate_expr(sexpr: &SExpr, builder: &mut FunctionBuilder, var_map: &mut HashMap<&'_ str, Variable>, var_index: &mut usize) -> Value {
+    fn translate_expr<'a>(sexpr: &SExpr<'a>, builder: &mut FunctionBuilder, var_map: &mut HashMap<&'a str, Variable>, var_index: &mut usize) -> Value {
         #[allow(unused)]
         match sexpr {
             SExpr::Int { meta, value } => {
@@ -168,8 +168,24 @@ impl Generator {
             }
 
             SExpr::StructSet { meta, name, values } => todo!(),
-            SExpr::Declare { meta, mutable, variable, value } => todo!(),
-            SExpr::Assign { meta, variable, value } => todo!(),
+
+            SExpr::Declare { meta, mutable, variable, value } => {
+                let var = Variable::new(*var_index);
+                *var_index += 1;
+                builder.declare_var(var, Self::convert_type_to_type(&meta.type_));
+                let val = Self::translate_expr(&**value, builder, var_map, var_index);
+                var_map.insert(*variable, var);
+                builder.def_var(var, val);
+                builder.use_var(var)
+            }
+
+            SExpr::Assign { meta, variable, value } => {
+                let var = *var_map.get(variable).unwrap();
+                let val = Self::translate_expr(&**value, builder, var_map, var_index);
+                builder.def_var(var, val);
+                builder.use_var(var)
+            }
+
             SExpr::Attribute { meta, top, attrs } => todo!(),
 
             _ => todo!(),
