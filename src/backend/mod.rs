@@ -102,12 +102,21 @@ impl Generator {
             }
 
             SExpr::Str { meta, value } => todo!(),
-            SExpr::Seq { meta, values } => todo!(),
+
+            SExpr::Seq { meta, values } => {
+                for value in values[..values.len() - 1].iter() {
+                    Self::translate_expr(value, builder, var_map, var_index);
+                }
+
+                Self::translate_expr(values.last().unwrap(), builder, var_map, var_index)
+            }
+
             SExpr::Cond { meta, values } => todo!(),
             SExpr::Loop { meta, value } => todo!(),
             SExpr::Break { meta, value } => todo!(),
             SExpr::Nil { meta } => todo!(),
-            SExpr::Type { meta, value } => todo!(),
+
+            SExpr::Type { value, .. } => Self::translate_expr(value, builder, var_map, var_index),
 
             SExpr::FuncCall { meta, func, values } => {
                 let values: Vec<_> = values.iter().map(|v| Self::translate_expr(v, builder, var_map, var_index)).collect();
