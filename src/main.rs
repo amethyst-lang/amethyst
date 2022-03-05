@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use amethyst::backend::Generator;
 use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
 
@@ -7,16 +8,8 @@ fn main() {
     let mut asts = TopParser::new()
         .parse(
     r#"
-        (defun succ (x i32) : i32
-            (+ x 1))
-
-        (defun apply (f (fn ('a) : 'a)) (x 'a) : 'a
-            (f x))
-
-        (apply succ 2)
-
-        (defun add (a i32) (b i32) : i32
-            (+ a b))
+        (defun main (a i32) (b i32) : i32
+            69)
     "#,
         )
         .unwrap();
@@ -30,4 +23,7 @@ fn main() {
     correctness::extract_structs(&sexprs, &mut struct_map);
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
     println!("{:#?}", sexprs);
+    let mut gen = Generator::default();
+    gen.compile(sexprs);
+    std::fs::write("a.out", gen.emit_object()).unwrap();
 }
