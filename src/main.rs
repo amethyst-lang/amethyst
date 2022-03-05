@@ -6,14 +6,10 @@ use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
 
 fn main() {
+    let contents = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
+
     let mut asts = TopParser::new()
-        .parse(
-    r#"
-        (defun main (a i32) (b i32) : i32
-            69)
-    "#,
-        )
-        .unwrap();
+        .parse(&contents).unwrap();
     let mut map = HashMap::new();
     macros::extract_macros(&mut map, &asts);
     macros::replace_macros(&map, &mut asts);
