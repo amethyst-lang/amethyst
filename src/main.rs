@@ -19,7 +19,6 @@ fn main() {
     let mut struct_map = HashMap::new();
     correctness::extract_structs(&sexprs, &mut struct_map);
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
-    println!("{:#?}", sexprs);
     let mut gen = Generator::default();
     gen.compile(sexprs);
     std::fs::write("main.o", gen.emit_object()).unwrap();

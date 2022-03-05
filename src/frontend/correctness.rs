@@ -994,6 +994,7 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Vec<Signature<'a>>> {
     ]);
     create_one_signature(&mut map, "*", true, false);
     create_one_signature(&mut map, "/", true, false);
+    create_one_signature(&mut map, "%", false, false);
     create_one_signature(&mut map, "<", true, true);
     create_one_signature(&mut map, ">", true, true);
     create_one_signature(&mut map, "<=", true, true);
