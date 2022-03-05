@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::process::Command;
 
 use amethyst::backend::Generator;
 use amethyst::frontend::{ast_lowering, correctness, macros};
@@ -25,5 +26,22 @@ fn main() {
     println!("{:#?}", sexprs);
     let mut gen = Generator::default();
     gen.compile(sexprs);
-    std::fs::write("a.out", gen.emit_object()).unwrap();
+    std::fs::write("main.o", gen.emit_object()).unwrap();
+    Command::new("nasm")
+        .arg("-f")
+        .arg("elf64")
+        .arg("-o")
+        .arg("_start.o")
+        .arg("_start.s")
+        .spawn()
+        .unwrap()
+        .wait()
+        .unwrap();
+    Command::new("ld")
+        .arg("_start.o")
+        .arg("main.o")
+        .spawn()
+        .unwrap()
+        .wait()
+        .unwrap();
 }
