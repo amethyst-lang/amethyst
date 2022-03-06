@@ -40,10 +40,14 @@ fn create_loop_constraints<'a>(
             }
         }
 
-        SExpr::Cond { values, .. } => {
+        SExpr::Cond { values, elsy, .. } => {
             for (cond, then) in values {
                 create_loop_constraints(type_, cond, constraints);
                 create_loop_constraints(type_, then, constraints);
+            }
+
+            if let Some(elsy) = elsy {
+                create_loop_constraints(type_, &mut **elsy, constraints);
             }
         }
 
@@ -143,7 +147,7 @@ fn create_constraints<'a>(
             ));
         }
 
-        SExpr::Cond { meta, values } => {
+        SExpr::Cond { meta, values, elsy } => {
             for (cond, then) in values {
                 scopes.push(HashMap::new());
                 create_constraints(cond, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
@@ -154,6 +158,15 @@ fn create_constraints<'a>(
                 constraints.push(TypeConstraint::Equals(
                     meta.type_.clone(),
                     then.meta().type_.clone(),
+                ));
+            }
+
+            if let Some(elsy) = elsy {
+                create_constraints(elsy, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+
+                constraints.push(TypeConstraint::Equals(
+                    meta.type_.clone(),
+                    elsy.meta().type_.clone(),
                 ));
             }
         }
@@ -756,10 +769,14 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
             }
         }
 
-        SExpr::Cond { values, .. } => {
+        SExpr::Cond { values, elsy, .. } => {
             for (cond, then) in values {
                 apply_substitutions(cond, substitutions);
                 apply_substitutions(then, substitutions);
+            }
+
+            if let Some(elsy) = elsy {
+                apply_substitutions(&mut **elsy, substitutions);
             }
         }
 

@@ -204,6 +204,7 @@ pub enum SExpr<'a> {
     Cond {
         meta: Metadata<'a>,
         values: Vec<(SExpr<'a>, SExpr<'a>)>,
+        elsy: Option<Box<SExpr<'a>>>,
     },
 
     Loop {
@@ -566,25 +567,42 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
-                    Ast::Symbol(_, "cond") => SExpr::Cond {
-                        meta: Metadata {
-                            range,
-                            type_: Type::Unknown,
-                        },
+                    Ast::Symbol(_, "cond") => {
+                        let elsy = if matches!(sexpr.last(), Some(Ast::SExpr(_, v)) if v.len() == 2 && matches!(v[0], Ast::Key(_, "else"))) {
+                            if let Ast::SExpr(_, mut v) = sexpr.remove(sexpr.len() - 1) {
+                                Some(Box::new(lower_helper(v.remove(1), false)?))
+                            } else {
+                                unreachable!()
+                            }
+                        } else {
+                            None
+                        };
 
-                        values: sexpr
-                            .into_iter()
-                            .skip(1)
-                            .map(|v| match v {
-                                Ast::SExpr(_, mut v) if v.len() == 2 => Ok((
-                                    lower_helper(v.swap_remove(0), false)?,
-                                    lower_helper(v.remove(0), false)?,
-                                )),
+                        SExpr::Cond {
+                            meta: Metadata {
+                                range,
+                                type_: if elsy.is_none() {
+                                    Type::Tuple(vec![])
+                                } else {
+                                    Type::Unknown
+                                }
+                            },
 
-                                _ => Err(LoweringError::InvalidCondBranch),
-                            })
-                            .collect::<Result<_, LoweringError>>()?,
-                    },
+                            values: sexpr
+                                .into_iter()
+                                .skip(1)
+                                .map(|v| match v {
+                                    Ast::SExpr(_, mut v) if v.len() == 2 => Ok((
+                                        lower_helper(v.swap_remove(0), false)?,
+                                        lower_helper(v.remove(0), false)?,
+                                    )),
+
+                                    _ => Err(LoweringError::InvalidCondBranch),
+                                })
+                                .collect::<Result<_, LoweringError>>()?,
+                            elsy,
+                        }
+                    }
 
                     Ast::Symbol(_, "loop") => {
                         if sexpr.len() == 2 {

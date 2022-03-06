@@ -56,7 +56,6 @@ impl Generator {
                 let entry_block = builder.create_block();
                 builder.append_block_params_for_function_params(entry_block);
                 builder.switch_to_block(entry_block);
-                builder.seal_block(entry_block);
                 let mut var_map = HashMap::new();
                 let mut var_index = 0;
                 for (i, (name, typ)) in args.iter().enumerate() {
@@ -69,6 +68,7 @@ impl Generator {
 
                 let ret_value = Self::translate_expr(&**expr, &mut builder, &mut var_map, &mut var_index);
                 builder.ins().return_(&[ret_value]);
+                builder.seal_block(builder.current_block().unwrap());
                 builder.finalize();
 
                 let id = self.module.declare_function(name, Linkage::Export, &self.ctx.func.signature).unwrap();
@@ -103,7 +103,7 @@ impl Generator {
 
             SExpr::Str { meta, value } => todo!(),
 
-            SExpr::Seq { meta, values } => {
+            SExpr::Seq { values, .. } => {
                 for value in values[..values.len() - 1].iter() {
                     Self::translate_expr(value, builder, var_map, var_index);
                 }
@@ -111,10 +111,45 @@ impl Generator {
                 Self::translate_expr(values.last().unwrap(), builder, var_map, var_index)
             }
 
-            SExpr::Cond { meta, values } => todo!(),
+            SExpr::Cond { meta, values, elsy } => {
+                let mut conds = vec![builder.current_block().unwrap()];
+                let mut thens = vec![];
+                for _ in values {
+                    conds.push(builder.create_block());
+                    thens.push(builder.create_block());
+                }
+
+                let last = builder.create_block();
+
+                builder.append_block_param(last, Self::convert_type_to_type(&meta.type_));
+
+                for (i, (cond, body)) in values.iter().enumerate() {
+                    let cond = Self::translate_expr(cond, builder, var_map, var_index);
+                    builder.ins().brz(cond, conds[i + 1], &[]);
+                    builder.ins().jump(thens[i], &[]);
+                    builder.seal_block(conds[i]);
+                    builder.switch_to_block(thens[i]);
+                    let then = Self::translate_expr(body, builder, var_map, var_index);
+                    builder.ins().jump(last, &[then]);
+                    builder.seal_block(thens[i]);
+                    builder.switch_to_block(conds[i + 1]);
+                }
+
+                let elsy = if let Some(elsy) = elsy {
+                    Self::translate_expr(&**elsy, builder, var_map, var_index)
+                } else {
+                    builder.ins().bconst(Self::convert_type_to_type(&SExprType::Tuple(vec![])), false)
+                };
+                builder.ins().jump(last, &[elsy]);
+                builder.seal_block(*conds.last().unwrap());
+
+                builder.switch_to_block(last);
+                builder.block_params(last)[0]
+            }
+
             SExpr::Loop { meta, value } => todo!(),
             SExpr::Break { meta, value } => todo!(),
-            SExpr::Nil { meta } => todo!(),
+            SExpr::Nil { meta } => builder.ins().bconst(Self::convert_type_to_type(&meta.type_), false),
 
             SExpr::Type { value, .. } => Self::translate_expr(value, builder, var_map, var_index),
 
@@ -202,7 +237,7 @@ impl Generator {
             SExprType::F32 => types::F32,
             SExprType::F64 => types::F64,
 
-            SExprType::Tuple(v) if v.is_empty() => todo!(),
+            SExprType::Tuple(v) if v.is_empty() => types::B1,
 
             SExprType::Pointer(_, _) => todo!(),
             SExprType::Slice(_, _) => todo!(),
