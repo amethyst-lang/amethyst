@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use cranelift::prelude::{*, isa::CallConv, codegen::Context};
-use cranelift_module::{DataContext, Module, Linkage, FuncId};
+use cranelift_module::{DataContext, Module, Linkage};
 use cranelift_object::{ObjectModule, ObjectBuilder};
 use target_lexicon::triple;
 
-use crate::frontend::ast_lowering::{SExpr, Type as SExprType};
+use crate::frontend::ast_lowering::{SExpr, Type as SExprType, LValue};
 
 pub struct Generator {
     builder_context: FunctionBuilderContext,
@@ -273,11 +273,19 @@ impl Generator {
                 builder.use_var(var)
             }
 
-            SExpr::Assign { meta, variable, value } => {
-                let var = *var_map.get(variable).unwrap();
-                let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx);
-                builder.def_var(var, val);
-                builder.use_var(var)
+            SExpr::Assign { meta, lvalue, value } => {
+                match lvalue {
+                    LValue::Symbol(variable) => {
+                        let var = *var_map.get(variable).unwrap();
+                        let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                        builder.def_var(var, val);
+                        builder.use_var(var)
+                    }
+
+                    LValue::Attribute(_, _) => todo!(),
+                    LValue::Deref(_) => todo!(),
+                    LValue::Get(_, _) => todo!(),
+                }
             }
 
             SExpr::Attribute { meta, top, attrs } => {

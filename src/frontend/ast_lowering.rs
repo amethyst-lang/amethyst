@@ -154,6 +154,14 @@ impl<'a> Type<'a> {
 }
 
 #[derive(Debug, Clone)]
+pub enum LValue<'a> {
+    Symbol(&'a str),
+    Attribute(Box<LValue<'a>>, Vec<&'a str>),
+    Deref(Box<LValue<'a>>),
+    Get(Box<LValue<'a>>, Box<SExpr<'a>>),
+}
+
+#[derive(Debug, Clone)]
 pub enum SExpr<'a> {
     Int {
         meta: Metadata<'a>,
@@ -261,7 +269,7 @@ pub enum SExpr<'a> {
 
     Assign {
         meta: Metadata<'a>,
-        variable: &'a str,
+        lvalue: LValue<'a>,
         value: Box<SExpr<'a>>,
     },
 
@@ -342,6 +350,7 @@ pub enum LoweringError {
     InvalidLet,
     InvalidDefStruct,
     InvalidInst,
+    InvalidLvalue,
 }
 
 fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
@@ -815,15 +824,19 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
 
                     Ast::Symbol(_, "set") => {
                         if sexpr.len() == 4 {
-                            match (&sexpr[1], &sexpr[2]) {
-                                (&Ast::Symbol(_, variable), &Ast::Symbol(_, "=")) => SExpr::Assign {
-                                    meta: Metadata {
-                                        range,
-                                        type_: Type::Unknown,
-                                    },
-                                    variable,
-                                    value: Box::new(lower_helper(sexpr.swap_remove(3), false)?),
-                                },
+                            match &sexpr[2] {
+                                Ast::Symbol(_, "=") => {
+                                    let value = lower_helper(sexpr.swap_remove(3), false)?;
+                                    let lvalue = lvalue_creator(sexpr.swap_remove(1))?;
+                                    SExpr::Assign {
+                                        meta: Metadata {
+                                            range,
+                                            type_: Type::Unknown,
+                                        },
+                                        lvalue,
+                                        value: Box::new(value),
+                                    }
+                                }
 
                                 _ => return Err(LoweringError::InvalidSet),
                             }
@@ -906,6 +919,42 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
     };
 
     Ok(sexpr)
+}
+
+fn lvalue_creator<'a>(ast: Ast<'a>) -> Result<LValue<'a>, LoweringError> {
+    match ast {
+        Ast::Symbol(_, sym) => {
+            Ok(LValue::Symbol(sym))
+        }
+
+        Ast::SExpr(_, mut v) => {
+            let first = v.remove(0);
+            match first {
+                Ast::Symbol(_, "get") if v.len() == 2 => {
+                    let index = lower_helper(v.remove(1), false)?;
+                    let slice = lvalue_creator(v.remove(0))?;
+                    Ok(LValue::Get(Box::new(slice), Box::new(index)))
+                }
+
+                Ast::Symbol(_, "deref") if v.len() == 1 => {
+                    Ok(LValue::Deref(Box::new(lvalue_creator(v.remove(0))?)))
+                }
+
+                _ => return Err(LoweringError::InvalidLvalue),
+            }
+        }
+
+        Ast::Attribute(_, mut v) => {
+            let top = lvalue_creator(v.remove(0))?;
+            let attrs = v.into_iter().map(|v| match v {
+                Ast::Symbol(_, v) => Ok(v),
+                _ => Err(LoweringError::InvalidLvalue),
+            }).collect::<Result<Vec<_>, _>>()?;
+            Ok(LValue::Attribute(Box::new(top), attrs))
+        }
+
+        _ => Err(LoweringError::InvalidLvalue)
+    }
 }
 
 pub fn lower(asts: Vec<Ast<'_>>) -> Result<Vec<SExpr<'_>>, LoweringError> {

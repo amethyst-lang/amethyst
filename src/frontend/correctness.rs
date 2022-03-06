@@ -1,6 +1,6 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use super::ast_lowering::{SExpr, Type};
+use super::ast_lowering::{SExpr, Type, LValue};
 
 #[derive(Debug)]
 pub enum CorrectnessError {
@@ -296,21 +296,71 @@ fn create_constraints<'a>(
 
         SExpr::Assign {
             meta,
-            variable,
+            lvalue,
             value,
         } => {
             create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
-            for scope in scopes.iter().rev() {
-                if let Some(t) = scope.get(variable) {
-                    constraints.push(TypeConstraint::Equals(value.meta().type_.clone(), t.clone()));
-                    constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
-                }
+            if let Some(t) = create_lvalue_constraints(lvalue, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes) {
+                constraints.push(TypeConstraint::Equals(value.meta().type_.clone(), t));
+                constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
             }
         }
 
         SExpr::Attribute { meta, top, attrs } => {
             create_constraints(&mut **top, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
             constraints.push(TypeConstraint::Attribute(meta.type_.clone(), top.meta().type_.clone(), attrs.clone()));
+        }
+    }
+}
+
+fn create_lvalue_constraints<'a>(
+    lvalue: &mut LValue<'a>,
+    type_var_counter: &mut u64,
+    constraints: &mut Vec<TypeConstraint<'a>>,
+    func_map: &HashMap<&'a str, Vec<Signature<'a>>>,
+    struct_map: &HashMap<&'a str, Struct<'a>>,
+    monomorphisms: &mut Vec<(Type<'a>, usize)>,
+    scopes: &mut Vec<HashMap<&'a str, Type<'a>>>,
+) -> Option<Type<'a>> {
+    match lvalue {
+        LValue::Symbol(sym) => {
+            for scope in scopes.iter().rev() {
+                if let Some(t) = scope.get(sym) {
+                    return Some(t.clone());
+                }
+            }
+
+            None
+        }
+
+        LValue::Attribute(_, _) => todo!(),
+
+        LValue::Deref(v) => {
+            match create_lvalue_constraints(&mut **v, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes) {
+                Some(Type::Pointer(_, t)) => Some(*t),
+                Some(Type::TypeVariable(i)) => {
+                    let t = Type::Pointer(true, Box::new(Type::TypeVariable(*type_var_counter)));
+                    *type_var_counter += 1;
+                    constraints.push(TypeConstraint::Equals(Type::TypeVariable(i), t.clone()));
+                    Some(t)
+                }
+                _ => None,
+            }
+        }
+
+        LValue::Get(v, i) => {
+            create_constraints(&mut **i, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+            constraints.push(TypeConstraint::Equals(i.meta().type_.clone(), Type::Int(false, 64)));
+            match create_lvalue_constraints(&mut **v, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes) {
+                Some(Type::Slice(_, t)) => Some(*t),
+                Some(Type::TypeVariable(i)) => {
+                    let t = Type::Slice(true, Box::new(Type::TypeVariable(*type_var_counter)));
+                    *type_var_counter += 1;
+                    constraints.push(TypeConstraint::Equals(Type::TypeVariable(i), t.clone()));
+                    Some(t)
+                }
+                _ => None,
+            }
         }
     }
 }
@@ -753,6 +803,18 @@ fn flatten_substitution<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
     }
 }
 
+fn apply_subs_lvalue<'a>(lvalue: &mut LValue<'a>, substitutions: &[Type<'a>]) {
+    match lvalue {
+        LValue::Symbol(_) => (),
+        LValue::Attribute(v, _) => apply_subs_lvalue(&mut **v, substitutions),
+        LValue::Deref(v) => apply_subs_lvalue(&mut **v, substitutions),
+        LValue::Get(v, i) => {
+            apply_subs_lvalue(&mut **v, substitutions);
+            apply_substitutions(&mut **i, substitutions);
+        }
+    }
+}
+
 fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
     flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
 
@@ -782,8 +844,13 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
         SExpr::Loop { value, .. }
             | SExpr::Type { value, .. }
             | SExpr::Declare { value, .. }
-            | SExpr::Assign { value, .. }
             | SExpr::Break { value: Some(value), .. } => apply_substitutions(value, substitutions),
+
+        SExpr::Assign { lvalue, value, .. } => {
+            apply_subs_lvalue(lvalue, substitutions);
+            apply_substitutions(value, substitutions);
+        }
+
 
         SExpr::FuncDef { expr, .. } => apply_substitutions(expr, substitutions),
 
@@ -1102,8 +1169,10 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Vec<Signature<'a>>> {
             ret_type: Type::Generic("a"),
             index: None,
         },
+    ]);
+    map.insert("get", vec![
         Signature {
-            arg_types: vec![Type::Slice(true, Box::new(Type::Generic("a")))],
+            arg_types: vec![Type::Slice(true, Box::new(Type::Generic("a"))), Type::Int(false, 64)],
             ret_type: Type::Generic("a"),
             index: None,
         },
