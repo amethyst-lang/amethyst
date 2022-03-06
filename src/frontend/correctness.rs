@@ -594,8 +594,7 @@ fn unify_attrs<'a>(attrs: &[(Type<'a>, Type<'a>, Vec<&'a str>)], substitutions: 
             (Type::TypeVariable(i), t) => {
                 match &substitutions[*i as usize] {
                     Type::TypeVariable(j) if *i == *j => substitutions[*i as usize] = t,
-                    v if *v == t => (),
-                    _ => return Err(CorrectnessError::UnificationError),
+                    _ => unify(substitutions, result, &t)?,
                 }
             }
 
@@ -1085,7 +1084,7 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Vec<Signature<'a>>> {
             index: None,
         },
         Signature {
-            arg_types: vec![Type::Int(false, 64)],
+            arg_types: vec![],
             ret_type: Type::Pointer(true, Box::new(Type::Generic("a"))),
             index: None,
         },
