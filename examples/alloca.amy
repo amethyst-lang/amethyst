@@ -1,0 +1,4 @@
+(defun main (_a i32) (_b i32) : i32
+    (seq
+        (: (@ mut u8) (alloca 1024))
+        0))

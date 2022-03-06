@@ -257,6 +257,31 @@ impl Generator {
                         }
                     }
 
+                    SExpr::Symbol { value: "alloca", .. } => {
+                        match &meta.type_ {
+                            SExprType::Pointer(_, v) => {
+                                let slot = builder.create_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, Self::size_of(&**v)));
+                                builder.ins().stack_addr(Self::convert_type_to_type(&meta.type_), slot, 0)
+                            }
+
+                            SExprType::Slice(_, v) => {
+                                const SIZE: u32 = 1024;
+                                let len = values.remove(0);
+                                let size = builder.ins().imul_imm(len, Self::size_of(&**v) as i64);
+                                let flags = builder.ins().icmp_imm(IntCC::UnsignedLessThanOrEqual, size, SIZE as i64);
+                                builder.ins().trapz(flags, TrapCode::StackOverflow);
+                                let slot = builder.create_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, SIZE));
+                                let reference = builder.ins().stack_addr(Self::convert_type_to_type(&meta.type_), slot, 0);
+                                let slot = builder.create_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16));
+                                builder.ins().stack_store(len, slot, 0);
+                                builder.ins().stack_store(reference, slot, 8);
+                                builder.ins().stack_addr(Self::convert_type_to_type(&meta.type_), slot, 0)
+                            }
+
+                            _ => unreachable!(),
+                        }
+                    }
+
                     _ => todo!(),
                 }
             }
@@ -340,6 +365,29 @@ impl Generator {
 
             SExprType::Pointer(_, _) => types::I64,
             SExprType::Slice(_, _) => types::I64,
+
+            SExprType::Struct(_, _) => todo!(),
+
+            SExprType::Function(_, _) => todo!(),
+
+            _ => unreachable!(),
+        }
+    }
+
+    fn size_of(t: &SExprType) -> u32 {
+        match t {
+            SExprType::Int(_, width) if *width == 1 => 1,
+            SExprType::Int(_, width) if *width == 8 => 1,
+            SExprType::Int(_, width) if *width == 16 => 2,
+            SExprType::Int(_, width) if *width == 32 => 4,
+            SExprType::Int(_, width) if *width == 64 => 8,
+            SExprType::F32 => 4,
+            SExprType::F64 => 8,
+
+            SExprType::Tuple(v) if v.is_empty() => 0,
+
+            SExprType::Pointer(_, _) => 8,
+            SExprType::Slice(_, _) => 8,
 
             SExprType::Struct(_, _) => todo!(),
 
