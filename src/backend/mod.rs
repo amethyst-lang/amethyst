@@ -66,9 +66,9 @@ impl Generator {
                     builder.def_var(var, builder.block_params(entry_block)[i]);
                 }
 
-                let ret_value = Self::translate_expr(&**expr, &mut builder, &mut var_map, &mut var_index);
+                let ret_value = Self::translate_expr(&**expr, &mut builder, &mut var_map, &mut var_index, None);
                 builder.ins().return_(&[ret_value]);
-                builder.seal_block(builder.current_block().unwrap());
+                builder.seal_all_blocks();
                 builder.finalize();
 
                 let id = self.module.declare_function(name, Linkage::Export, &self.ctx.func.signature).unwrap();
@@ -78,7 +78,7 @@ impl Generator {
         }
     }
 
-    fn translate_expr<'a>(sexpr: &SExpr<'a>, builder: &mut FunctionBuilder, var_map: &mut HashMap<&'a str, Variable>, var_index: &mut usize) -> Value {
+    fn translate_expr<'a>(sexpr: &SExpr<'a>, builder: &mut FunctionBuilder, var_map: &mut HashMap<&'a str, Variable>, var_index: &mut usize, break_block: Option<Block>) -> Value {
         #[allow(unused)]
         match sexpr {
             SExpr::Int { meta, value } => {
@@ -105,10 +105,10 @@ impl Generator {
 
             SExpr::Seq { values, .. } => {
                 for value in values[..values.len() - 1].iter() {
-                    Self::translate_expr(value, builder, var_map, var_index);
+                    Self::translate_expr(value, builder, var_map, var_index, break_block);
                 }
 
-                Self::translate_expr(values.last().unwrap(), builder, var_map, var_index)
+                Self::translate_expr(values.last().unwrap(), builder, var_map, var_index, break_block)
             }
 
             SExpr::Cond { meta, values, elsy } => {
@@ -124,37 +124,57 @@ impl Generator {
                 builder.append_block_param(last, Self::convert_type_to_type(&meta.type_));
 
                 for (i, (cond, body)) in values.iter().enumerate() {
-                    let cond = Self::translate_expr(cond, builder, var_map, var_index);
+                    let cond = Self::translate_expr(cond, builder, var_map, var_index, break_block);
                     builder.ins().brz(cond, conds[i + 1], &[]);
                     builder.ins().jump(thens[i], &[]);
-                    builder.seal_block(conds[i]);
                     builder.switch_to_block(thens[i]);
-                    let then = Self::translate_expr(body, builder, var_map, var_index);
+                    let then = Self::translate_expr(body, builder, var_map, var_index, break_block);
                     builder.ins().jump(last, &[then]);
-                    builder.seal_block(thens[i]);
                     builder.switch_to_block(conds[i + 1]);
                 }
 
                 let elsy = if let Some(elsy) = elsy {
-                    Self::translate_expr(&**elsy, builder, var_map, var_index)
+                    Self::translate_expr(&**elsy, builder, var_map, var_index, break_block)
                 } else {
                     builder.ins().bconst(Self::convert_type_to_type(&SExprType::Tuple(vec![])), false)
                 };
                 builder.ins().jump(last, &[elsy]);
-                builder.seal_block(*conds.last().unwrap());
 
                 builder.switch_to_block(last);
                 builder.block_params(last)[0]
             }
 
-            SExpr::Loop { meta, value } => todo!(),
-            SExpr::Break { meta, value } => todo!(),
+            SExpr::Loop { meta, value } => {
+                let loop_block = builder.create_block();
+                let break_block = builder.create_block();
+                builder.append_block_param(break_block, Self::convert_type_to_type(&meta.type_));
+                builder.ins().jump(loop_block, &[]);
+                builder.switch_to_block(loop_block);
+                Self::translate_expr(&**value, builder, var_map, var_index, Some(break_block));
+                builder.ins().jump(loop_block, &[]);
+                builder.switch_to_block(break_block);
+                builder.block_params(break_block)[0]
+            }
+
+            SExpr::Break { meta, value } => {
+                let value = if let Some(value) = value {
+                    Self::translate_expr(&**value, builder, var_map, var_index, break_block)
+                } else {
+                    builder.ins().bconst(Self::convert_type_to_type(&meta.type_), false)
+                };
+
+                builder.ins().jump(break_block.unwrap(), &[value]);
+                let new = builder.create_block();
+                builder.switch_to_block(new);
+                builder.ins().bconst(Self::convert_type_to_type(&meta.type_), false)
+            }
+
             SExpr::Nil { meta } => builder.ins().bconst(Self::convert_type_to_type(&meta.type_), false),
 
-            SExpr::Type { value, .. } => Self::translate_expr(value, builder, var_map, var_index),
+            SExpr::Type { value, .. } => Self::translate_expr(value, builder, var_map, var_index, break_block),
 
             SExpr::FuncCall { meta, func, values } => {
-                let values: Vec<_> = values.iter().map(|v| Self::translate_expr(v, builder, var_map, var_index)).collect();
+                let values: Vec<_> = values.iter().map(|v| Self::translate_expr(v, builder, var_map, var_index, break_block)).collect();
                 match **func {
                     SExpr::Symbol { value: "+", .. } => {
                         if meta.type_ == SExprType::F32 || meta.type_ == SExprType::F64 {
@@ -208,7 +228,7 @@ impl Generator {
                 let var = Variable::new(*var_index);
                 *var_index += 1;
                 builder.declare_var(var, Self::convert_type_to_type(&meta.type_));
-                let val = Self::translate_expr(&**value, builder, var_map, var_index);
+                let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block);
                 var_map.insert(*variable, var);
                 builder.def_var(var, val);
                 builder.use_var(var)
@@ -216,7 +236,7 @@ impl Generator {
 
             SExpr::Assign { meta, variable, value } => {
                 let var = *var_map.get(variable).unwrap();
-                let val = Self::translate_expr(&**value, builder, var_map, var_index);
+                let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block);
                 builder.def_var(var, val);
                 builder.use_var(var)
             }
