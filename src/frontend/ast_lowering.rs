@@ -584,6 +584,24 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
+                    Ast::Symbol(_, "seqn") => SExpr::Seq {
+                        meta: Metadata {
+                            range: range.clone(),
+                            type_: Type::Unknown,
+                        },
+                        values: sexpr
+                            .into_iter()
+                            .skip(1)
+                            .map(|v| lower_helper(v, false))
+                            .chain([Ok(SExpr::Nil {
+                                meta: Metadata {
+                                    range,
+                                    type_: Type::Tuple(vec![]),
+                                }
+                            })])
+                            .collect::<Result<Vec<SExpr>, LoweringError>>()?,
+                    },
+
                     Ast::Symbol(_, "cond") => {
                         let elsy = if matches!(sexpr.last(), Some(Ast::SExpr(_, v)) if v.len() == 2 && matches!(v[0], Ast::Key(_, "else"))) {
                             if let Ast::SExpr(_, mut v) = sexpr.remove(sexpr.len() - 1) {

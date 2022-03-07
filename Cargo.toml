@@ -13,6 +13,7 @@ cranelift-module = "0.81.1"
 cranelift-object = "0.81.1"
 regex = "1"
 target-lexicon = "0.12.3"
+petgraph = "0.6.0"
 
 [build-dependencies]
 lalrpop = "0.19.6"

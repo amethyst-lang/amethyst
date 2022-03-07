@@ -42,15 +42,17 @@ impl Generator {
     fn translate(&mut self, sexprs: &[SExpr<'_>]) {
         for sexpr in sexprs {
             if let SExpr::FuncDef { name, ret_type, args, expr, .. } = sexpr {
+                if args.iter().any(|(_, v)| v.has_generic()) || ret_type.has_generic() {
+                    continue;
+                }
+
                 for (_, typ) in args {
                     let typ = Self::convert_type_to_type(typ);
                     self.ctx.func.signature.params.push(AbiParam::new(typ));
                 }
 
-                if *ret_type != SExprType::Tuple(vec![]) {
-                    let typ = Self::convert_type_to_type(ret_type);
-                    self.ctx.func.signature.returns.push(AbiParam::new(typ));
-                }
+                let typ = Self::convert_type_to_type(ret_type);
+                self.ctx.func.signature.returns.push(AbiParam::new(typ));
 
                 let mut func = self.ctx.func.clone();
                 let mut builder = FunctionBuilder::new(&mut func, &mut self.builder_context);
@@ -71,6 +73,7 @@ impl Generator {
                 let ret_value = Self::translate_expr(&**expr, &mut builder, &mut var_map, &mut var_index, None, &mut self.module, &mut self.ctx, &mut self.data_ctx);
                 builder.ins().return_(&[ret_value]);
                 builder.seal_all_blocks();
+                println!("{}", builder.func);
                 builder.finalize();
                 self.ctx.func = func;
 
@@ -253,7 +256,7 @@ impl Generator {
                             (SExprType::Int(_, width1), SExprType::Int(_, width2)) => todo!(),
                             (SExprType::Pointer(_, _), SExprType::Int(_, _)) => values.remove(0),
                             (SExprType::Int(_, _), SExprType::Pointer(_, _)) => values.remove(0),
-                            _ => todo!("{:?} vs {:?}", meta.type_, args[0].meta().type_),
+                            _ => todo!("casting into {:?} from {:?}", meta.type_, args[0].meta().type_),
                         }
                     }
 
@@ -282,6 +285,15 @@ impl Generator {
                         }
                     }
 
+                    SExpr::Symbol { value: "get", .. } => {
+                        let i = values.remove(1);
+                        let v = values.remove(0);
+                        let v = builder.ins().load(Self::convert_type_to_type(&SExprType::Pointer(true, Box::new(SExprType::F32))), MemFlags::new(), v, 8);
+                        let i = builder.ins().imul_imm(i, Self::size_of(&meta.type_) as i64);
+                        let ptr = builder.ins().iadd(v, i);
+                        builder.ins().load(Self::convert_type_to_type(&meta.type_), MemFlags::new(), ptr, 0)
+                    }
+
                     SExpr::Symbol { value: "&", .. } => builder.ins().band(values.remove(0), values.remove(0)),
                     SExpr::Symbol { value: "|", .. } => builder.ins().bor(values.remove(0), values.remove(0)),
                     SExpr::Symbol { value: "^", .. } => builder.ins().bxor(values.remove(0), values.remove(0)),
@@ -298,7 +310,7 @@ impl Generator {
                         }
                     }
 
-                    _ => todo!(),
+                    _ => todo!("{:?} can't be used as a function yet", func),
                 }
             }
 

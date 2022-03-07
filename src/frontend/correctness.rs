@@ -1,4 +1,6 @@
-use std::{collections::{HashMap, hash_map::Entry}, ops::Range};
+use std::{collections::{HashMap, hash_map::Entry, HashSet}, ops::Range};
+
+use petgraph::{Graph, Undirected, graph::NodeIndex};
 
 use super::ast_lowering::{SExpr, Type, LValue};
 
@@ -682,6 +684,60 @@ fn unify_attrs<'a>(attrs: &[(Type<'a>, Type<'a>, Vec<&'a str>)], substitutions: 
     Ok(())
 }
 
+fn get_shared_type_variables_helper(t: &Type, set: &mut HashSet<u64>) {
+    match t {
+        Type::Tuple(v) => {
+            for v in v {
+                get_shared_type_variables_helper(v, set);
+            }
+        }
+
+        Type::Pointer(_, v) => get_shared_type_variables_helper(&**v, set),
+        Type::Slice(_, v) => get_shared_type_variables_helper(&**v, set),
+
+        Type::Struct(_, g) => {
+            for g in g {
+                get_shared_type_variables_helper(g, set);
+            }
+        }
+
+        Type::Function(a, r) => {
+            for a in a {
+                get_shared_type_variables_helper(a, set);
+            }
+
+            get_shared_type_variables_helper(&**r, set);
+        }
+
+        Type::TypeVariable(v) => {
+            set.insert(*v);
+        }
+        _ => (),
+    }
+}
+
+fn get_shared_type_variables(t1: &Type, t2: &Type) -> Vec<u64> {
+    let mut a = HashSet::new();
+    let mut b = HashSet::new();
+    get_shared_type_variables_helper(t1, &mut a);
+    get_shared_type_variables_helper(t2, &mut b);
+    a.intersection(&b).cloned().collect()
+}
+
+fn unify_get_connected_nodes<'a>(unification_graph: &Graph<(Type<'a>, Vec<Type<'a>>), u64, Undirected, u32>, index: NodeIndex) -> Vec<NodeIndex> {
+    let mut result = HashSet::new();
+    let mut stack = vec![index];
+
+    while let Some(i) = stack.pop() {
+        if !result.insert(i) {
+            let neighbours = unification_graph.neighbors(i);
+            stack.extend(neighbours);
+        }
+    }
+
+    result.into_iter().collect()
+}
+
 fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, struct_map: &HashMap<&'a str, Struct<'a>>) -> Result<Vec<Type<'a>>, CorrectnessError<'a>> {
     let mut substitutions = vec![Type::Unknown; type_var_counter as usize];
     let mut float_or_int = vec![FloatOrInt::Neither; type_var_counter as usize];
@@ -743,46 +799,84 @@ fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, 
         }
     }
 
-    if !unification_options.is_empty() {
-        let mut selected = vec![0; unification_options.len()];
-        let mut successes = vec![];
+    let mut unification_graph: Graph<_, _, Undirected, u32> = Graph::default();
 
-        'b: loop {
-            let mut sub = substitutions.clone();
-            let mut success = true;
+    for v in unification_options {
+        unification_graph.add_node(v);
+    }
 
-            for (i, (t, options)) in unification_options.iter().enumerate() {
-                if unify(&mut sub, t, &options[selected[i]]).is_err() {
-                    success = false;
-                    break;
+    for i in unification_graph.node_indices() {
+        for j in unification_graph.node_indices() {
+            if i != j {
+                let (t1, v1) = unification_graph.node_weight(i).unwrap().clone();
+                let (t2, v2) = unification_graph.node_weight(j).unwrap().clone();
+                let v = get_shared_type_variables(&t1, &t2);
+                for v in v {
+                    unification_graph.add_edge(i, j, v);
                 }
-            }
-
-            if success && unify_attrs(&attrs, &mut sub, struct_map).is_ok() && check_float_or_int(&mut sub, &float_or_int).is_ok() {
-                successes.push(sub);
-            }
-
-            let last_index = selected.len() - 1;
-            for (i, selection) in selected.iter_mut().enumerate() {
-                *selection += 1;
-
-                if unification_options[i].1.len() > *selection {
-                    break;
-                } else {
-                    *selection = 0;
-                    if i == last_index {
-                        break 'b;
+                for v in v1 {
+                    let v = get_shared_type_variables(&t1, &v);
+                    for v in v {
+                        unification_graph.add_edge(i, j, v);
+                    }
+                }
+                for v in v2 {
+                    let v = get_shared_type_variables(&t1, &v);
+                    for v in v {
+                        unification_graph.add_edge(i, j, v);
                     }
                 }
             }
         }
+    }
 
-        if successes.len() == 1 {
-            substitutions = successes.remove(0);
-            unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
-        } else {
-            return Err(CorrectnessError::TooManyPossibilities);
+    if !unification_graph.raw_nodes().is_empty() {
+        for i in unification_graph.node_indices() {
+            let connected = unify_get_connected_nodes(&unification_graph, i);
+            let mut selected = vec![0; connected.len()];
+            let mut successes = vec![];
+
+            'b: loop {
+                let mut sub = substitutions.clone();
+                let mut success = true;
+
+                for (i, index) in connected.iter().enumerate() {
+                    let (t, options) = unification_graph.node_weight(*index).unwrap();
+                    if unify(&mut sub, t, &options[selected[i]]).is_err() {
+                        success = false;
+                        break;
+                    }
+                }
+
+                if success && unify_attrs(&attrs, &mut sub, struct_map).is_ok() {
+                    successes.push(sub);
+                }
+
+                let last_index = selected.len() - 1;
+                for (i, selection) in selected.iter_mut().enumerate() {
+                    *selection += 1;
+
+                    if unification_graph.node_weight(connected[i]).unwrap().1.len() > *selection {
+                        break;
+                    } else {
+                        *selection = 0;
+                        if i == last_index {
+                            break 'b;
+                        }
+                    }
+                }
+            }
+
+            if successes.len() == 1 {
+                substitutions = successes.remove(0);
+            } else {
+                return Err(CorrectnessError::TooManyPossibilities);
+            }
         }
+
+        unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
+        check_float_or_int(&mut substitutions, &float_or_int)?;
+        unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
     } else {
         unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
         check_float_or_int(&mut substitutions, &float_or_int)?;
@@ -912,7 +1006,7 @@ pub fn check<'a>(original: &'a str, sexprs: &mut Vec<SExpr<'a>>, func_map: &Hash
         }
 
         for (i, var_range) in var_ranges.into_iter().enumerate() {
-            println!("{}: {:#?}", i, &original[var_range]);
+            println!("{} ({:?}):\n{}\n", i, var_range, &original[var_range.clone()]);
         }
         let unified = unify_types(type_var_counter, constraints, struct_map)?;
         for sexpr in sexprs.iter_mut().skip(skip) {
