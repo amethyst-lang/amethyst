@@ -43,14 +43,14 @@ Float: Ast<'input> =
     <s:@L> <v:FloatRaw> <e:@R> => Ast::Float(s..e, v);
 
 Char: Ast<'input> = {
-    <s:@L> <v:r"'[^\\']'"> <e:@R> => Ast::Int(s..e, v.chars().skip(1).next().unwrap() as u64),
-    <s:@L> <v:"'\\n'"> <e:@R> => Ast::Int(s..e, b'\n' as u64),
-    <s:@L> <v:"'\\r'"> <e:@R> => Ast::Int(s..e, b'\r' as u64),
-    <s:@L> <v:"'\\t'"> <e:@R> => Ast::Int(s..e, b'\t' as u64),
-    <s:@L> <v:"'\\0'"> <e:@R> => Ast::Int(s..e, b'\0' as u64),
-    <s:@L> <v:"'\\\\'"> <e:@R> => Ast::Int(s..e, b'\\' as u64),
-    <s:@L> <v:"'\\''"> <e:@R> => Ast::Int(s..e, b'\'' as u64),
-    <s:@L> <v:"'\\\"'"> <e:@R> => Ast::Int(s..e, b'\"' as u64),
+    <s:@L> <v:r"'[^\\']'"> <e:@R> => Ast::Char(s..e, v.bytes().skip(1).next().unwrap()),
+    <s:@L> <v:"'\\n'"> <e:@R> => Ast::Char(s..e, b'\n'),
+    <s:@L> <v:"'\\r'"> <e:@R> => Ast::Char(s..e, b'\r'),
+    <s:@L> <v:"'\\t'"> <e:@R> => Ast::Char(s..e, b'\t'),
+    <s:@L> <v:"'\\0'"> <e:@R> => Ast::Char(s..e, b'\0'),
+    <s:@L> <v:"'\\\\'"> <e:@R> => Ast::Char(s..e, b'\\'),
+    <s:@L> <v:"'\\''"> <e:@R> => Ast::Char(s..e, b'\''),
+    <s:@L> <v:"'\\\"'"> <e:@R> => Ast::Char(s..e, b'\"'),
 }
 
 Bool: Ast<'input> = {

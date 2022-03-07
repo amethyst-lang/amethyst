@@ -265,7 +265,7 @@ impl Generator {
                             }
 
                             SExprType::Slice(_, v) => {
-                                const SIZE: u32 = 1024;
+                                const SIZE: u32 = 512;
                                 let len = values.remove(0);
                                 let size = builder.ins().imul_imm(len, Self::size_of(&**v) as i64);
                                 let flags = builder.ins().icmp_imm(IntCC::UnsignedLessThanOrEqual, size, SIZE as i64);
@@ -298,19 +298,18 @@ impl Generator {
                 builder.use_var(var)
             }
 
-            SExpr::Assign { meta, lvalue, value } => {
-                match lvalue {
-                    LValue::Symbol(variable) => {
-                        let var = *var_map.get(variable).unwrap();
-                        let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx);
-                        builder.def_var(var, val);
-                        builder.use_var(var)
-                    }
+            SExpr::Assign { meta, lvalue: LValue::Symbol(variable), value } => {
+                let var = *var_map.get(variable).unwrap();
+                let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                builder.def_var(var, val);
+                builder.use_var(var)
+            }
 
-                    LValue::Attribute(_, _) => todo!(),
-                    LValue::Deref(_) => todo!(),
-                    LValue::Get(_, _) => todo!(),
-                }
+            SExpr::Assign { meta, lvalue, value } => {
+                let value = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                let lvalue = Self::get_pointer(lvalue, builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                builder.ins().store(MemFlags::new(), value, lvalue, 0);
+                value
             }
 
             SExpr::Attribute { meta, top, attrs } => {
@@ -348,6 +347,37 @@ impl Generator {
             }
 
             _ => todo!(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn get_pointer<'a>(lvalue: &LValue<'a>, builder: &mut FunctionBuilder, var_map: &mut HashMap<&'a str, Variable>, var_index: &mut usize, break_block: Option<Block>, module: &mut ObjectModule, ctx: &mut Context, data_ctx: &mut DataContext) -> Value {
+        match lvalue {
+            LValue::Symbol(v) => builder.use_var(*var_map.get(v).unwrap()),
+
+            LValue::Attribute(_v, _attrs) => todo!(),
+
+            LValue::Deref(v) => {
+                let ret = Self::get_pointer(v, builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                if let LValue::Symbol(_) = **v {
+                    ret
+                } else {
+                    builder.ins().load(Self::convert_type_to_type(&SExprType::Pointer(true, Box::new(SExprType::F32))), MemFlags::new(), ret, 0)
+                }
+            }
+
+            LValue::Get(t, v, i) => {
+                let i = Self::translate_expr(&**i, builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                let offset = builder.ins().imul_imm(i, Self::size_of(t) as i64);
+                let ptr = Self::get_pointer(v, builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                let ptr = if let LValue::Symbol(_) = **v {
+                    ptr
+                } else {
+                    builder.ins().load(Self::convert_type_to_type(&SExprType::Pointer(true, Box::new(SExprType::F32))), MemFlags::new(), ptr, 0)
+                };
+                let ptr = builder.ins().load(Self::convert_type_to_type(&SExprType::Pointer(true, Box::new(SExprType::F32))), MemFlags::new(), ptr, 8);
+                builder.ins().iadd(ptr, offset)
+            }
         }
     }
 

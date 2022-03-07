@@ -102,7 +102,7 @@ fn replace_macro_args<'input>(
     args: &[Ast<'input>],
 ) {
     match ast {
-        Ast::Int(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Key(_, _) => (),
+        Ast::Int(_, _) | Ast::Char(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Key(_, _) => (),
 
         Ast::Symbol(_, name) => {
             if let Some(cap) = map.get(name) {
@@ -147,7 +147,7 @@ fn replace_macros_helper<'input>(
     ast: &mut Ast<'input>,
 ) -> bool {
     match ast {
-        Ast::Int(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Symbol(_, _) | Ast::Key(_, _) => {
+        Ast::Int(_, _) | Ast::Char(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Symbol(_, _) | Ast::Key(_, _) => {
             false
         }
 

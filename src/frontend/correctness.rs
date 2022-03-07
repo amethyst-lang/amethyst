@@ -7,6 +7,7 @@ pub enum CorrectnessError {
     UnificationError,
 }
 
+#[derive(Debug)]
 enum TypeConstraint<'a> {
     Int(Type<'a>),
     Float(Type<'a>),
@@ -301,7 +302,7 @@ fn create_constraints<'a>(
         } => {
             create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
             if let Some(t) = create_lvalue_constraints(lvalue, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes) {
-                constraints.push(TypeConstraint::Equals(value.meta().type_.clone(), t));
+                constraints.push(TypeConstraint::Equals(t, value.meta().type_.clone()));
                 constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
             }
         }
@@ -338,27 +339,35 @@ fn create_lvalue_constraints<'a>(
         LValue::Deref(v) => {
             match create_lvalue_constraints(&mut **v, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes) {
                 Some(Type::Pointer(_, t)) => Some(*t),
+
                 Some(Type::TypeVariable(i)) => {
-                    let t = Type::Pointer(true, Box::new(Type::TypeVariable(*type_var_counter)));
+                    let t = Type::TypeVariable(*type_var_counter);
                     *type_var_counter += 1;
-                    constraints.push(TypeConstraint::Equals(Type::TypeVariable(i), t.clone()));
+                    constraints.push(TypeConstraint::Equals(Type::TypeVariable(i), Type::Pointer(true, Box::new(t.clone()))));
                     Some(t)
                 }
+
                 _ => None,
             }
         }
 
-        LValue::Get(v, i) => {
+        LValue::Get(typ, v, i) => {
             create_constraints(&mut **i, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
             constraints.push(TypeConstraint::Equals(i.meta().type_.clone(), Type::Int(false, 64)));
             match create_lvalue_constraints(&mut **v, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes) {
-                Some(Type::Slice(_, t)) => Some(*t),
+                Some(Type::Slice(_, t)) => {
+                    *typ = (*t).clone();
+                    Some(*t)
+                }
+
                 Some(Type::TypeVariable(i)) => {
-                    let t = Type::Slice(true, Box::new(Type::TypeVariable(*type_var_counter)));
+                    let t = Type::TypeVariable(*type_var_counter);
                     *type_var_counter += 1;
-                    constraints.push(TypeConstraint::Equals(Type::TypeVariable(i), t.clone()));
+                    constraints.push(TypeConstraint::Equals(Type::TypeVariable(i), Type::Slice(true, Box::new(t.clone()))));
+                    *typ = t.clone();
                     Some(t)
                 }
+
                 _ => None,
             }
         }
@@ -808,7 +817,8 @@ fn apply_subs_lvalue<'a>(lvalue: &mut LValue<'a>, substitutions: &[Type<'a>]) {
         LValue::Symbol(_) => (),
         LValue::Attribute(v, _) => apply_subs_lvalue(&mut **v, substitutions),
         LValue::Deref(v) => apply_subs_lvalue(&mut **v, substitutions),
-        LValue::Get(v, i) => {
+        LValue::Get(t, v, i) => {
+            flatten_substitution(t, substitutions);
             apply_subs_lvalue(&mut **v, substitutions);
             apply_substitutions(&mut **i, substitutions);
         }

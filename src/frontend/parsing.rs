@@ -8,6 +8,7 @@ pub enum Error {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Ast<'a> {
     Int(Range<usize>, u64),
+    Char(Range<usize>, u8),
     Float(Range<usize>, f64),
     Str(Range<usize>, String),
     Symbol(Range<usize>, &'a str),
@@ -26,6 +27,7 @@ impl<'a> Ast<'a> {
     pub fn span(&self) -> Range<usize> {
         match self {
             Ast::Int(s, _)
+            | Ast::Char(s, _)
             | Ast::Float(s, _)
             | Ast::Str(s, _)
             | Ast::Symbol(s, _)

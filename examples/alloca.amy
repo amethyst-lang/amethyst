@@ -1,4 +1,10 @@
-(defun main (_a i32) (_b i32) : i32
+(defun main : i32
     (seq
-        (: (@ mut u8) (alloca 1024))
+        (let p = (alloca))
+        (set (deref p) = 'h')
+        (syscall 1 1 (cast p) 1 0 0 0)
+        (let p = (alloca 2))
+        (set (get p 0) = 'i')
+        (set (get p 1) = '\n')
+        (syscall 1 1 (cast p.ptr) p.len 0 0 0)
         0))
