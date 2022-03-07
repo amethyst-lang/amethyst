@@ -282,6 +282,22 @@ impl Generator {
                         }
                     }
 
+                    SExpr::Symbol { value: "&", .. } => builder.ins().band(values.remove(0), values.remove(0)),
+                    SExpr::Symbol { value: "|", .. } => builder.ins().bor(values.remove(0), values.remove(0)),
+                    SExpr::Symbol { value: "^", .. } => builder.ins().bxor(values.remove(0), values.remove(0)),
+                    SExpr::Symbol { value: "<<", .. } => builder.ins().ishl(values.remove(0), values.remove(0)),
+                    SExpr::Symbol { value: ">>", .. } => builder.ins().ushr(values.remove(0), values.remove(0)),
+
+                    SExpr::Symbol { value: "<", .. } => {
+                        if meta.type_ == SExprType::F32 || meta.type_ == SExprType::F64 {
+                            builder.ins().fcmp(FloatCC::LessThan, values[0], values[1])
+                        } else if matches!(meta.type_, SExprType::Int(true, _)) {
+                            builder.ins().icmp(IntCC::SignedLessThan, values[0], values[1])
+                        } else {
+                            builder.ins().icmp(IntCC::UnsignedLessThan, values[0], values[1])
+                        }
+                    }
+
                     _ => todo!(),
                 }
             }

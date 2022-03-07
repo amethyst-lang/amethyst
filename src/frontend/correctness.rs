@@ -1,10 +1,18 @@
-use std::collections::{HashMap, hash_map::Entry};
+use std::{collections::{HashMap, hash_map::Entry}, ops::Range};
 
 use super::ast_lowering::{SExpr, Type, LValue};
 
 #[derive(Debug)]
-pub enum CorrectnessError {
-    UnificationError,
+pub enum CorrectnessError<'a> {
+    OccursError(Type<'a>, Type<'a>),
+    LengthMismatch(Type<'a>, Type<'a>),
+    TypeError(Type<'a>, Type<'a>),
+    FloatOrIntError(FloatOrInt, FloatOrInt),
+    MismatchedFloatOrInt(Type<'a>, FloatOrInt),
+    UnassignedTypeVariable(Type<'a>),
+    InvalidAttr(Type<'a>, &'a str),
+    TooManyPossibilities,
+
 }
 
 #[derive(Debug)]
@@ -85,6 +93,7 @@ fn create_loop_constraints<'a>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_constraints<'a>(
     sexpr: &mut SExpr<'a>,
     type_var_counter: &mut u64,
@@ -93,19 +102,23 @@ fn create_constraints<'a>(
     struct_map: &HashMap<&'a str, Struct<'a>>,
     monomorphisms: &mut Vec<(Type<'a>, usize)>,
     scopes: &mut Vec<HashMap<&'a str, Type<'a>>>,
+    var_ranges: &mut Vec<Range<usize>>,
 ) {
     let meta = sexpr.meta_mut();
     if meta.type_ == Type::Unknown {
         meta.type_ = Type::TypeVariable(*type_var_counter);
         *type_var_counter += 1;
+        var_ranges.push(meta.range.clone());
     } else if meta.type_ == Type::UnknownInt {
         meta.type_ = Type::TypeVariable(*type_var_counter);
         constraints.push(TypeConstraint::Int(meta.type_.clone()));
         *type_var_counter += 1;
+        var_ranges.push(meta.range.clone());
     } else if meta.type_ == Type::UnknownFloat {
         meta.type_ = Type::TypeVariable(*type_var_counter);
         constraints.push(TypeConstraint::Float(meta.type_.clone()));
         *type_var_counter += 1;
+        var_ranges.push(meta.range.clone());
     }
 
     #[allow(unused)]
@@ -138,7 +151,7 @@ fn create_constraints<'a>(
         SExpr::Seq { meta, values } => {
             scopes.push(HashMap::new());
             for value in values.iter_mut() {
-                create_constraints(value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+                create_constraints(value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             }
             scopes.pop();
 
@@ -151,9 +164,9 @@ fn create_constraints<'a>(
         SExpr::Cond { meta, values, elsy } => {
             for (cond, then) in values {
                 scopes.push(HashMap::new());
-                create_constraints(cond, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+                create_constraints(cond, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
                 constraints.push(TypeConstraint::Int(cond.meta().type_.clone()));
-                create_constraints(then, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+                create_constraints(then, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
                 scopes.pop();
 
                 constraints.push(TypeConstraint::Equals(
@@ -163,7 +176,7 @@ fn create_constraints<'a>(
             }
 
             if let Some(elsy) = elsy {
-                create_constraints(elsy, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+                create_constraints(elsy, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
 
                 constraints.push(TypeConstraint::Equals(
                     meta.type_.clone(),
@@ -174,7 +187,7 @@ fn create_constraints<'a>(
 
         SExpr::Loop { meta, value } => {
             scopes.push(HashMap::new());
-            create_constraints(value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+            create_constraints(value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             create_loop_constraints(&meta.type_, value, constraints);
             constraints.push(TypeConstraint::Nillable(meta.type_.clone()));
             scopes.pop();
@@ -182,14 +195,14 @@ fn create_constraints<'a>(
 
         SExpr::Break { value, .. } => {
             if let Some(value) = value {
-                create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+                create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             }
         }
 
         SExpr::Nil { .. } => (),
 
         SExpr::Type { meta, value } => {
-            create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+            create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
         }
 
@@ -209,16 +222,16 @@ fn create_constraints<'a>(
             }
 
             scopes.push(scope);
-            create_constraints(&mut **expr, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+            create_constraints(&mut **expr, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             constraints.push(TypeConstraint::Equals(ret_type.clone(), expr.meta().type_.clone()));
             scopes.pop();
         }
 
         SExpr::FuncCall { meta, func, values } => {
-            create_constraints(&mut **func, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+            create_constraints(&mut **func, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             let mut args = vec![];
             for value in values.iter_mut() {
-                create_constraints(value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+                create_constraints(value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
                 args.push(value.meta().type_.clone());
             }
             let func_type_var = Type::Function(args, Box::new(meta.type_.clone()));
@@ -263,7 +276,7 @@ fn create_constraints<'a>(
                 let mut generics = vec![];
 
                 for (field, value) in values {
-                    create_constraints(value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+                    create_constraints(value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
 
                     if let Some((_, t)) = struct_.fields.iter().find(|(name, _)| *name == *field) {
                         let mut t = t.clone();
@@ -288,7 +301,7 @@ fn create_constraints<'a>(
             variable,
             value,
         } => {
-            create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+            create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             if let Some(scope) = scopes.last_mut() {
                 scope.insert(*variable, value.meta().type_.clone());
             }
@@ -300,20 +313,21 @@ fn create_constraints<'a>(
             lvalue,
             value,
         } => {
-            create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
-            if let Some(t) = create_lvalue_constraints(lvalue, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes) {
+            create_constraints(&mut **value, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
+            if let Some(t) = create_lvalue_constraints(lvalue, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges) {
                 constraints.push(TypeConstraint::Equals(t, value.meta().type_.clone()));
                 constraints.push(TypeConstraint::Equals(meta.type_.clone(), value.meta().type_.clone()));
             }
         }
 
         SExpr::Attribute { meta, top, attrs } => {
-            create_constraints(&mut **top, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+            create_constraints(&mut **top, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             constraints.push(TypeConstraint::Attribute(meta.type_.clone(), top.meta().type_.clone(), attrs.clone()));
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_lvalue_constraints<'a>(
     lvalue: &mut LValue<'a>,
     type_var_counter: &mut u64,
@@ -322,6 +336,7 @@ fn create_lvalue_constraints<'a>(
     struct_map: &HashMap<&'a str, Struct<'a>>,
     monomorphisms: &mut Vec<(Type<'a>, usize)>,
     scopes: &mut Vec<HashMap<&'a str, Type<'a>>>,
+    var_ranges: &mut Vec<Range<usize>>,
 ) -> Option<Type<'a>> {
     match lvalue {
         LValue::Symbol(sym) => {
@@ -337,7 +352,7 @@ fn create_lvalue_constraints<'a>(
         LValue::Attribute(_, _) => todo!(),
 
         LValue::Deref(v) => {
-            match create_lvalue_constraints(&mut **v, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes) {
+            match create_lvalue_constraints(&mut **v, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges) {
                 Some(Type::Pointer(_, t)) => Some(*t),
 
                 Some(Type::TypeVariable(i)) => {
@@ -352,9 +367,9 @@ fn create_lvalue_constraints<'a>(
         }
 
         LValue::Get(typ, v, i) => {
-            create_constraints(&mut **i, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes);
+            create_constraints(&mut **i, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             constraints.push(TypeConstraint::Equals(i.meta().type_.clone(), Type::Int(false, 64)));
-            match create_lvalue_constraints(&mut **v, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes) {
+            match create_lvalue_constraints(&mut **v, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges) {
                 Some(Type::Slice(_, t)) => {
                     *typ = (*t).clone();
                     Some(*t)
@@ -363,6 +378,7 @@ fn create_lvalue_constraints<'a>(
                 Some(Type::TypeVariable(i)) => {
                     let t = Type::TypeVariable(*type_var_counter);
                     *type_var_counter += 1;
+                    var_ranges.push(0..0);
                     constraints.push(TypeConstraint::Equals(Type::TypeVariable(i), Type::Slice(true, Box::new(t.clone()))));
                     *typ = t.clone();
                     Some(t)
@@ -393,7 +409,7 @@ fn occurs_in(substitutions: &[Type<'_>], index: u64, t: &Type<'_>) -> bool {
     }
 }
 
-fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: &Type<'a>, t2: &Type<'a>) -> Result<(), CorrectnessError> {
+fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: &Type<'a>, t2: &Type<'a>) -> Result<(), CorrectnessError<'a>> {
     match (t1, t2) {
         (Type::TypeVariable(i), Type::TypeVariable(j)) if i == j => Ok(()),
 
@@ -406,7 +422,7 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: &Type<'a>, t2: &Type<'a>) ->
 
         (Type::TypeVariable(i), t2) => {
             if occurs_in(substitutions, *i, t2) {
-                return Err(CorrectnessError::UnificationError);
+                return Err(CorrectnessError::OccursError(Type::TypeVariable(*i), t2.clone()));
             }
 
             substitutions[*i as usize] = t2.clone();
@@ -415,7 +431,7 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: &Type<'a>, t2: &Type<'a>) ->
 
         (t1, Type::TypeVariable(i)) => {
             if occurs_in(substitutions, *i, t1) {
-                return Err(CorrectnessError::UnificationError);
+                return Err(CorrectnessError::OccursError(t1.clone(), Type::TypeVariable(*i)));
             }
 
             substitutions[*i as usize] = t1.clone();
@@ -431,7 +447,7 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: &Type<'a>, t2: &Type<'a>) ->
 
         (Type::Tuple(v1), Type::Tuple(v2)) => {
             if v1.len() != v2.len() {
-                return Err(CorrectnessError::UnificationError);
+                return Err(CorrectnessError::LengthMismatch(Type::Tuple(v1.clone()), Type::Tuple(v2.clone())));
             }
 
             for (t1, t2) in v1.iter().zip(v2) {
@@ -446,7 +462,7 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: &Type<'a>, t2: &Type<'a>) ->
 
         (Type::Struct(name1, v1), Type::Struct(name2, v2)) if name1 == name2 => {
             if v1.len() != v2.len() {
-                return Err(CorrectnessError::UnificationError);
+                return Err(CorrectnessError::LengthMismatch(Type::Struct(*name1, v1.clone()), Type::Struct(*name2, v2.clone())));
             }
 
             for (t1, t2) in v1.iter().zip(v2) {
@@ -460,7 +476,7 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: &Type<'a>, t2: &Type<'a>) ->
 
         (Type::Function(v1, t1), Type::Function(v2, t2)) => {
             if v1.len() != v2.len() {
-                return Err(CorrectnessError::UnificationError);
+                return Err(CorrectnessError::LengthMismatch(Type::Function(v1.clone(), t1.clone()), Type::Function(v2.clone(), t2.clone())));
             }
 
             for (t1, t2) in v1.iter().zip(v2) {
@@ -470,12 +486,12 @@ fn unify<'a>(substitutions: &mut Vec<Type<'a>>, t1: &Type<'a>, t2: &Type<'a>) ->
             unify(substitutions, &**t1, &**t2)
         }
 
-        _ => Err(CorrectnessError::UnificationError),
+        _ => Err(CorrectnessError::TypeError(t1.clone(), t2.clone())),
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-enum FloatOrInt {
+pub enum FloatOrInt {
     Float,
     Int,
     Nil,
@@ -516,7 +532,7 @@ fn propagator_helper<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
     }
 }
 
-fn unify_type_variable_propagator(substitutions: &mut Vec<Type<'_>>, float_or_int: &mut Vec<FloatOrInt>) -> Result<(), CorrectnessError> {
+fn unify_type_variable_propagator<'a>(substitutions: &mut Vec<Type<'a>>, float_or_int: &mut Vec<FloatOrInt>) -> Result<(), CorrectnessError<'a>> {
     for i in 0..substitutions.len() {
         let mut j = i;
         while let Type::TypeVariable(k) = substitutions[j] {
@@ -540,7 +556,7 @@ fn unify_type_variable_propagator(substitutions: &mut Vec<Type<'_>>, float_or_in
                     float_or_int[j] = float_or_int[i]
                 }
                 (a, b) if a == b => (),
-                _ => return Err(CorrectnessError::UnificationError),
+                _ => return Err(CorrectnessError::FloatOrIntError(float_or_int[i], float_or_int[j])),
             }
 
             if matches!(float_or_int[j], FloatOrInt::Nil)
@@ -561,7 +577,7 @@ fn unify_type_variable_propagator(substitutions: &mut Vec<Type<'_>>, float_or_in
     Ok(())
 }
 
-fn check_float_or_int(substitutions: &mut Vec<Type<'_>>, float_or_int: &[FloatOrInt]) -> Result<(), CorrectnessError> {
+fn check_float_or_int<'a>(substitutions: &mut Vec<Type<'a>>, float_or_int: &[FloatOrInt]) -> Result<(), CorrectnessError<'a>> {
     for (i, foi) in float_or_int.iter().enumerate() {
         match foi {
             FloatOrInt::Float => match substitutions[i] {
@@ -571,7 +587,7 @@ fn check_float_or_int(substitutions: &mut Vec<Type<'_>>, float_or_int: &[FloatOr
 
                 Type::F32 | Type::F64 => (),
 
-                _ => return Err(CorrectnessError::UnificationError),
+                _ => return Err(CorrectnessError::MismatchedFloatOrInt(substitutions[i].clone(), *foi)),
             },
 
             FloatOrInt::Int => match substitutions[i] {
@@ -581,7 +597,7 @@ fn check_float_or_int(substitutions: &mut Vec<Type<'_>>, float_or_int: &[FloatOr
 
                 Type::Int(_, _) => (),
 
-                _ => return Err(CorrectnessError::UnificationError),
+                _ => return Err(CorrectnessError::MismatchedFloatOrInt(substitutions[i].clone(), *foi)),
             },
 
             FloatOrInt::Neither => (),
@@ -597,13 +613,13 @@ fn check_float_or_int(substitutions: &mut Vec<Type<'_>>, float_or_int: &[FloatOr
     Ok(())
 }
 
-fn unify_attrs<'a>(attrs: &[(Type<'a>, Type<'a>, Vec<&'a str>)], substitutions: &mut Vec<Type<'a>>, struct_map: &HashMap<&'a str, Struct<'a>>) -> Result<(), CorrectnessError> {
+fn unify_attrs<'a>(attrs: &[(Type<'a>, Type<'a>, Vec<&'a str>)], substitutions: &mut Vec<Type<'a>>, struct_map: &HashMap<&'a str, Struct<'a>>) -> Result<(), CorrectnessError<'a>> {
     for (result, obj, attrs) in attrs {
         let mut obj = obj.clone();
         while let Type::TypeVariable(i) = obj {
             let new = substitutions[i as usize].clone();
             match new {
-                Type::TypeVariable(j) if i == j => return Err(CorrectnessError::UnificationError),
+                Type::TypeVariable(j) if i == j => return Err(CorrectnessError::UnassignedTypeVariable(Type::TypeVariable(i))),
                 _ => obj = new,
             }
         }
@@ -624,10 +640,10 @@ fn unify_attrs<'a>(attrs: &[(Type<'a>, Type<'a>, Vec<&'a str>)], substitutions: 
                             obj = t.clone();
                             obj.replace_generics(&mut type_var_counter, &mut map);
                         } else {
-                            return Err(CorrectnessError::UnificationError);
+                            return Err(CorrectnessError::InvalidAttr(Type::Struct(name, generics), *attr));
                         }
                     } else {
-                        return Err(CorrectnessError::UnificationError);
+                        return Err(CorrectnessError::InvalidAttr(Type::Struct(name, generics), *attr));
                     }
                 }
 
@@ -635,18 +651,18 @@ fn unify_attrs<'a>(attrs: &[(Type<'a>, Type<'a>, Vec<&'a str>)], substitutions: 
                     match *attr {
                         "len" | "cap" => obj = Type::Int(false, 64),
                         "ptr" => obj = Type::Pointer(mutable, t),
-                        _ => return Err(CorrectnessError::UnificationError),
+                        _ => return Err(CorrectnessError::InvalidAttr(Type::Slice(mutable, t), *attr)),
                     }
                 }
 
                 Type::TypeVariable(_) => (),
 
-                _ => return Err(CorrectnessError::UnificationError)
+                _ => return Err(CorrectnessError::InvalidAttr(obj.clone(), *attr))
             }
         }
 
         match (result, obj) {
-            (Type::TypeVariable(i), Type::TypeVariable(j)) if *i == j => return Err(CorrectnessError::UnificationError),
+            (Type::TypeVariable(i), Type::TypeVariable(j)) if *i == j => return Err(CorrectnessError::UnassignedTypeVariable(Type::TypeVariable(j))),
 
             (_, Type::TypeVariable(_)) => (),
 
@@ -659,14 +675,14 @@ fn unify_attrs<'a>(attrs: &[(Type<'a>, Type<'a>, Vec<&'a str>)], substitutions: 
 
             (a, b) if *a == b => (),
 
-            _ => return Err(CorrectnessError::UnificationError),
+            (_, obj) => return Err(CorrectnessError::TypeError(result.clone(), obj)),
         }
     }
 
     Ok(())
 }
 
-fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, struct_map: &HashMap<&'a str, Struct<'a>>) -> Result<Vec<Type<'a>>, CorrectnessError> {
+fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, struct_map: &HashMap<&'a str, Struct<'a>>) -> Result<Vec<Type<'a>>, CorrectnessError<'a>> {
     let mut substitutions = vec![Type::Unknown; type_var_counter as usize];
     let mut float_or_int = vec![FloatOrInt::Neither; type_var_counter as usize];
     let mut unification_options = vec![];
@@ -688,7 +704,7 @@ fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, 
                     float_or_int[i as usize] = FloatOrInt::Int
                 }
                 Type::Int(_, _) => (),
-                _ => return Err(CorrectnessError::UnificationError)
+                t => return Err(CorrectnessError::MismatchedFloatOrInt(t, FloatOrInt::Int))
             },
 
             TypeConstraint::Float(t) => match t {
@@ -701,20 +717,19 @@ fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, 
                     float_or_int[i as usize] = FloatOrInt::Float
                 }
                 Type::F32 | Type::F64 => (),
-                _ => return Err(CorrectnessError::UnificationError)
+                t => return Err(CorrectnessError::MismatchedFloatOrInt(t, FloatOrInt::Float))
             },
 
-            TypeConstraint::Equals(t1, t2) => unify(&mut substitutions, &t1, &t2)?,
+            TypeConstraint::Equals(t1, t2) => if unify(&mut substitutions, &t1, &t2).is_err() {
+                return Err(CorrectnessError::TypeError(t1, t2))
+            },
 
             TypeConstraint::Nillable(t) => match t {
                 Type::TypeVariable(i)
                     if matches!(
                         float_or_int[i as usize],
                         FloatOrInt::Nil | FloatOrInt::Neither
-                    ) =>
-                {
-                    float_or_int[i as usize] = FloatOrInt::Nil
-                }
+                    ) => float_or_int[i as usize] = FloatOrInt::Nil,
                 _ => (),
             },
 
@@ -766,7 +781,7 @@ fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, 
             substitutions = successes.remove(0);
             unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
         } else {
-            return Err(CorrectnessError::UnificationError);
+            return Err(CorrectnessError::TooManyPossibilities);
         }
     } else {
         unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
@@ -881,7 +896,7 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
     }
 }
 
-pub fn check<'a>(sexprs: &mut Vec<SExpr<'a>>, func_map: &HashMap<&'a str, Vec<Signature<'a>>>, struct_map: &HashMap<&'a str, Struct<'a>>) -> Result<(), CorrectnessError> {
+pub fn check<'a>(original: &'a str, sexprs: &mut Vec<SExpr<'a>>, func_map: &HashMap<&'a str, Vec<Signature<'a>>>, struct_map: &HashMap<&'a str, Struct<'a>>) -> Result<(), CorrectnessError<'a>> {
     let mut monomorphisms;
     let mut skip = 0;
     let mut scopes = vec![HashMap::new()];
@@ -889,12 +904,16 @@ pub fn check<'a>(sexprs: &mut Vec<SExpr<'a>>, func_map: &HashMap<&'a str, Vec<Si
     while {
         let mut type_var_counter = 0;
         let mut constraints = vec![];
+        let mut var_ranges = vec![];
         monomorphisms = vec![];
 
         for sexpr in sexprs.iter_mut().skip(skip) {
-            create_constraints(sexpr, &mut type_var_counter, &mut constraints, func_map, struct_map, &mut monomorphisms, &mut scopes);
+            create_constraints(sexpr, &mut type_var_counter, &mut constraints, func_map, struct_map, &mut monomorphisms, &mut scopes, &mut var_ranges);
         }
 
+        for (i, var_range) in var_ranges.into_iter().enumerate() {
+            println!("{}: {:#?}", i, &original[var_range]);
+        }
         let unified = unify_types(type_var_counter, constraints, struct_map)?;
         for sexpr in sexprs.iter_mut().skip(skip) {
             apply_substitutions(sexpr, &unified);

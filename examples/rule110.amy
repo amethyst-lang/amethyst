@@ -1,0 +1,33 @@
+(defmacro
+    while condy
+        stat
+        &key else
+    (loop
+        (cond
+            (condy stat)
+            (:else (break else)))))
+
+(defun main
+    (seq
+        (let SIZE = 30)
+        (let board = (alloca SIZE))
+        (set (get board (- SIZE 1)) = true)
+        (let i = 0)
+        (let s = (alloc))
+        (while (< i SIZE)
+            (seq
+                (let j = 0)
+                (while (< j SIZE)
+                    (seq
+                        (set (deref s) =
+                            (cond
+                                ((get board j) '*')
+                                (:else ' ')))
+                        (syscall 1 1 (cast s) 1 0 0 0)
+                        (set j = (+ j 1))
+                        ()))
+                (set (deref s) = '\n')
+                (syscall 1 1 (cast s) 1 0 0 0)
+                (set i = (+ i 1))
+                ()))))
+
