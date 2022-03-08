@@ -178,12 +178,14 @@ fn create_constraints<'a>(
             }
 
             if let Some(elsy) = elsy {
+                scopes.push(HashMap::new());
                 create_constraints(elsy, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
 
                 constraints.push(TypeConstraint::Equals(
                     meta.type_.clone(),
                     elsy.meta().type_.clone(),
                 ));
+                scopes.pop();
             }
         }
 

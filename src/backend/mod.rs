@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use cranelift::prelude::{*, isa::CallConv, codegen::Context};
+use cranelift::{prelude::{*, isa::CallConv, codegen::Context}, codegen::ir::SigRef};
 use cranelift_module::{DataContext, Module, Linkage};
 use cranelift_object::{ObjectModule, ObjectBuilder};
 use target_lexicon::triple;
@@ -59,11 +59,11 @@ impl Generator {
                 let entry_block = builder.create_block();
                 builder.append_block_params_for_function_params(entry_block);
                 builder.switch_to_block(entry_block);
-                let mut var_map = HashMap::new();
+                let mut var_map = vec![HashMap::new()];
                 let mut var_index = 0;
                 for (i, (name, typ)) in args.iter().enumerate() {
                     let var = Variable::new(var_index);
-                    var_map.insert(*name, var);
+                    var_map[0].insert(*name, var);
                     var_index += 1;
                     builder.declare_var(var, Self::convert_type_to_type(typ));
                     builder.def_var(var, builder.block_params(entry_block)[i]);
@@ -85,7 +85,7 @@ impl Generator {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn translate_expr<'a>(sexpr: &SExpr<'a>, builder: &mut FunctionBuilder, var_map: &mut HashMap<&'a str, Variable>, var_index: &mut usize, break_block: Option<Block>, module: &mut ObjectModule, ctx: &mut Context, data_ctx: &mut DataContext) -> Value {
+    fn translate_expr<'a>(sexpr: &SExpr<'a>, builder: &mut FunctionBuilder, var_map: &mut Vec<HashMap<&'a str, Variable>>, var_index: &mut usize, break_block: Option<Block>, module: &mut ObjectModule, ctx: &mut Context, data_ctx: &mut DataContext) -> Value {
         #[allow(unused)]
         match sexpr {
             SExpr::Int { meta, value } => {
@@ -97,7 +97,13 @@ impl Generator {
             }
 
             SExpr::Symbol { value, .. } => {
-                builder.use_var(*var_map.get(value).unwrap())
+                for scope in var_map.iter().rev() {
+                    if let Some(&var) = scope.get(value) {
+                        return builder.use_var(var);
+                    }
+                }
+
+                unreachable!("variable was typechecked so it must be defined");
             }
 
             SExpr::Float { meta, value } => {
@@ -125,11 +131,14 @@ impl Generator {
             }
 
             SExpr::Seq { values, .. } => {
+                var_map.push(HashMap::new());
                 for value in values[..values.len() - 1].iter() {
                     Self::translate_expr(value, builder, var_map, var_index, break_block, module, ctx, data_ctx);
                 }
 
-                Self::translate_expr(values.last().unwrap(), builder, var_map, var_index, break_block, module, ctx, data_ctx)
+                let v = Self::translate_expr(values.last().unwrap(), builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                var_map.pop();
+                v
             }
 
             SExpr::Cond { meta, values, elsy } => {
@@ -145,17 +154,22 @@ impl Generator {
                 builder.append_block_param(last, Self::convert_type_to_type(&meta.type_));
 
                 for (i, (cond, body)) in values.iter().enumerate() {
+                    var_map.push(HashMap::new());
                     let cond = Self::translate_expr(cond, builder, var_map, var_index, break_block, module, ctx, data_ctx);
                     builder.ins().brz(cond, conds[i + 1], &[]);
                     builder.ins().jump(thens[i], &[]);
                     builder.switch_to_block(thens[i]);
                     let then = Self::translate_expr(body, builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                    var_map.pop();
                     builder.ins().jump(last, &[then]);
                     builder.switch_to_block(conds[i + 1]);
                 }
 
                 let elsy = if let Some(elsy) = elsy {
-                    Self::translate_expr(&**elsy, builder, var_map, var_index, break_block, module, ctx, data_ctx)
+                    var_map.push(HashMap::new());
+                    let v = Self::translate_expr(&**elsy, builder, var_map, var_index, break_block, module, ctx, data_ctx);
+                    var_map.pop();
+                    v
                 } else {
                     builder.ins().bconst(Self::convert_type_to_type(&SExprType::Tuple(vec![])), false)
                 };
@@ -171,7 +185,9 @@ impl Generator {
                 builder.append_block_param(break_block, Self::convert_type_to_type(&meta.type_));
                 builder.ins().jump(loop_block, &[]);
                 builder.switch_to_block(loop_block);
+                var_map.push(HashMap::new());
                 Self::translate_expr(&**value, builder, var_map, var_index, Some(break_block), module, ctx, data_ctx);
+                var_map.pop();
                 builder.ins().jump(loop_block, &[]);
                 builder.switch_to_block(break_block);
                 builder.block_params(break_block)[0]
@@ -197,7 +213,7 @@ impl Generator {
             SExpr::FuncCall { meta, func, values } => {
                 let args = values;
                 let mut values: Vec<_> = args.iter().map(|v| Self::translate_expr(v, builder, var_map, var_index, break_block, module, ctx, data_ctx)).collect();
-                match **func {
+                match &**func {
                     SExpr::Symbol { value: "+", .. } => {
                         if meta.type_ == SExprType::F32 || meta.type_ == SExprType::F64 {
                             builder.ins().fadd(values[0], values[1])
@@ -310,6 +326,29 @@ impl Generator {
                         }
                     }
 
+                    SExpr::Symbol { meta, value } => {
+                        let mut sig = Signature::new(CallConv::SystemV);
+                        if let SExprType::Function(a, r) = &meta.type_ {
+                            sig.params.extend(a.iter().map(Self::convert_type_to_type).map(AbiParam::new));
+                            sig.returns.push(AbiParam::new(Self::convert_type_to_type(&**r)));
+                        }
+
+                        for scope in var_map.iter().rev() {
+                            if let Some(func) = scope.get(value) {
+                                let sig = builder.import_signature(sig);
+                                let func = builder.use_var(*func);
+                                let call = builder.ins().call_indirect(sig, func, &values);
+                                return builder.inst_results(call)[0];
+                            }
+                        }
+
+                        let func = module.declare_function(value, Linkage::Import, &sig).unwrap();
+                        let func = module.declare_func_in_func(func, builder.func);
+
+                        let call = builder.ins().call(func, &values);
+                        builder.inst_results(call)[0]
+                    }
+
                     _ => todo!("{:?} can't be used as a function yet", func),
                 }
             }
@@ -321,13 +360,19 @@ impl Generator {
                 *var_index += 1;
                 builder.declare_var(var, Self::convert_type_to_type(&meta.type_));
                 let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx);
-                var_map.insert(*variable, var);
+                var_map.last_mut().unwrap().insert(*variable, var);
                 builder.def_var(var, val);
                 builder.use_var(var)
             }
 
             SExpr::Assign { meta, lvalue: LValue::Symbol(variable), value } => {
-                let var = *var_map.get(variable).unwrap();
+                let mut var = Variable::new(0);
+                for scope in var_map.iter().rev() {
+                    if let Some(v) = scope.get(variable) {
+                        var = *v;
+                        break;
+                    }
+                }
                 let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx);
                 builder.def_var(var, val);
                 builder.use_var(var)
@@ -379,9 +424,17 @@ impl Generator {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn get_pointer<'a>(lvalue: &LValue<'a>, builder: &mut FunctionBuilder, var_map: &mut HashMap<&'a str, Variable>, var_index: &mut usize, break_block: Option<Block>, module: &mut ObjectModule, ctx: &mut Context, data_ctx: &mut DataContext) -> Value {
+    fn get_pointer<'a>(lvalue: &LValue<'a>, builder: &mut FunctionBuilder, var_map: &mut Vec<HashMap<&'a str, Variable>>, var_index: &mut usize, break_block: Option<Block>, module: &mut ObjectModule, ctx: &mut Context, data_ctx: &mut DataContext) -> Value {
         match lvalue {
-            LValue::Symbol(v) => builder.use_var(*var_map.get(v).unwrap()),
+            LValue::Symbol(v) => {
+                for scope in var_map.iter().rev() {
+                    if let Some(var) = scope.get(v) {
+                        return builder.use_var(*var);
+                    }
+                }
+
+                unreachable!("variable was typechecked");
+            }
 
             LValue::Attribute(_v, _attrs) => todo!(),
 
