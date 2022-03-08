@@ -250,6 +250,9 @@ fn create_constraints<'a>(
                             if sig.has_generic() {
                                 let mut map = HashMap::new();
                                 sig.replace_generics(type_var_counter, &mut map);
+                                if let Some(index) = v.index {
+                                    monomorphisms.push((sig.clone(), index));
+                                }
                             }
                             Some(sig)
                         } else {

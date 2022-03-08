@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 
-use cranelift::{prelude::{*, isa::CallConv, codegen::Context}, codegen::ir::SigRef};
+use cranelift::prelude::{*, isa::CallConv, codegen::Context};
 use cranelift_module::{DataContext, Module, Linkage};
 use cranelift_object::{ObjectModule, ObjectBuilder};
 use target_lexicon::triple;
@@ -77,9 +78,10 @@ impl Generator {
                 builder.finalize();
                 self.ctx.func = func;
 
-                let id = self.module.declare_function(name, Linkage::Export, &self.ctx.func.signature).unwrap();
+                let id = self.module.declare_function(&Self::mangle_func(name, args.iter().map(|(_, v)| v), ret_type), Linkage::Export, &self.ctx.func.signature).unwrap();
                 self.module.define_function(id, &mut self.ctx).unwrap();
                 self.module.clear_context(&mut self.ctx);
+                var_map.clear();
             }
         }
     }
@@ -96,14 +98,24 @@ impl Generator {
                 }
             }
 
-            SExpr::Symbol { value, .. } => {
+            SExpr::Symbol { meta, value } => {
                 for scope in var_map.iter().rev() {
                     if let Some(&var) = scope.get(value) {
                         return builder.use_var(var);
                     }
                 }
 
-                unreachable!("variable was typechecked so it must be defined");
+                let mut sig = Signature::new(CallConv::SystemV);
+                if let SExprType::Function(a, r) = &meta.type_ {
+                    sig.params.extend(a.iter().map(Self::convert_type_to_type).map(AbiParam::new));
+                    sig.returns.push(AbiParam::new(Self::convert_type_to_type(&**r)));
+                    let func = module.declare_function(&Self::mangle_func(value, a.iter(), &**r), Linkage::Import, &sig).unwrap();
+                    let func = module.declare_func_in_func(func, builder.func);
+
+                    builder.ins().func_addr(Self::convert_type_to_type(&meta.type_), func)
+                } else {
+                    unreachable!("func must have type func");
+                }
             }
 
             SExpr::Float { meta, value } => {
@@ -342,11 +354,15 @@ impl Generator {
                             }
                         }
 
-                        let func = module.declare_function(value, Linkage::Import, &sig).unwrap();
-                        let func = module.declare_func_in_func(func, builder.func);
+                        if let SExprType::Function(a, r) = &meta.type_ {
+                            let func = module.declare_function(&Self::mangle_func(value, a.iter(), &**r), Linkage::Import, &sig).unwrap();
+                            let func = module.declare_func_in_func(func, builder.func);
 
-                        let call = builder.ins().call(func, &values);
-                        builder.inst_results(call)[0]
+                            let call = builder.ins().call(func, &values);
+                            builder.inst_results(call)[0]
+                        } else {
+                            unreachable!("must be func");
+                        }
                     }
 
                     _ => todo!("{:?} can't be used as a function yet", func),
@@ -479,7 +495,7 @@ impl Generator {
 
             SExprType::Struct(_, _) => todo!(),
 
-            SExprType::Function(_, _) => todo!(),
+            SExprType::Function(_, _) => types::I64,
 
             _ => unreachable!(),
         }
@@ -506,6 +522,66 @@ impl Generator {
 
             _ => unreachable!(),
         }
+    }
+
+    fn mangle_type(mangled: &mut String, t: &SExprType) {
+        match t {
+            SExprType::Int(false, width) => write!(mangled, "u{}", width).unwrap(),
+            SExprType::Int(true, width) => write!(mangled, "i{}", width).unwrap(),
+            SExprType::F32 => mangled.push('f'),
+            SExprType::F64 => mangled.push('F'),
+            SExprType::Tuple(v) if v.is_empty() => mangled.push('N'),
+            SExprType::Pointer(false, v) => {
+                mangled.push('p');
+                Self::mangle_type(mangled, &**v);
+            }
+            SExprType::Pointer(true, v) => {
+                mangled.push('P');
+                Self::mangle_type(mangled, &**v);
+            }
+            SExprType::Slice(false, v) => {
+                mangled.push('s');
+                Self::mangle_type(mangled, &**v);
+            }
+            SExprType::Slice(true, v) => {
+                mangled.push('S');
+                Self::mangle_type(mangled, &**v);
+            }
+            //SExprType::Struct(_, _) => todo!(),
+            SExprType::Function(a, r) => {
+                mangled.push('U');
+                for (i, a) in a.iter().enumerate() {
+                    if i != 0 {
+                        mangled.push(',');
+                    }
+                    Self::mangle_type(mangled, a);
+                }
+                mangled.push(':');
+                Self::mangle_type(mangled, &**r);
+            }
+
+            _ => unreachable!(),
+        }
+    }
+
+    fn mangle_func<'a, 'b>(name: &str, args: impl Iterator<Item=&'a SExprType<'b>>, ret: &SExprType) -> String
+        where 'b: 'a
+    {
+        if name == "main" {
+            return String::from("main");
+        }
+
+        let mut mangled = String::new();
+        write!(mangled, "amy_{}@", name).unwrap();
+        for (i, arg) in args.enumerate() {
+            if i != 0 {
+                mangled.push(',');
+            }
+            Self::mangle_type(&mut mangled, arg);
+        }
+        mangled.push(':');
+        Self::mangle_type(&mut mangled, ret);
+        mangled
     }
 
     pub fn emit_object(self) -> Vec<u8> {
