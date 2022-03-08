@@ -1,0 +1,5 @@
+(defun main : i32
+    (my-awesome-func 69 420))
+
+(defun my-awesome-func (a i32) (b i32) : i32
+    (+ a b))
