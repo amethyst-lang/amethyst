@@ -138,8 +138,14 @@ fn create_constraints<'a>(
             }
 
             if let Some(v) = func_map.get(value) {
-                if v.len() == 1 && v[0].arg_types.iter().all(|v| !v.has_generic()) && !v[0].ret_type.has_generic() {
-                    constraints.push(TypeConstraint::Equals(meta.type_.clone(), Type::Function(v[0].arg_types.clone(), Box::new(v[0].ret_type.clone()))));
+                if v.len() == 1 {
+                    if let Some(index) = v[0].index {
+                        let mut sig = Type::Function(v[0].arg_types.clone(), Box::new(v[0].ret_type.clone()));
+                        let mut map = HashMap::new();
+                        sig.replace_generics(type_var_counter, &mut map);
+                        monomorphisms.push((sig.clone(), index));
+                        constraints.push(TypeConstraint::Equals(meta.type_.clone(), sig));
+                    }
                 }
             }
         }
@@ -1021,11 +1027,17 @@ pub fn check<'a>(original: &'a str, sexprs: &mut Vec<SExpr<'a>>, func_map: &Hash
         skip = sexprs.len();
 
         if !monomorphisms.is_empty() {
+            let mut done = HashSet::new();
             for (mut t, index) in monomorphisms {
                 let mut monomorphised = sexprs[index].clone();
 
                 if let SExpr::FuncDef { meta, args, ret_type, .. } = &mut monomorphised {
                     flatten_substitution(&mut t, &unified);
+                    if done.contains(&t) {
+                        continue;
+                    }
+
+                    done.insert(t.clone());
                     meta.type_ = t.clone();
                     if let Type::Function(a, r) = t {
                         for (i, (_, arg)) in args.iter_mut().enumerate() {

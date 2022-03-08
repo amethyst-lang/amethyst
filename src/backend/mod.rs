@@ -547,7 +547,7 @@ impl Generator {
                 mangled.push('S');
                 Self::mangle_type(mangled, &**v);
             }
-            //SExprType::Struct(_, _) => todo!(),
+            SExprType::Struct(_, _) => todo!(),
             SExprType::Function(a, r) => {
                 mangled.push('U');
                 for (i, a) in a.iter().enumerate() {

@@ -8,7 +8,7 @@ pub struct Metadata<'a> {
     pub type_: Type<'a>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub enum Type<'a> {
     Unknown,
     UnknownInt,
