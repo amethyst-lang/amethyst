@@ -1,0 +1,12 @@
+(defstruct IntFloat
+    (int i32)
+    (float f64))
+
+(defun main : i32
+    (seq
+        (let if =
+            (inst IntFloat
+                (int 69)
+                (float 420.0)))
+        if.float
+        if.int))

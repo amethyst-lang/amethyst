@@ -158,7 +158,7 @@ pub enum LValue<'a> {
     Symbol(&'a str),
     Attribute(Box<LValue<'a>>, Vec<&'a str>),
     Deref(Box<LValue<'a>>),
-    Get(Type<'a>, Box<LValue<'a>>, Box<SExpr<'a>>),
+    Get(Box<LValue<'a>>, Box<SExpr<'a>>),
 }
 
 #[derive(Debug, Clone)]
@@ -959,7 +959,7 @@ fn lvalue_creator<'a>(ast: Ast<'a>) -> Result<LValue<'a>, LoweringError> {
                 Ast::Symbol(_, "get") if v.len() == 2 => {
                     let index = lower_helper(v.remove(1), false)?;
                     let slice = lvalue_creator(v.remove(0))?;
-                    Ok(LValue::Get(Type::Unknown, Box::new(slice), Box::new(index)))
+                    Ok(LValue::Get(Box::new(slice), Box::new(index)))
                 }
 
                 Ast::Symbol(_, "deref") if v.len() == 1 => {

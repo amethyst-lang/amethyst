@@ -371,6 +371,7 @@ fn create_lvalue_constraints<'a>(
                 Some(Type::TypeVariable(i)) => {
                     let t = Type::TypeVariable(*type_var_counter);
                     *type_var_counter += 1;
+                    var_ranges.push(0..0);
                     constraints.push(TypeConstraint::Equals(Type::TypeVariable(i), Type::Pointer(true, Box::new(t.clone()))));
                     Some(t)
                 }
@@ -379,21 +380,17 @@ fn create_lvalue_constraints<'a>(
             }
         }
 
-        LValue::Get(typ, v, i) => {
+        LValue::Get(v, i) => {
             create_constraints(&mut **i, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges);
             constraints.push(TypeConstraint::Equals(i.meta().type_.clone(), Type::Int(false, 64)));
             match create_lvalue_constraints(&mut **v, type_var_counter, constraints, func_map, struct_map, monomorphisms, scopes, var_ranges) {
-                Some(Type::Slice(_, t)) => {
-                    *typ = (*t).clone();
-                    Some(*t)
-                }
+                Some(Type::Slice(_, t)) => Some(*t),
 
                 Some(Type::TypeVariable(i)) => {
                     let t = Type::TypeVariable(*type_var_counter);
                     *type_var_counter += 1;
                     var_ranges.push(0..0);
                     constraints.push(TypeConstraint::Equals(Type::TypeVariable(i), Type::Slice(true, Box::new(t.clone()))));
-                    *typ = t.clone();
                     Some(t)
                 }
 
@@ -932,19 +929,6 @@ fn flatten_substitution<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
     }
 }
 
-fn apply_subs_lvalue<'a>(lvalue: &mut LValue<'a>, substitutions: &[Type<'a>]) {
-    match lvalue {
-        LValue::Symbol(_) => (),
-        LValue::Attribute(v, _) => apply_subs_lvalue(&mut **v, substitutions),
-        LValue::Deref(v) => apply_subs_lvalue(&mut **v, substitutions),
-        LValue::Get(t, v, i) => {
-            flatten_substitution(t, substitutions);
-            apply_subs_lvalue(&mut **v, substitutions);
-            apply_substitutions(&mut **i, substitutions);
-        }
-    }
-}
-
 fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
     flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
 
@@ -977,7 +961,6 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
             | SExpr::Break { value: Some(value), .. } => apply_substitutions(value, substitutions),
 
         SExpr::Assign { lvalue, value, .. } => {
-            apply_subs_lvalue(lvalue, substitutions);
             apply_substitutions(value, substitutions);
         }
 

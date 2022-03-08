@@ -20,7 +20,7 @@ fn main() {
     correctness::extract_structs(&sexprs, &mut struct_map);
     correctness::check(&contents, &mut sexprs, &func_map, &struct_map).unwrap();
     let mut gen = Generator::default();
-    gen.compile(sexprs);
+    gen.compile(sexprs, &struct_map);
     std::fs::write("main.o", gen.emit_object()).unwrap();
     Command::new("nasm")
         .arg("-f")
