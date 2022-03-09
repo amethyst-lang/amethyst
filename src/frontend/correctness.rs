@@ -1020,24 +1020,39 @@ enum FloatOrInt {
     Int,
 }
 
+fn get_leaf<'a, 'b>(mut t: &'b Type<'a>, substitutions: &'b HashMap<u64, Type<'a>>) -> &'b Type<'a> {
+    while let Type::TypeVariable(i) = t {
+        if let Some(u) = substitutions.get(i) {
+            t = u;
+        } else {
+            break;
+        }
+    }
+    t
+}
+
 fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &mut HashMap<u64, Type<'a>>) -> Result<(), CorrectnessError> {
-    if *assignee == Type::Unknown {
+    *assignee = get_leaf(assigner, substitutions).clone();
+    let assigner = get_leaf(assigner, substitutions).clone();
+    if assigner == *assignee {
+        Ok(())
+    } else if *assignee == Type::Unknown {
         *assignee = assigner.clone();
         Ok(())
     } else if let Type::TypeVariable(i) = assignee {
         if substitutions.insert(*i, assigner.clone()).is_some() {
             todo!("error handling");
         } else {
-            *assignee = assigner.clone();
+            *assignee = assigner;
             Ok(())
         }
     } else if let Type::TypeVariable(i) = assigner {
-        if substitutions.insert(*i, assignee.clone()).is_some() {
+        if substitutions.insert(i, assignee.clone()).is_some() {
             todo!("error handling");
         } else {
             Ok(())
         }
-    } else if assignee != assigner {
+    } else if *assignee != assigner {
         todo!("error handling");
     } else {
         Ok(())
@@ -1073,7 +1088,22 @@ fn traverse_sexpr<'a, 'b>(
         | SExpr::Str { .. }
         | SExpr::Nil { .. } => Ok(()),
 
-        SExpr::Symbol { meta, value } => todo!(),
+        SExpr::Symbol { meta, value } => {
+            let mut var_type = None;
+            for scope in scopes.iter_mut().rev() {
+                if let Some(t) = scope.get_mut(value) {
+                    var_type = Some(t);
+                    break;
+                }
+            }
+
+            if let Some(var_type) = var_type {
+                meta.type_ = var_type.clone();
+                Ok(())
+            } else {
+                todo!("error handling");
+            }
+        }
 
         SExpr::List { .. } => todo!(),
         SExpr::Quote { .. } => todo!(),
@@ -1082,6 +1112,7 @@ fn traverse_sexpr<'a, 'b>(
         SExpr::Splice { .. } => todo!(),
 
         SExpr::Seq { meta, values } => {
+            scopes.push(HashMap::new());
             for value in values.iter_mut() {
                 traverse_sexpr(value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
             }
@@ -1090,11 +1121,13 @@ fn traverse_sexpr<'a, 'b>(
                 meta.type_ = last.meta().type_.clone();
             }
 
+            scopes.pop();
             Ok(())
         }
 
         SExpr::Cond { meta, values, elsy } => {
             for (cond, then) in values.iter_mut() {
+                scopes.push(HashMap::new());
                 traverse_sexpr(cond, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
                 traverse_sexpr(then, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
 
@@ -1117,11 +1150,14 @@ fn traverse_sexpr<'a, 'b>(
                 }
 
                 substitute(&mut meta.type_, &then.meta().type_, substitutions)?;
+                scopes.pop();
             }
 
             if let Some(elsy) = elsy {
+                scopes.push(HashMap::new());
                 traverse_sexpr(&mut **elsy, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
                 substitute(&mut meta.type_, &elsy.meta().type_, substitutions)?;
+                scopes.pop();
             } else if meta.type_ != Type::Tuple(vec![]) {
                 todo!("error handling");
             }
@@ -1130,6 +1166,7 @@ fn traverse_sexpr<'a, 'b>(
         }
 
         SExpr::Loop { meta, value } => {
+            scopes.push(HashMap::new());
             let mut break_type = Some(Type::Unknown);
             traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, &mut break_type)?;
 
@@ -1138,6 +1175,7 @@ fn traverse_sexpr<'a, 'b>(
                 Some(v) => v,
                 None => unreachable!(),
             };
+            scopes.pop();
 
             Ok(())
         }
@@ -1183,12 +1221,41 @@ fn traverse_sexpr<'a, 'b>(
             }
         }
 
-        SExpr::FuncDef { meta, name, ret_type, args, expr } => todo!(),
+        SExpr::FuncDef { .. } => Ok(()),
+
         SExpr::FuncCall { meta, func, values } => todo!(),
         SExpr::StructDef { meta, name, fields } => todo!(),
         SExpr::StructSet { meta, name, values } => todo!(),
-        SExpr::Declare { meta, mutable, variable, value } => todo!(),
+
+        SExpr::Declare { meta, variable, value, .. } => {
+            traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+            meta.type_ = value.meta().type_.clone();
+            scopes.last_mut().unwrap().insert(*variable, meta.type_.clone());
+            Ok(())
+        }
+
+        SExpr::Assign { meta, lvalue: LValue::Symbol(variable), value } => {
+            traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+
+            let mut var_type = None;
+            for scope in scopes.iter_mut().rev() {
+                if let Some(t) = scope.get_mut(variable) {
+                    var_type = Some(t);
+                    break;
+                }
+            }
+
+            if let Some(var_type) = var_type {
+                substitute(var_type, &value.meta().type_, substitutions)?;
+                meta.type_ = var_type.clone();
+                Ok(())
+            } else {
+                todo!("error handling");
+            }
+        }
+
         SExpr::Assign { meta, lvalue, value } => todo!(),
+
         SExpr::Attribute { meta, top, attrs } => todo!(),
     }
 }
@@ -1239,11 +1306,22 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, T
 
         SExpr::Type { value, .. } => apply_substitutions(&mut **value, substitutions),
 
-        SExpr::FuncCall { func, values, .. } => todo!(),
-        SExpr::StructSet { values, .. } => todo!(),
-        SExpr::Declare { value, .. } => todo!(),
-        SExpr::Assign { value, .. } => todo!(),
-        SExpr::Attribute { top, .. } => todo!(),
+        SExpr::FuncCall { func, values, .. } => {
+            apply_substitutions(&mut **func, substitutions);
+            for value in values {
+                apply_substitutions(value, substitutions);
+            }
+        }
+
+        SExpr::StructSet { values, .. } => {
+            for (_, value) in values {
+                apply_substitutions(value, substitutions);
+            }
+        }
+
+        SExpr::Declare { value, .. } => apply_substitutions(&mut **value, substitutions),
+        SExpr::Assign { value, .. } => apply_substitutions(&mut **value, substitutions),
+        SExpr::Attribute { top, .. } => apply_substitutions(&mut **top, substitutions),
 
         _ => (),
     }
@@ -1256,17 +1334,25 @@ pub fn check<'a>(
     struct_map: &HashMap<&'a str, Struct<'a>>,
 ) -> Result<(), CorrectnessError> {
     let mut skip = 0;
-    let mut scopes = vec![HashMap::new()];
 
     while {
         let mut monomorphisms = vec![];
 
         for sexpr in sexprs.iter_mut().skip(skip) {
-            let mut type_var_counter = 0;
-            let mut substitutions = HashMap::new();
-            let mut coercions = HashMap::new();
+            if let SExpr::FuncDef { ret_type, args, expr, .. } = sexpr {
+                if args.iter().any(|(_, v)| v.has_generic()) || ret_type.has_generic() {
+                    continue;
+                }
 
-            if let SExpr::FuncDef { meta, name, ret_type, args, expr } = sexpr {
+                let mut scopes = vec![HashMap::new()];
+                for (arg, type_) in args {
+                    scopes.last_mut().unwrap().insert(*arg, type_.clone());
+                }
+
+                let mut type_var_counter = 0;
+                let mut substitutions = HashMap::new();
+                let mut coercions = HashMap::new();
+
                 traverse_sexpr(
                     expr,
                     &mut type_var_counter,
