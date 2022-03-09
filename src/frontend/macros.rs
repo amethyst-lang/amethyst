@@ -147,9 +147,12 @@ fn replace_macros_helper<'input>(
     ast: &mut Ast<'input>,
 ) -> bool {
     match ast {
-        Ast::Int(_, _) | Ast::Char(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Symbol(_, _) | Ast::Key(_, _) => {
-            false
-        }
+        Ast::Int(_, _)
+        | Ast::Char(_, _)
+        | Ast::Float(_, _)
+        | Ast::Str(_, _)
+        | Ast::Symbol(_, _)
+        | Ast::Key(_, _) => false,
 
         Ast::Quote(_, quote) => replace_macros_helper(map, quote),
         Ast::Comma(_, comma) => replace_macros_helper(map, comma),

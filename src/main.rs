@@ -8,8 +8,7 @@ use amethyst::parser::TopParser;
 fn main() {
     let contents = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
 
-    let mut asts = TopParser::new()
-        .parse(&contents).unwrap();
+    let mut asts = TopParser::new().parse(&contents).unwrap();
     let mut map = HashMap::new();
     macros::extract_macros(&mut map, &asts);
     macros::replace_macros(&map, &mut asts);
