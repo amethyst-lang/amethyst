@@ -110,20 +110,20 @@ impl<'a> Type<'a> {
         }
     }
 
-    pub fn replace_generics(&mut self, type_var_counter: &mut u64, map: &mut HashMap<&'a str, Self>) {
+    pub fn replace_generics(&mut self, type_var_counter: &mut u64, map: &mut HashMap<&'a str, Self>, var_ranges: &mut Vec<Range<usize>>) {
         match self {
             Type::Tuple(v) => {
                 for v in v {
-                    v.replace_generics(type_var_counter, map);
+                    v.replace_generics(type_var_counter, map, var_ranges);
                 }
             }
 
-            Type::Pointer(_, v) => v.replace_generics(type_var_counter, map),
-            Type::Slice(_, v) => v.replace_generics(type_var_counter, map),
+            Type::Pointer(_, v) => v.replace_generics(type_var_counter, map, var_ranges),
+            Type::Slice(_, v) => v.replace_generics(type_var_counter, map, var_ranges),
 
             Type::Struct(_, v) => {
                 for v in v {
-                    v.replace_generics(type_var_counter, map);
+                    v.replace_generics(type_var_counter, map, var_ranges);
                 }
             }
 
@@ -137,15 +137,16 @@ impl<'a> Type<'a> {
                         *self = Type::TypeVariable(*type_var_counter);
                         *type_var_counter += 1;
                         entry.insert(self.clone());
+                        var_ranges.push(0..0);
                     }
                 }
             }
 
             Type::Function(a, r) => {
                 for a in a {
-                    a.replace_generics(type_var_counter, map);
+                    a.replace_generics(type_var_counter, map, var_ranges);
                 }
-                r.replace_generics(type_var_counter, map);
+                r.replace_generics(type_var_counter, map, var_ranges);
             }
 
             _ => (),

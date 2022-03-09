@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, hash_map::Entry, HashSet}, ops::Range};
+use std::{collections::{HashMap, hash_map::Entry, HashSet}, ops::Range, iter::once};
 
 use petgraph::{Graph, Undirected, graph::NodeIndex};
 
@@ -141,9 +141,11 @@ fn create_constraints<'a>(
                 if v.len() == 1 {
                     if let Some(index) = v[0].index {
                         let mut sig = Type::Function(v[0].arg_types.clone(), Box::new(v[0].ret_type.clone()));
-                        let mut map = HashMap::new();
-                        sig.replace_generics(type_var_counter, &mut map);
-                        monomorphisms.push((sig.clone(), index));
+                        if sig.has_generic() {
+                            let mut map = HashMap::new();
+                            sig.replace_generics(type_var_counter, &mut map, var_ranges);
+                            monomorphisms.push((sig.clone(), index));
+                        }
                         constraints.push(TypeConstraint::Equals(meta.type_.clone(), sig));
                     }
                 }
@@ -255,7 +257,7 @@ fn create_constraints<'a>(
                             let mut sig = Type::Function(v.arg_types.clone(), Box::new(v.ret_type.clone()));
                             if sig.has_generic() {
                                 let mut map = HashMap::new();
-                                sig.replace_generics(type_var_counter, &mut map);
+                                sig.replace_generics(type_var_counter, &mut map, var_ranges);
                                 if let Some(index) = v.index {
                                     monomorphisms.push((sig.clone(), index));
                                 }
@@ -294,7 +296,7 @@ fn create_constraints<'a>(
                     if let Some((_, t)) = struct_.fields.iter().find(|(name, _)| *name == *field) {
                         let mut t = t.clone();
                         t.find_generics(&mut generics);
-                        t.replace_generics(type_var_counter, &mut map);
+                        t.replace_generics(type_var_counter, &mut map, var_ranges);
                         constraints.push(TypeConstraint::Equals(t, value.meta().type_.clone()));
                     }
                 }
@@ -647,8 +649,9 @@ fn unify_attrs<'a>(attrs: &[(Type<'a>, Type<'a>, Vec<&'a str>)], substitutions: 
                                     unreachable!("must be all generics");
                                 }
                             }).zip(generics.into_iter()).collect();
+                            let mut ranges = vec![];
                             obj = t.clone();
-                            obj.replace_generics(&mut type_var_counter, &mut map);
+                            obj.replace_generics(&mut type_var_counter, &mut map, &mut ranges);
                         } else {
                             return Err(CorrectnessError::InvalidAttr(Type::Struct(name, generics), *attr));
                         }
@@ -692,58 +695,75 @@ fn unify_attrs<'a>(attrs: &[(Type<'a>, Type<'a>, Vec<&'a str>)], substitutions: 
     Ok(())
 }
 
-fn get_shared_type_variables_helper(t: &Type, set: &mut HashSet<u64>) {
+fn get_shared_type_variables_helper<'a, 'b>(mut t: &'b Type<'a>, set: &mut HashSet<u64>, substitutions: &'b [Type<'a>]) {
     match t {
         Type::Tuple(v) => {
             for v in v {
-                get_shared_type_variables_helper(v, set);
+                get_shared_type_variables_helper(v, set, substitutions);
             }
         }
 
-        Type::Pointer(_, v) => get_shared_type_variables_helper(&**v, set),
-        Type::Slice(_, v) => get_shared_type_variables_helper(&**v, set),
+        Type::Pointer(_, v) => get_shared_type_variables_helper(&**v, set, substitutions),
+        Type::Slice(_, v) => get_shared_type_variables_helper(&**v, set, substitutions),
 
         Type::Struct(_, g) => {
             for g in g {
-                get_shared_type_variables_helper(g, set);
+                get_shared_type_variables_helper(g, set, substitutions);
             }
         }
 
         Type::Function(a, r) => {
             for a in a {
-                get_shared_type_variables_helper(a, set);
+                get_shared_type_variables_helper(a, set, substitutions);
             }
 
-            get_shared_type_variables_helper(&**r, set);
+            get_shared_type_variables_helper(&**r, set, substitutions);
         }
 
-        Type::TypeVariable(v) => {
-            set.insert(*v);
+        Type::TypeVariable(_) => {
+            let original = t;
+
+            while let &Type::TypeVariable(v) = t {
+                set.insert(v);
+                let u = &substitutions[v as usize];
+                if t == u {
+                    break;
+                }
+                t = u;
+            }
+
+            let mut t = original.clone();
+            loop {
+                let mut not_found = true;
+                for (i, sub) in substitutions.iter().enumerate() {
+                    if *sub == t {
+                        if let Type::TypeVariable(j) = t {
+                            if i as u64 == j {
+                                continue;
+                            }
+                        }
+                        not_found = false;
+                        set.insert(i as u64);
+                        t = Type::TypeVariable(i as u64);
+                        break;
+                    }
+                }
+
+                if not_found {
+                    break;
+                }
+            }
         }
         _ => (),
     }
 }
 
-fn get_shared_type_variables(t1: &Type, t2: &Type) -> Vec<u64> {
+fn get_shared_type_variables(t1: &Type, t2: &Type, substitutions: &[Type]) -> Vec<u64> {
     let mut a = HashSet::new();
     let mut b = HashSet::new();
-    get_shared_type_variables_helper(t1, &mut a);
-    get_shared_type_variables_helper(t2, &mut b);
+    get_shared_type_variables_helper(t1, &mut a, substitutions);
+    get_shared_type_variables_helper(t2, &mut b, substitutions);
     a.intersection(&b).cloned().collect()
-}
-
-fn unify_get_connected_nodes<'a>(unification_graph: &Graph<(Type<'a>, Vec<Type<'a>>), u64, Undirected, u32>, index: NodeIndex) -> Vec<NodeIndex> {
-    let mut result = HashSet::new();
-    let mut stack = vec![index];
-
-    while let Some(i) = stack.pop() {
-        if !result.insert(i) {
-            let neighbours = unification_graph.neighbors(i);
-            stack.extend(neighbours);
-        }
-    }
-
-    result.into_iter().collect()
 }
 
 fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, struct_map: &HashMap<&'a str, Struct<'a>>) -> Result<Vec<Type<'a>>, CorrectnessError<'a>> {
@@ -813,39 +833,36 @@ fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, 
         unification_graph.add_node(v);
     }
 
-    for i in unification_graph.node_indices() {
-        for j in unification_graph.node_indices() {
+    for (k, i) in unification_graph.node_indices().enumerate() {
+        for j in unification_graph.node_indices().skip(k) {
             if i != j {
-                let (t1, v1) = unification_graph.node_weight(i).unwrap().clone();
-                let (t2, v2) = unification_graph.node_weight(j).unwrap().clone();
-                let v = get_shared_type_variables(&t1, &t2);
+                let (t1, _) = unification_graph.node_weight(i).unwrap();
+                let (t2, _) = unification_graph.node_weight(j).unwrap();
+                let v = get_shared_type_variables(t1, t2, &substitutions);
                 for v in v {
                     unification_graph.add_edge(i, j, v);
-                }
-                for v in v1 {
-                    let v = get_shared_type_variables(&t1, &v);
-                    for v in v {
-                        unification_graph.add_edge(i, j, v);
-                    }
-                }
-                for v in v2 {
-                    let v = get_shared_type_variables(&t1, &v);
-                    for v in v {
-                        unification_graph.add_edge(i, j, v);
-                    }
                 }
             }
         }
     }
 
     if !unification_graph.raw_nodes().is_empty() {
+        println!("{:?}", unification_graph.node_indices().map(|v| unification_graph.neighbors(v).count() + 1).collect::<Vec<_>>());
+        let mut done = HashSet::new();
         for i in unification_graph.node_indices() {
-            let connected = unify_get_connected_nodes(&unification_graph, i);
+            if done.contains(&i) {
+                continue;
+            }
+
+            let connected: Vec<_> = unification_graph.neighbors(i).chain(once(i)).collect();
+            done.extend(connected.iter().cloned());
+
             let mut selected = vec![0; connected.len()];
             let mut successes = vec![];
 
             'b: loop {
                 let mut sub = substitutions.clone();
+                let mut foi = float_or_int.clone();
                 let mut success = true;
 
                 for (i, index) in connected.iter().enumerate() {
@@ -856,8 +873,13 @@ fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, 
                     }
                 }
 
-                if success && unify_attrs(&attrs, &mut sub, struct_map).is_ok() {
-                    successes.push(sub);
+                if success
+                    && unify_type_variable_propagator(&mut sub, &mut foi).is_ok()
+                    && check_float_or_int(&mut sub, &foi).is_ok()
+                    && unify_type_variable_propagator(&mut sub, &mut foi).is_ok()
+                    && unify_attrs(&attrs, &mut sub, struct_map).is_ok()
+                {
+                    successes.push((sub, foi));
                 }
 
                 let last_index = selected.len() - 1;
@@ -875,16 +897,16 @@ fn unify_types<'a>(type_var_counter: u64, constraints: Vec<TypeConstraint<'a>>, 
                 }
             }
 
+            println!("length: {}", successes.len());
             if successes.len() == 1 {
-                substitutions = successes.remove(0);
+                let (subs, foi) = successes.remove(0);
+                substitutions = subs;
+                float_or_int = foi;
             } else {
+                println!("{:?}", connected.iter().map(|v| unification_graph.node_weight(*v).unwrap()).collect::<Vec<_>>());
                 return Err(CorrectnessError::TooManyPossibilities);
             }
         }
-
-        unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
-        check_float_or_int(&mut substitutions, &float_or_int)?;
-        unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
     } else {
         unify_type_variable_propagator(&mut substitutions, &mut float_or_int)?;
         check_float_or_int(&mut substitutions, &float_or_int)?;
@@ -929,6 +951,18 @@ fn flatten_substitution<'a>(t: &mut Type<'a>, substitutions: &[Type<'a>]) {
     }
 }
 
+fn apply_lvalue_subs<'a>(lvalue: &mut LValue<'a>, substitutions: &[Type<'a>]) {
+    match lvalue {
+        LValue::Symbol(_) => (),
+        LValue::Attribute(v, _) => apply_lvalue_subs(&mut **v, substitutions),
+        LValue::Deref(v) => apply_lvalue_subs(&mut **v, substitutions),
+        LValue::Get(v, i) => {
+            apply_lvalue_subs(&mut **v, substitutions);
+            apply_substitutions(&mut **i, substitutions);
+        }
+    }
+}
+
 fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
     flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
 
@@ -962,6 +996,7 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
 
         SExpr::Assign { lvalue, value, .. } => {
             apply_substitutions(value, substitutions);
+            apply_lvalue_subs(lvalue, substitutions);
         }
 
 
