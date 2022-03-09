@@ -1018,7 +1018,6 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &[Type<'a>]) {
 enum FloatOrInt {
     Float,
     Int,
-    Nillable,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1027,11 +1026,11 @@ fn traverse_sexpr<'a, 'b>(
     type_var_counter: &mut u64,
     substitutions: &mut HashMap<u64, Type<'a>>,
     coercions: &mut HashMap<u64, FloatOrInt>,
-    var_ranges: &mut Vec<Range<usize>>,
     func_map: &HashMap<&'a str, Vec<Signature<'a>>>,
     struct_map: &HashMap<&'a str, Struct<'a>>,
     monomorphisms: &mut Vec<(Type<'a>, usize)>,
     scopes: &mut Vec<HashMap<&'a str, Type<'a>>>,
+    break_type: &mut Option<Type<'a>>,
 ) -> Result<(), CorrectnessError> {
     let t = &mut sexpr.meta_mut().type_;
     if *t == Type::UnknownInt {
@@ -1047,7 +1046,8 @@ fn traverse_sexpr<'a, 'b>(
     match sexpr {
         SExpr::Int { .. }
         | SExpr::Float { .. }
-        | SExpr::Str { .. } => Ok(()),
+        | SExpr::Str { .. }
+        | SExpr::Nil { .. } => Ok(()),
 
         SExpr::Symbol { meta, value } => todo!(),
 
@@ -1059,7 +1059,7 @@ fn traverse_sexpr<'a, 'b>(
 
         SExpr::Seq { meta, values } => {
             for value in values.iter_mut() {
-                traverse_sexpr(value, type_var_counter, substitutions, coercions, var_ranges, func_map, struct_map, monomorphisms, scopes)?;
+                traverse_sexpr(value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
             }
 
             if let Some(last) = values.last() {
@@ -1071,8 +1071,8 @@ fn traverse_sexpr<'a, 'b>(
 
         SExpr::Cond { meta, values, elsy } => {
             for (cond, then) in values.iter_mut() {
-                traverse_sexpr(cond, type_var_counter, substitutions, coercions, var_ranges, func_map, struct_map, monomorphisms, scopes)?;
-                traverse_sexpr(then, type_var_counter, substitutions, coercions, var_ranges, func_map, struct_map, monomorphisms, scopes)?;
+                traverse_sexpr(cond, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+                traverse_sexpr(then, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
 
                 match &cond.meta().type_ {
                     Type::Int(_, _) => (),
@@ -1110,7 +1110,7 @@ fn traverse_sexpr<'a, 'b>(
             }
 
             if let Some(elsy) = elsy {
-                traverse_sexpr(&mut **elsy, type_var_counter, substitutions, coercions, var_ranges, func_map, struct_map, monomorphisms, scopes)?;
+                traverse_sexpr(&mut **elsy, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
                 if meta.type_ == Type::Unknown {
                     meta.type_ = elsy.meta().type_.clone();
                 } else if let Type::TypeVariable(i) = meta.type_ {
@@ -1133,12 +1133,52 @@ fn traverse_sexpr<'a, 'b>(
             Ok(())
         }
 
-        SExpr::Loop { meta, value } => todo!(),
-        SExpr::Break { meta, value } => todo!(),
-        SExpr::Nil { meta } => todo!(),
+        SExpr::Loop { meta, value } => {
+            let mut break_type = None;
+            traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, &mut break_type)?;
+
+            meta.type_ = break_type.unwrap_or_else(|| Type::Tuple(vec![]));
+            Ok(())
+        }
+
+        SExpr::Break { value, .. } => {
+            if let Some(value) = value {
+                traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+
+                if let Some(break_type) = break_type {
+                    if let &mut Type::TypeVariable(i) = break_type {
+                        if substitutions.insert(i, value.meta().type_.clone()).is_some() {
+                            todo!("error handling");
+                        } else {
+                            *break_type = value.meta().type_.clone();
+                        }
+                    } else if let Type::TypeVariable(i) = value.meta().type_ {
+                        if substitutions.insert(i, break_type.clone()).is_some() {
+                            todo!("error handling");
+                        }
+                    } 
+                } else {
+                    *break_type = Some(value.meta().type_.clone());
+                }
+            } else if let Some(break_type) = break_type {
+                if let &mut Type::TypeVariable(i) = break_type {
+                    if substitutions.insert(i, Type::Tuple(vec![])).is_some() {
+                        todo!("error handling");
+                    } else {
+                        *break_type = Type::Tuple(vec![]);
+                    }
+                } else if *break_type != Type::Tuple(vec![]) {
+                    todo!("error handling");
+                }
+            } else {
+                *break_type = Some(Type::Tuple(vec![]));
+            }
+
+            Ok(())
+        }
 
         SExpr::Type { meta, value } => {
-            traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, var_ranges, func_map, struct_map, monomorphisms, scopes)?;
+            traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
 
             match &value.meta().type_ {
                 &Type::TypeVariable(i) => {
@@ -1214,8 +1254,8 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, T
             }
         }
 
-        SExpr::Loop { value, .. } => todo!(),
-        SExpr::Break { value: Some(value), .. } => todo!(),
+        SExpr::Loop { value, .. } => apply_substitutions(&mut **value, substitutions),
+        SExpr::Break { value: Some(value), .. } => apply_substitutions(&mut **value, substitutions),
 
         SExpr::Type { value, .. } => apply_substitutions(&mut **value, substitutions),
 
@@ -1245,7 +1285,7 @@ pub fn check<'a>(
             let mut type_var_counter = 0;
             let mut substitutions = HashMap::new();
             let mut coercions = HashMap::new();
-            let mut var_ranges = vec![];
+            let mut break_type = None;
 
             if let SExpr::FuncDef { meta, name, ret_type, args, expr } = sexpr {
                 traverse_sexpr(
@@ -1253,11 +1293,11 @@ pub fn check<'a>(
                     &mut type_var_counter,
                     &mut substitutions,
                     &mut coercions,
-                    &mut var_ranges,
                     func_map,
                     struct_map,
                     &mut monomorphisms,
                     &mut scopes,
+                    &mut break_type
                 )?;
 
                 for (i, coercion) in coercions {
@@ -1267,7 +1307,6 @@ pub fn check<'a>(
                             match coercion {
                                 FloatOrInt::Float => v.insert(Type::F64),
                                 FloatOrInt::Int => v.insert(Type::Int(true, 32)),
-                                FloatOrInt::Nillable => v.insert(Type::Tuple(vec![])),
                             };
                         }
                     }
