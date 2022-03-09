@@ -1031,15 +1031,22 @@ fn get_leaf<'a, 'b>(mut t: &'b Type<'a>, substitutions: &'b HashMap<u64, Type<'a
     t
 }
 
-fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &mut HashMap<u64, Type<'a>>) -> Result<(), CorrectnessError> {
-    *assignee = get_leaf(assigner, substitutions).clone();
+fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &mut HashMap<u64, Type<'a>>, coercions: &mut HashMap<u64, FloatOrInt>) -> Result<(), CorrectnessError> {
+    *assignee = get_leaf(assignee, substitutions).clone();
     let assigner = get_leaf(assigner, substitutions).clone();
+
     if assigner == *assignee {
         Ok(())
     } else if *assignee == Type::Unknown {
         *assignee = assigner.clone();
         Ok(())
     } else if let Type::TypeVariable(i) = assignee {
+        match (coercions.get(i), &assigner) {
+            (Some(FloatOrInt::Int), Type::Int(_, _)) => (),
+            (Some(FloatOrInt::Float), Type::F32 | Type::F64) => (),
+            (None, _) => (),
+            _ => todo!("error handling"),
+        }
         if substitutions.insert(*i, assigner.clone()).is_some() {
             todo!("error handling");
         } else {
@@ -1047,6 +1054,12 @@ fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &
             Ok(())
         }
     } else if let Type::TypeVariable(i) = assigner {
+        match (coercions.get(&i), &assignee) {
+            (Some(FloatOrInt::Int), Type::Int(_, _)) => (),
+            (Some(FloatOrInt::Float), Type::F32 | Type::F64) => (),
+            (None, _) => (),
+            _ => todo!("error handling"),
+        }
         if substitutions.insert(i, assignee.clone()).is_some() {
             todo!("error handling");
         } else {
@@ -1149,14 +1162,14 @@ fn traverse_sexpr<'a, 'b>(
                     _ => todo!("error handling"),
                 }
 
-                substitute(&mut meta.type_, &then.meta().type_, substitutions)?;
+                substitute(&mut meta.type_, &then.meta().type_, substitutions, coercions)?;
                 scopes.pop();
             }
 
             if let Some(elsy) = elsy {
                 scopes.push(HashMap::new());
                 traverse_sexpr(&mut **elsy, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
-                substitute(&mut meta.type_, &elsy.meta().type_, substitutions)?;
+                substitute(&mut meta.type_, &elsy.meta().type_, substitutions, coercions)?;
                 scopes.pop();
             } else if meta.type_ != Type::Tuple(vec![]) {
                 todo!("error handling");
@@ -1184,12 +1197,12 @@ fn traverse_sexpr<'a, 'b>(
             if let Some(value) = value {
                 traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
                 if let Some(type_) = break_type {
-                    substitute(type_, &value.meta().type_, substitutions)
+                    substitute(type_, &value.meta().type_, substitutions, coercions)
                 } else {
                     todo!("error handling");
                 }
             } else if let Some(type_) = break_type {
-                substitute(type_, &Type::Tuple(vec![]), substitutions)
+                substitute(type_, &Type::Tuple(vec![]), substitutions, coercions)
             } else {
                 todo!("error handling");
             }
@@ -1197,28 +1210,7 @@ fn traverse_sexpr<'a, 'b>(
 
         SExpr::Type { meta, value } => {
             traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
-
-            match &value.meta().type_ {
-                &Type::TypeVariable(i) => {
-                    match substitutions.entry(i) {
-                        Entry::Occupied(o) => {
-                            if *o.get() == meta.type_ {
-                                Ok(())
-                            } else {
-                                todo!("error handling");
-                            }
-                        }
-
-                        Entry::Vacant(v) => {
-                            v.insert(meta.type_.clone());
-                            Ok(())
-                        }
-                    }
-                }
-
-                v if *v == meta.type_ => Ok(()),
-                _ => todo!("error handling"),
-            }
+            substitute(&mut meta.type_, &value.meta().type_, substitutions, coercions)
         }
 
         SExpr::FuncDef { .. } => Ok(()),
@@ -1246,7 +1238,7 @@ fn traverse_sexpr<'a, 'b>(
             }
 
             if let Some(var_type) = var_type {
-                substitute(var_type, &value.meta().type_, substitutions)?;
+                substitute(var_type, &value.meta().type_, substitutions, coercions)?;
                 meta.type_ = var_type.clone();
                 Ok(())
             } else {
