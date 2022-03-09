@@ -1020,6 +1020,30 @@ enum FloatOrInt {
     Int,
 }
 
+fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &mut HashMap<u64, Type<'a>>) -> Result<(), CorrectnessError> {
+    if *assignee == Type::Unknown {
+        *assignee = assigner.clone();
+        Ok(())
+    } else if let Type::TypeVariable(i) = assignee {
+        if substitutions.insert(*i, assigner.clone()).is_some() {
+            todo!("error handling");
+        } else {
+            *assignee = assigner.clone();
+            Ok(())
+        }
+    } else if let Type::TypeVariable(i) = assigner {
+        if substitutions.insert(*i, assignee.clone()).is_some() {
+            todo!("error handling");
+        } else {
+            Ok(())
+        }
+    } else if assignee != assigner {
+        todo!("error handling");
+    } else {
+        Ok(())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn traverse_sexpr<'a, 'b>(
     sexpr: &'b mut SExpr<'a>,
@@ -1092,40 +1116,12 @@ fn traverse_sexpr<'a, 'b>(
                     _ => todo!("error handling"),
                 }
 
-                if meta.type_ == Type::Unknown {
-                    meta.type_ = then.meta().type_.clone();
-                } else if let Type::TypeVariable(i) = meta.type_ {
-                    if substitutions.insert(i, then.meta().type_.clone()).is_some() {
-                        todo!("error handling");
-                    } else {
-                        meta.type_ = then.meta().type_.clone();
-                    }
-                } else if let Type::TypeVariable(i) = then.meta().type_ {
-                    if substitutions.insert(i, meta.type_.clone()).is_some() {
-                        todo!("error handling");
-                    }
-                } else if meta.type_ != then.meta().type_ {
-                    todo!("error handling");
-                }
+                substitute(&mut meta.type_, &then.meta().type_, substitutions)?;
             }
 
             if let Some(elsy) = elsy {
                 traverse_sexpr(&mut **elsy, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
-                if meta.type_ == Type::Unknown {
-                    meta.type_ = elsy.meta().type_.clone();
-                } else if let Type::TypeVariable(i) = meta.type_ {
-                    if substitutions.insert(i, elsy.meta().type_.clone()).is_some() {
-                        todo!("error handling");
-                    } else {
-                        meta.type_ = elsy.meta().type_.clone();
-                    }
-                } else if let Type::TypeVariable(i) = elsy.meta().type_ {
-                    if substitutions.insert(i, meta.type_.clone()).is_some() {
-                        todo!("error handling");
-                    }
-                } else if meta.type_ != elsy.meta().type_ {
-                    todo!("error handling");
-                }
+                substitute(&mut meta.type_, &elsy.meta().type_, substitutions)?;
             } else if meta.type_ != Type::Tuple(vec![]) {
                 todo!("error handling");
             }
@@ -1134,47 +1130,31 @@ fn traverse_sexpr<'a, 'b>(
         }
 
         SExpr::Loop { meta, value } => {
-            let mut break_type = None;
+            let mut break_type = Some(Type::Unknown);
             traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, &mut break_type)?;
 
-            meta.type_ = break_type.unwrap_or_else(|| Type::Tuple(vec![]));
+            meta.type_ = match break_type {
+                Some(Type::Unknown) => Type::Tuple(vec![]),
+                Some(v) => v,
+                None => unreachable!(),
+            };
+
             Ok(())
         }
 
         SExpr::Break { value, .. } => {
             if let Some(value) = value {
                 traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
-
-                if let Some(break_type) = break_type {
-                    if let &mut Type::TypeVariable(i) = break_type {
-                        if substitutions.insert(i, value.meta().type_.clone()).is_some() {
-                            todo!("error handling");
-                        } else {
-                            *break_type = value.meta().type_.clone();
-                        }
-                    } else if let Type::TypeVariable(i) = value.meta().type_ {
-                        if substitutions.insert(i, break_type.clone()).is_some() {
-                            todo!("error handling");
-                        }
-                    } 
+                if let Some(type_) = break_type {
+                    substitute(type_, &value.meta().type_, substitutions)
                 } else {
-                    *break_type = Some(value.meta().type_.clone());
-                }
-            } else if let Some(break_type) = break_type {
-                if let &mut Type::TypeVariable(i) = break_type {
-                    if substitutions.insert(i, Type::Tuple(vec![])).is_some() {
-                        todo!("error handling");
-                    } else {
-                        *break_type = Type::Tuple(vec![]);
-                    }
-                } else if *break_type != Type::Tuple(vec![]) {
                     todo!("error handling");
                 }
+            } else if let Some(type_) = break_type {
+                substitute(type_, &Type::Tuple(vec![]), substitutions)
             } else {
-                *break_type = Some(Type::Tuple(vec![]));
+                todo!("error handling");
             }
-
-            Ok(())
         }
 
         SExpr::Type { meta, value } => {
@@ -1285,7 +1265,6 @@ pub fn check<'a>(
             let mut type_var_counter = 0;
             let mut substitutions = HashMap::new();
             let mut coercions = HashMap::new();
-            let mut break_type = None;
 
             if let SExpr::FuncDef { meta, name, ret_type, args, expr } = sexpr {
                 traverse_sexpr(
@@ -1297,7 +1276,7 @@ pub fn check<'a>(
                     struct_map,
                     &mut monomorphisms,
                     &mut scopes,
-                    &mut break_type
+                    &mut None,
                 )?;
 
                 for (i, coercion) in coercions {
