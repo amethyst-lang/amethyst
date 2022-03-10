@@ -26,8 +26,6 @@ fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &
     *assignee = get_leaf(assignee, substitutions).clone();
     let assigner = get_leaf(assigner, substitutions).clone();
 
-    println!("{:?}, {:?}, {:?}", assignee, assigner, substitutions);
-
     if assigner == *assignee {
         Ok(())
     } else if *assignee == Type::Unknown {
@@ -132,8 +130,8 @@ fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &
 }
 
 #[allow(clippy::too_many_arguments)]
-fn traverse_sexpr<'a, 'b>(
-    sexpr: &'b mut SExpr<'a>,
+fn traverse_sexpr<'a>(
+    sexpr: &mut SExpr<'a>,
     type_var_counter: &mut u64,
     substitutions: &mut HashMap<u64, Type<'a>>,
     coercions: &mut HashMap<u64, FloatOrInt>,
@@ -308,7 +306,8 @@ fn traverse_sexpr<'a, 'b>(
             }
         }
 
-        SExpr::StructDef { meta, name, fields } => todo!(),
+        SExpr::StructDef { .. } => Ok(()),
+
         SExpr::StructSet { meta, name, values } => todo!(),
 
         SExpr::Declare { meta, variable, value, .. } => {
@@ -338,9 +337,103 @@ fn traverse_sexpr<'a, 'b>(
             }
         }
 
-        SExpr::Assign { meta, lvalue, value } => todo!(),
+        SExpr::Assign { meta, lvalue, value } => {
+            let type_ = traverse_lvalue(lvalue, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+            meta.type_ = type_;
+            traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+            substitute(&mut value.meta_mut().type_, &meta.type_, substitutions, coercions)
+        }
 
-        SExpr::Attribute { meta, top, attrs } => todo!(),
+        SExpr::Attribute { meta, top, attrs } => {
+            traverse_sexpr(&mut **top, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+
+            match &top.meta().type_ {
+                Type::Slice(_, t) => {
+                    if attrs.len() != 1 {
+                        todo!("error handling");
+                    }
+
+                    match attrs[0] {
+                        "ptr" => {
+                            meta.type_ = Type::Pointer(true, t.clone());
+                        }
+
+                        "len" | "cap" => {
+                            meta.type_ = Type::Int(false, 64);
+                        }
+
+                        _ => todo!("error handling"),
+                    }
+                }
+
+                Type::Struct(_, _) => todo!(),
+
+                _ => todo!("error handling"),
+            }
+
+            Ok(())
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn traverse_lvalue<'a>(
+    lvalue: &mut LValue<'a>,
+    type_var_counter: &mut u64,
+    substitutions: &mut HashMap<u64, Type<'a>>,
+    coercions: &mut HashMap<u64, FloatOrInt>,
+    func_map: &HashMap<&'a str, Signature<'a>>,
+    struct_map: &HashMap<&'a str, Struct<'a>>,
+    monomorphisms: &mut Vec<(Type<'a>, usize)>,
+    scopes: &mut Vec<HashMap<&'a str, Type<'a>>>,
+    break_type: &mut Option<Type<'a>>,
+) -> Result<Type<'a>, CorrectnessError> {
+    match lvalue {
+        LValue::Symbol(sym) => {
+            for scope in scopes.iter().rev() {
+                if let Some(typ) = scope.get(sym) {
+                    return Ok(typ.clone());
+                }
+            }
+
+            todo!("error handling");
+        }
+
+        LValue::Attribute(_, _) => todo!(),
+
+        LValue::Deref(v) => {
+            let mut type_ = traverse_lvalue(&mut **v, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+            match type_ {
+                Type::Pointer(_, t) => Ok(*t),
+
+                Type::TypeVariable(_) => {
+                    let t = Type::TypeVariable(*type_var_counter);
+                    *type_var_counter += 1;
+                    substitute(&mut type_, &Type::Pointer(true, Box::new(t.clone())), substitutions, coercions)?;
+                    Ok(t)
+                }
+
+                _ => todo!("error handling"),
+            }
+        }
+
+        LValue::Get(v, i) => {
+            traverse_sexpr(&mut **i, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+            substitute(&mut i.meta_mut().type_, &Type::Int(false, 64), substitutions, coercions)?;
+            let mut type_ = traverse_lvalue(&mut **v, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+            match type_ {
+                Type::Slice(_, t) => Ok(*t),
+
+                Type::TypeVariable(_) => {
+                    let t = Type::TypeVariable(*type_var_counter);
+                    *type_var_counter += 1;
+                    substitute(&mut type_, &Type::Slice(true, Box::new(t.clone())), substitutions, coercions)?;
+                    Ok(t)
+                }
+
+                _ => todo!("error handling"),
+            }
+        }
     }
 }
 
