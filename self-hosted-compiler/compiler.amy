@@ -1,6 +1,111 @@
+//
+// ==================================================================================================
+// STANDARD LIBRARY STUFFS
+// ==================================================================================================
+//
+
+
+
+// Loops while a condition is true.
+(defmacro
+    while condy
+        stat
+    &key else
+    (loop
+        (cond
+            (condy stat)
+            (:else (break else)))))
+
+// Prints out a string onto stdout.
 (defun print (str (@ mut u8))
     (seqn
         (syscall 1 1 (cast str.ptr) str.len 0 0 0)))
 
+// Prints out a string onto stderr.
+(defun eprint (str (@ mut u8))
+    (seqn
+        (syscall 1 2 (cast str.ptr) str.len 0 0 0)))
+
+// Exits the program
+(defun exit (code i32)
+    (seqn
+        (syscall 60 (cast code) 0 0 0 0 0)))
+
+// Creates a subslice from a given slice and range.
+(defun subslice (s (@ mut 'a)) (start u64) (end u64) : (@ mut 'a)
+    (slice (- end start) (ptr-add s.ptr start)))
+
+// Defines a file (wrapper around a file descriptor).
+(defstruct File
+    (descriptor i32))
+
+(defun file-is-valid (file File) : u1
+    (!= file.descriptor (- 0 1)))
+
+(defmacro FILE_OPEN_FLAG_READ_ONLY 0)
+
+// Opens a file.
+(defun file-open (path (@ mut u8)) (flags u64) : File
+    (seq
+        (let null-term = (alloca (+ path.len 1)))
+        (let i = 0)
+        (while (< i path.len)
+            (seqn
+                (set (get null-term i) = (get path i))
+                (set i = (+ i 1))))
+        (set (get null-term i) = '\0')
+        (inst File
+            (descriptor
+                (cast (syscall 2 (cast null-term.ptr) flags 0 0 0 0))))))
+
+// Closes a previously opened file.
+(defun file-close (file File)
+    (seqn
+        (syscall 3 (cast file.descriptor) 0 0 0 0 0)))
+
+
+
+//
+// ==================================================================================================
+// LEXING
+// ==================================================================================================
+//
+
+
+
+// Defines a location in source code.
+(defstruct Location
+    (start u64)
+    (end u64))
+
+// Defines a token.
+(defstruct Token
+    (loc Location)
+    (type u64)
+    (value (@ mut u8)))
+
+(defmacro TOKEN_TYPE_EOF 0)
+(defmacro TOKEN_TYPE_INT 1)
+
+
+
+//
+// ==================================================================================================
+// MAIN
+// ==================================================================================================
+//
+
+
+
 (defun main
-    (print "hewo\n"))
+    (seqn
+        (print "hewo\n")
+        (let file = (file-open "self-hosted-compiler/compiler.amy" (FILE_OPEN_FLAG_READ_ONLY)))
+        (cond
+            ((file-is-valid file)
+                (print "opened file!\n"))
+            (:else (seq
+                (eprint "failed to open file :(\n")
+                (exit 1))))
+        (file-close file)))
+

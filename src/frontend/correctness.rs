@@ -901,6 +901,16 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
             index: None,
         },
     );
+    map.insert("ptr-add", Signature {
+        arg_types: vec![Type::Pointer(true, Box::new(Type::Generic("a"))), Type::Int(false, 64)],
+        ret_type: Type::Pointer(true, Box::new(Type::Generic("a"))),
+        index: None,
+    });
+    map.insert("ptr-sub", Signature {
+        arg_types: vec![Type::Pointer(true, Box::new(Type::Generic("a"))), Type::Int(false, 64)],
+        ret_type: Type::Pointer(true, Box::new(Type::Generic("a"))),
+        index: None,
+    });
     map.insert(
         "slice",
         Signature {

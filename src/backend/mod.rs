@@ -498,6 +498,24 @@ impl Generator {
                         }
                     }
 
+                    SExpr::Symbol { value: "ptr-add", .. } => {
+                        if let SExprType::Pointer(_, t) = &meta.type_ {
+                            let i = builder.ins().imul_imm(values[1][0], Self::size_of(&**t, structs) as i64);
+                            vec![builder.ins().iadd(values[0][0], i)]
+                        } else {
+                            unreachable!();
+                        }
+                    }
+
+                    SExpr::Symbol { value: "ptr-sub", .. } => {
+                        if let SExprType::Pointer(_, t) = &meta.type_ {
+                            let i = builder.ins().imul_imm(values[1][0], Self::size_of(&**t, structs) as i64);
+                            vec![builder.ins().isub(values[0][0], i)]
+                        } else {
+                            unreachable!();
+                        }
+                    }
+
                     SExpr::Symbol {
                         value: "alloca", ..
                     } => {
