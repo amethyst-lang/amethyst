@@ -1087,10 +1087,50 @@ fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &
         } else {
             Ok(())
         }
-    } else if *assignee != assigner {
-        todo!("error handling");
     } else {
-        Ok(())
+        match (assignee, assigner) {
+            (Type::Tuple(v1), Type::Tuple(v2)) => {
+                if v1.len() != v2.len() {
+                    todo!("error handling");
+                }
+
+                for (a, b) in v1.iter_mut().zip(v2) {
+                    substitute(a, &b, substitutions, coercions)?;
+                }
+
+                Ok(())
+            }
+
+            (Type::Pointer(_, a), Type::Pointer(_, b)) => substitute(&mut **a, &*b, substitutions, coercions),
+            (Type::Slice(_, a), Type::Slice(_, b)) => substitute(&mut **a, &*b, substitutions, coercions),
+
+            (Type::Struct(_, v1), Type::Struct(_, v2)) => {
+                if v1.len() != v2.len() {
+                    todo!("error handling");
+                }
+
+                for (a, b) in v1.iter_mut().zip(v2) {
+                    substitute(a, &b, substitutions, coercions)?;
+                }
+
+                Ok(())
+            }
+
+            (Type::Function(a1, r1), Type::Function(a2, r2)) => {
+                if a1.len() != a2.len() {
+                    todo!("error handling");
+                }
+
+                for (a, b) in a1.iter_mut().zip(a2) {
+                    substitute(a, &b, substitutions, coercions)?;
+                }
+
+                substitute(&mut **r1, &*r2, substitutions, coercions)
+            }
+
+            (a, b) if *a == b => Ok(()),
+            _ => todo!("error handling"),
+        }
     }
 }
 
@@ -1136,9 +1176,14 @@ fn traverse_sexpr<'a, 'b>(
                 meta.type_ = var_type.clone();
                 Ok(())
             } else if let Some(func) = func_map.get(value) {
-                let mut map = HashMap::new();
                 meta.type_ = Type::Function(func.arg_types.clone(), Box::new(func.ret_type.clone()));
-                meta.type_.replace_generics(type_var_counter, &mut map);
+                if meta.type_.has_generic() {
+                    let mut map = HashMap::new();
+                    meta.type_.replace_generics(type_var_counter, &mut map);
+                    if let Some(index) = func.index {
+                        monomorphisms.push((meta.type_.clone(), index));
+                    }
+                }
                 Ok(())
             } else {
                 todo!("error handling");
@@ -1302,22 +1347,42 @@ fn traverse_sexpr<'a, 'b>(
     }
 }
 
-fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, Type<'a>>) {
-    if let Type::TypeVariable(i) = sexpr.meta().type_ {
-        if let Some(mut t) = substitutions.get(&i) {
-            while let Type::TypeVariable(i) = t {
-                if let Some(v) = substitutions.get(i) {
-                    t = v;
-                } else {
-                    todo!("error handling");
-                }
+fn flatten_substitution<'a>(t1: &mut Type<'a>, substitutions: &HashMap<u64, Type<'a>>) {
+    match t1 {
+        Type::Tuple(v) => {
+            for v in v {
+                flatten_substitution(v, substitutions);
+            }
+        }
+
+        Type::Pointer(_, v) => flatten_substitution(&mut **v, substitutions),
+        Type::Slice(_, v) => flatten_substitution(&mut **v, substitutions),
+
+        Type::Struct(_, v) => {
+            for v in v {
+                flatten_substitution(v, substitutions);
+            }
+        }
+
+        Type::Function(a, r) => {
+            for a in a {
+                flatten_substitution(a, substitutions);
             }
 
-            sexpr.meta_mut().type_ = t.clone();
-        } else {
-            todo!("error handling");
+            flatten_substitution(&mut **r, substitutions);
         }
+
+        Type::TypeVariable(i) => {
+            *t1 = substitutions.get(i).unwrap().clone();
+            flatten_substitution(t1, substitutions);
+        }
+
+        _ => (),
     }
+}
+
+fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, Type<'a>>) {
+    flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
 
     match sexpr {
         SExpr::List { .. } => todo!(),
@@ -1380,6 +1445,9 @@ pub fn check<'a>(
     while {
         let mut monomorphisms = vec![];
 
+        let mut type_var_counter = 0;
+        let mut substitutions = HashMap::new();
+        let mut coercions = HashMap::new();
         for sexpr in sexprs.iter_mut().skip(skip) {
             if let SExpr::FuncDef { ret_type, args, expr, .. } = sexpr {
                 if args.iter().any(|(_, v)| v.has_generic()) || ret_type.has_generic() {
@@ -1390,10 +1458,6 @@ pub fn check<'a>(
                 for (arg, type_) in args {
                     scopes.last_mut().unwrap().insert(*arg, type_.clone());
                 }
-
-                let mut type_var_counter = 0;
-                let mut substitutions = HashMap::new();
-                let mut coercions = HashMap::new();
 
                 traverse_sexpr(
                     expr,
@@ -1407,7 +1471,7 @@ pub fn check<'a>(
                     &mut None,
                 )?;
 
-                for (i, coercion) in coercions {
+                for (&i, &coercion) in coercions.iter() {
                     match substitutions.entry(i) {
                         Entry::Occupied(_) => (),
                         Entry::Vacant(v) => {
@@ -1440,18 +1504,11 @@ pub fn check<'a>(
         skip = sexprs.len();
 
         if !monomorphisms.is_empty() {
-            /*
-            let mut done = HashSet::new();
             for (mut t, index) in monomorphisms {
+                flatten_substitution(&mut t, &substitutions);
                 let mut monomorphised = sexprs[index].clone();
 
                 if let SExpr::FuncDef { meta, args, ret_type, .. } = &mut monomorphised {
-                    //flatten_substitution(&mut t, &unified);
-                    if done.contains(&t) {
-                        continue;
-                    }
-
-                    done.insert(t.clone());
                     meta.type_ = t.clone();
                     if let Type::Function(a, r) = t {
                         for (i, (_, arg)) in args.iter_mut().enumerate() {
@@ -1464,7 +1521,6 @@ pub fn check<'a>(
                     }
                 }
             }
-            */
 
             true
         } else {
