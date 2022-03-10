@@ -9,5 +9,5 @@
                 (int 68)
                 (float 420.0)))
         if.float
-        //(set if.int = 69)
+        (set if.int = 69)
         if.int))
