@@ -400,6 +400,9 @@ impl Generator {
                     SExpr::Symbol { value: "+", .. } => {
                         if meta.type_ == SExprType::F32 || meta.type_ == SExprType::F64 {
                             vec![builder.ins().fadd(values[0][0], values[1][0])]
+                        } else if let SExprType::Pointer(_, t) = &meta.type_ {
+                            let offset = builder.ins().imul_imm(values[1][0], Self::size_of(&**t, structs) as i64);
+                            vec![builder.ins().iadd(values[0][0], offset)]
                         } else {
                             vec![builder.ins().iadd(values[0][0], values[1][0])]
                         }
@@ -408,6 +411,9 @@ impl Generator {
                     SExpr::Symbol { value: "-", .. } => {
                         if meta.type_ == SExprType::F32 || meta.type_ == SExprType::F64 {
                             vec![builder.ins().fsub(values[0][0], values[1][0])]
+                        } else if let SExprType::Pointer(_, t) = &meta.type_ {
+                            let offset = builder.ins().imul_imm(values[1][0], Self::size_of(&**t, structs) as i64);
+                            vec![builder.ins().isub(values[0][0], offset)]
                         } else {
                             vec![builder.ins().isub(values[0][0], values[1][0])]
                         }
@@ -467,10 +473,20 @@ impl Generator {
                     }
 
                     SExpr::Symbol { value: "cast", .. } => {
+                        let t = Self::convert_type_to_type(&meta.type_, structs)[0];
                         match (&meta.type_, &args[0].meta().type_) {
-                            (SExprType::Int(_, width1), SExprType::Int(_, width2)) => todo!(),
+                            (SExprType::Int(_, width1), SExprType::Int(_, width2)) if width1 == width2 => vec![values[0][0]],
+                            (SExprType::Int(_, width1), SExprType::Int(_, width2)) if width1 < width2 => vec![builder.ins().ireduce(t, values[0][0])],
+                            (SExprType::Int(true, width1), SExprType::Int(_, width2)) => vec![builder.ins().sextend(t, values[0][0])],
+                            (SExprType::Int(false, width1), SExprType::Int(_, width2)) => vec![builder.ins().uextend(t, values[0][0])],
                             (SExprType::Pointer(_, _), SExprType::Int(_, _)) => vec![values[0][0]],
                             (SExprType::Int(_, _), SExprType::Pointer(_, _)) => vec![values[0][0]],
+                            (SExprType::Int(true, _), SExprType::F32 | SExprType::F64) => vec![builder.ins().fcvt_to_sint(t, values[0][0])],
+                            (SExprType::Int(false, _), SExprType::F32 | SExprType::F64) => vec![builder.ins().fcvt_to_uint(t, values[0][0])],
+                            (SExprType::F32 | SExprType::F64, SExprType::Int(true, _)) => vec![builder.ins().fcvt_from_sint(t, values[0][0])],
+                            (SExprType::F32 | SExprType::F64, SExprType::Int(false, _)) => vec![builder.ins().fcvt_from_uint(t, values[0][0])],
+                            (SExprType::F32, SExprType::F64) => vec![builder.ins().fdemote(t, values[0][0])],
+                            (SExprType::F64, SExprType::F32) => vec![builder.ins().fpromote(t, values[0][0])],
                             _ => todo!(
                                 "casting into {:?} from {:?}",
                                 meta.type_,
@@ -481,20 +497,8 @@ impl Generator {
 
                     SExpr::Symbol {
                         value: "alloca", ..
-                    } => match &meta.type_ {
-                        SExprType::Pointer(_, v) => {
-                            let slot = builder.create_stack_slot(StackSlotData::new(
-                                StackSlotKind::ExplicitSlot,
-                                Self::size_of(&**v, structs),
-                            ));
-                            vec![builder.ins().stack_addr(
-                                Self::convert_type_to_type_ref(&meta.type_, structs),
-                                slot,
-                                0,
-                            )]
-                        }
-
-                        SExprType::Slice(_, v) => {
+                    } => {
+                        if let SExprType::Slice(_, v) = &meta.type_ {
                             const SIZE: u32 = 512;
                             let len = values[0][0];
                             let size = builder
@@ -516,10 +520,10 @@ impl Generator {
                                 0,
                             );
                             vec![len, reference]
+                        } else {
+                            unreachable!()
                         }
-
-                        _ => unreachable!(),
-                    },
+                    }
 
                     SExpr::Symbol { value: "get", .. } => {
                         let v = values[0][1];
@@ -539,6 +543,19 @@ impl Generator {
                         result
                     }
 
+                    SExpr::Symbol { meta, value: "ref" } => {
+                        if let SExprType::Pointer(_, t) = &meta.type_ {
+                            let value = &values[0];
+                            let slot = builder.create_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, Self::size_of(&**t, structs)));
+                            for (&value, (offset, _)) in value.iter().zip(Self::offsets_and_sizes_of(&**t, structs)) {
+                                builder.ins().stack_store(value, slot, offset);
+                            }
+                            vec![builder.ins().stack_addr(Self::convert_type_to_type(&meta.type_, structs)[0], slot, 0)]
+                        } else {
+                            unreachable!();
+                        }
+                    }
+
                     SExpr::Symbol { value: "deref", .. } => {
                         let ptr = values[0][0];
                         let mut result = vec![];
@@ -552,13 +569,13 @@ impl Generator {
                         result
                     }
 
-                    SExpr::Symbol { value: "&", .. } => {
+                    SExpr::Symbol { value: "&" | "and", .. } => {
                         vec![builder.ins().band(values[0][0], values[1][0])]
                     }
-                    SExpr::Symbol { value: "|", .. } => {
+                    SExpr::Symbol { value: "|" | "or", .. } => {
                         vec![builder.ins().bor(values[0][0], values[1][0])]
                     }
-                    SExpr::Symbol { value: "^", .. } => {
+                    SExpr::Symbol { value: "^" | "xor", .. } => {
                         vec![builder.ins().bxor(values[0][0], values[1][0])]
                     }
                     SExpr::Symbol { value: "<<", .. } => {
@@ -568,24 +585,52 @@ impl Generator {
                         vec![builder.ins().ushr(values[0][0], values[1][0])]
                     }
 
-                    SExpr::Symbol { value: "<", .. } => {
+                    &SExpr::Symbol { value, .. } if value == "<" || value == ">" || value == "<=" || value == ">=" || value == "!=" || value == "==" => {
                         if meta.type_ == SExprType::F32 || meta.type_ == SExprType::F64 {
                             vec![builder
                                 .ins()
-                                .fcmp(FloatCC::LessThan, values[0][0], values[1][0])]
+                                .fcmp(match value {
+                                    "<" => FloatCC::LessThan,
+                                    ">" => FloatCC::GreaterThan,
+                                    "<=" => FloatCC::LessThanOrEqual,
+                                    ">=" => FloatCC::GreaterThanOrEqual,
+                                    "!=" => FloatCC::NotEqual,
+                                    "==" => FloatCC::Equal,
+                                    _ => unreachable!(),
+                                }, values[0][0], values[1][0])]
                         } else if matches!(meta.type_, SExprType::Int(true, _)) {
                             vec![builder.ins().icmp(
-                                IntCC::SignedLessThan,
+                                match value {
+                                    "<" => IntCC::SignedLessThan,
+                                    ">" => IntCC::SignedGreaterThan,
+                                    "<=" => IntCC::SignedLessThanOrEqual,
+                                    ">=" => IntCC::SignedGreaterThanOrEqual,
+                                    "!=" => IntCC::NotEqual,
+                                    "==" => IntCC::Equal,
+                                    _ => unreachable!(),
+                                },
                                 values[0][0],
                                 values[1][0],
                             )]
                         } else {
                             vec![builder.ins().icmp(
-                                IntCC::UnsignedLessThan,
+                                match value {
+                                    "<" => IntCC::UnsignedLessThan,
+                                    ">" => IntCC::UnsignedGreaterThan,
+                                    "<=" => IntCC::UnsignedLessThanOrEqual,
+                                    ">=" => IntCC::UnsignedGreaterThanOrEqual,
+                                    "!=" => IntCC::NotEqual,
+                                    "==" => IntCC::Equal,
+                                    _ => unreachable!(),
+                                },
                                 values[0][0],
                                 values[1][0],
                             )]
                         }
+                    }
+
+                    SExpr::Symbol { value: "slice", .. } => {
+                        vec![values[0][0], values[1][0]]
                     }
 
                     SExpr::Symbol { meta, value } => {
