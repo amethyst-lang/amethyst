@@ -401,6 +401,14 @@ fn traverse_sexpr<'a>(
                 Type::Struct(_, _) => {
                     let mut t = top.meta().type_.clone();
                     for &mut attr in attrs {
+                        while let Type::TypeVariable(i) = t {
+                            if let Some(u) = substitutions.get(&i) {
+                                t = u.clone();
+                            } else {
+                                todo!("error handling");
+                            }
+                        }
+
                         match t {
                             Type::Slice(_, u) => {
                                 match attr {
@@ -476,6 +484,14 @@ fn traverse_lvalue<'a>(
         LValue::Attribute(v, attrs) => {
             let mut t = traverse_lvalue(&mut **v, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
             for &mut attr in attrs {
+                while let Type::TypeVariable(i) = t {
+                    if let Some(u) = substitutions.get(&i) {
+                        t = u.clone();
+                    } else {
+                        todo!("error handling");
+                    }
+                }
+
                 if let Type::Struct(name, generics) = t {
                     if let Some(struct_) = struct_map.get(name) {
                         let mut map = struct_.generics.iter().zip(generics).map(|(key, val)| {
