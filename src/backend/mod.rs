@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use cranelift::prelude::{*, isa::CallConv, codegen::Context};
-use cranelift_module::{DataContext, Module, Linkage};
-use cranelift_object::{ObjectModule, ObjectBuilder};
+use cranelift::prelude::{codegen::Context, isa::CallConv, *};
+use cranelift_module::{DataContext, Linkage, Module};
+use cranelift_object::{ObjectBuilder, ObjectModule};
 use target_lexicon::triple;
 
-use crate::frontend::{ast_lowering::{SExpr, Type as SExprType, LValue}, correctness::Struct};
+use crate::frontend::{
+    ast_lowering::{LValue, SExpr, Type as SExprType},
+    correctness::Struct,
+};
 
 pub struct Generator {
     builder_context: FunctionBuilderContext,
@@ -24,7 +27,12 @@ impl Default for Generator {
 
         let f = settings::Flags::new(b);
         let isa_data = isa::lookup(triple!("x86_64-elf")).unwrap().finish(f);
-        let builder = ObjectBuilder::new(isa_data, "x86_64", cranelift_module::default_libcall_names()).unwrap();
+        let builder = ObjectBuilder::new(
+            isa_data,
+            "x86_64",
+            cranelift_module::default_libcall_names(),
+        )
+        .unwrap();
         let module = ObjectModule::new(builder);
         Self {
             builder_context: FunctionBuilderContext::new(),
@@ -42,7 +50,14 @@ impl Generator {
 
     fn translate(&mut self, sexprs: &[SExpr<'_>], structs: &HashMap<&str, Struct>) {
         for sexpr in sexprs {
-            if let SExpr::FuncDef { name, ret_type, args, expr, .. } = sexpr {
+            if let SExpr::FuncDef {
+                name,
+                ret_type,
+                args,
+                expr,
+                ..
+            } = sexpr
+            {
                 if args.iter().any(|(_, v)| v.has_generic()) || ret_type.has_generic() {
                     continue;
                 }
@@ -76,15 +91,31 @@ impl Generator {
                     var_map[0].insert(*name, vars);
                 }
 
-                // TODO: returning strings
-                let ret_value = Self::translate_expr(&**expr, &mut builder, &mut var_map, &mut var_index, None, &mut self.module, &mut self.ctx, &mut self.data_ctx, structs);
+                let ret_value = Self::translate_expr(
+                    &**expr,
+                    &mut builder,
+                    &mut var_map,
+                    &mut var_index,
+                    None,
+                    &mut self.module,
+                    &mut self.ctx,
+                    &mut self.data_ctx,
+                    structs,
+                );
                 builder.ins().return_(&ret_value);
                 builder.seal_all_blocks();
                 println!("{}", builder.func);
                 builder.finalize();
                 self.ctx.func = func;
 
-                let id = self.module.declare_function(&Self::mangle_func(name, args.iter().map(|(_, v)| v), ret_type), Linkage::Export, &self.ctx.func.signature).unwrap();
+                let id = self
+                    .module
+                    .declare_function(
+                        &Self::mangle_func(name, args.iter().map(|(_, v)| v), ret_type),
+                        Linkage::Export,
+                        &self.ctx.func.signature,
+                    )
+                    .unwrap();
                 self.module.define_function(id, &mut self.ctx).unwrap();
                 self.module.clear_context(&mut self.ctx);
                 var_map.clear();
@@ -93,14 +124,30 @@ impl Generator {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn translate_expr<'a>(sexpr: &SExpr<'a>, builder: &mut FunctionBuilder, var_map: &mut Vec<HashMap<&'a str, Vec<Variable>>>, var_index: &mut usize, break_block: Option<Block>, module: &mut ObjectModule, ctx: &mut Context, data_ctx: &mut DataContext, structs: &HashMap<&str, Struct>) -> Vec<Value> {
+    fn translate_expr<'a>(
+        sexpr: &SExpr<'a>,
+        builder: &mut FunctionBuilder,
+        var_map: &mut Vec<HashMap<&'a str, Vec<Variable>>>,
+        var_index: &mut usize,
+        break_block: Option<Block>,
+        module: &mut ObjectModule,
+        ctx: &mut Context,
+        data_ctx: &mut DataContext,
+        structs: &HashMap<&str, Struct>,
+    ) -> Vec<Value> {
         #[allow(unused)]
         match sexpr {
             SExpr::Int { meta, value } => {
                 if matches!(meta.type_, SExprType::Int(_, 1)) {
-                    vec![builder.ins().bconst(Self::convert_type_to_type_ref(&meta.type_, structs), *value != 0)]
+                    vec![builder.ins().bconst(
+                        Self::convert_type_to_type(&meta.type_, structs)[0],
+                        *value != 0,
+                    )]
                 } else {
-                    vec![builder.ins().iconst(Self::convert_type_to_type_ref(&meta.type_, structs), *value as i64)]
+                    vec![builder.ins().iconst(
+                        Self::convert_type_to_type(&meta.type_, structs)[0],
+                        *value as i64,
+                    )]
                 }
             }
 
@@ -113,12 +160,25 @@ impl Generator {
 
                 let mut sig = Signature::new(CallConv::SystemV);
                 if let SExprType::Function(a, r) = &meta.type_ {
-                    sig.params.extend(a.iter().map(|v| Self::convert_type_to_type_ref(v, structs)).map(AbiParam::new));
-                    sig.returns.push(AbiParam::new(Self::convert_type_to_type_ref(&**r, structs)));
-                    let func = module.declare_function(&Self::mangle_func(value, a.iter(), &**r), Linkage::Import, &sig).unwrap();
+                    sig.params.extend(
+                        a.iter()
+                            .map(|v| Self::convert_type_to_type_ref(v, structs))
+                            .map(AbiParam::new),
+                    );
+                    sig.returns
+                        .push(AbiParam::new(Self::convert_type_to_type_ref(&**r, structs)));
+                    let func = module
+                        .declare_function(
+                            &Self::mangle_func(value, a.iter(), &**r),
+                            Linkage::Import,
+                            &sig,
+                        )
+                        .unwrap();
                     let func = module.declare_func_in_func(func, builder.func);
 
-                    vec![builder.ins().func_addr(Self::convert_type_to_type_ref(&meta.type_, structs), func)]
+                    vec![builder
+                        .ins()
+                        .func_addr(Self::convert_type_to_type_ref(&meta.type_, structs), func)]
                 } else {
                     unreachable!("func must have type func");
                 }
@@ -136,22 +196,49 @@ impl Generator {
                 let name = format!("{}", var_index);
                 *var_index += 1;
                 data_ctx.define(Box::from(value.as_bytes()));
-                let sym = module.declare_data(&name, Linkage::Hidden, false, false).unwrap();
+                let sym = module
+                    .declare_data(&name, Linkage::Hidden, false, false)
+                    .unwrap();
                 module.define_data(sym, data_ctx).unwrap();
                 data_ctx.clear();
                 let val = module.declare_data_in_func(sym, builder.func);
-                let size = builder.ins().iconst(Self::convert_type_to_type_ref(&SExprType::Int(false, 64), structs), value.len() as i64);
-                let reference = builder.ins().global_value(Self::convert_type_to_type_ref(&meta.type_, structs), val);
+                let size = builder.ins().iconst(
+                    Self::convert_type_to_type_ref(&SExprType::Int(false, 64), structs),
+                    value.len() as i64,
+                );
+                let reference = builder
+                    .ins()
+                    .global_value(Self::convert_type_to_type_ref(&meta.type_, structs), val);
                 vec![size, reference]
             }
 
             SExpr::Seq { values, .. } => {
                 var_map.push(HashMap::new());
                 for value in values[..values.len() - 1].iter() {
-                    Self::translate_expr(value, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+                    Self::translate_expr(
+                        value,
+                        builder,
+                        var_map,
+                        var_index,
+                        break_block,
+                        module,
+                        ctx,
+                        data_ctx,
+                        structs,
+                    );
                 }
 
-                let v = Self::translate_expr(values.last().unwrap(), builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+                let v = Self::translate_expr(
+                    values.last().unwrap(),
+                    builder,
+                    var_map,
+                    var_index,
+                    break_block,
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                );
                 var_map.pop();
                 v
             }
@@ -172,11 +259,31 @@ impl Generator {
 
                 for (i, (cond, body)) in values.iter().enumerate() {
                     var_map.push(HashMap::new());
-                    let cond = Self::translate_expr(cond, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs)[0];
+                    let cond = Self::translate_expr(
+                        cond,
+                        builder,
+                        var_map,
+                        var_index,
+                        break_block,
+                        module,
+                        ctx,
+                        data_ctx,
+                        structs,
+                    )[0];
                     builder.ins().brz(cond, conds[i + 1], &[]);
                     builder.ins().jump(thens[i], &[]);
                     builder.switch_to_block(thens[i]);
-                    let then = Self::translate_expr(body, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+                    let then = Self::translate_expr(
+                        body,
+                        builder,
+                        var_map,
+                        var_index,
+                        break_block,
+                        module,
+                        ctx,
+                        data_ctx,
+                        structs,
+                    );
                     var_map.pop();
                     builder.ins().jump(last, &then);
                     builder.switch_to_block(conds[i + 1]);
@@ -184,7 +291,17 @@ impl Generator {
 
                 let elsy = if let Some(elsy) = elsy {
                     var_map.push(HashMap::new());
-                    let v = Self::translate_expr(&**elsy, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+                    let v = Self::translate_expr(
+                        &**elsy,
+                        builder,
+                        var_map,
+                        var_index,
+                        break_block,
+                        module,
+                        ctx,
+                        data_ctx,
+                        structs,
+                    );
                     var_map.pop();
                     v
                 } else {
@@ -207,16 +324,36 @@ impl Generator {
                 builder.ins().jump(loop_block, &[]);
                 builder.switch_to_block(loop_block);
                 var_map.push(HashMap::new());
-                Self::translate_expr(&**value, builder, var_map, var_index, Some(break_block), module, ctx, data_ctx, structs);
+                Self::translate_expr(
+                    &**value,
+                    builder,
+                    var_map,
+                    var_index,
+                    Some(break_block),
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                );
                 var_map.pop();
                 builder.ins().jump(loop_block, &[]);
                 builder.switch_to_block(break_block);
                 builder.block_params(break_block).to_vec()
             }
 
-            SExpr::Break { meta, value } => {
+            SExpr::Break { value, .. } => {
                 let value = if let Some(value) = value {
-                    Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs)
+                    Self::translate_expr(
+                        &**value,
+                        builder,
+                        var_map,
+                        var_index,
+                        break_block,
+                        module,
+                        ctx,
+                        data_ctx,
+                        structs,
+                    )
                 } else {
                     vec![]
                 };
@@ -227,13 +364,38 @@ impl Generator {
                 vec![]
             }
 
-            SExpr::Nil { meta } => vec![],
+            SExpr::Nil { .. } => vec![],
 
-            SExpr::Type { value, .. } => Self::translate_expr(value, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs),
+            SExpr::Type { value, .. } => Self::translate_expr(
+                value,
+                builder,
+                var_map,
+                var_index,
+                break_block,
+                module,
+                ctx,
+                data_ctx,
+                structs,
+            ),
 
             SExpr::FuncCall { meta, func, values } => {
                 let args = values;
-                let values: Vec<_> = args.iter().map(|v| Self::translate_expr(v, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs)).collect();
+                let values: Vec<_> = args
+                    .iter()
+                    .map(|v| {
+                        Self::translate_expr(
+                            v,
+                            builder,
+                            var_map,
+                            var_index,
+                            break_block,
+                            module,
+                            ctx,
+                            data_ctx,
+                            structs,
+                        )
+                    })
+                    .collect();
                 match &**func {
                     SExpr::Symbol { value: "+", .. } => {
                         if meta.type_ == SExprType::F32 || meta.type_ == SExprType::F64 {
@@ -277,14 +439,30 @@ impl Generator {
                         }
                     }
 
-                    SExpr::Symbol { value: "syscall", .. } => {
+                    SExpr::Symbol {
+                        value: "syscall", ..
+                    } => {
                         let mut syscall_sig = Signature::new(CallConv::SystemV);
-                        syscall_sig.params.extend([AbiParam::new(Self::convert_type_to_type_ref(&SExprType::Int(false, 64), structs)); 7]);
-                        syscall_sig.returns.push(AbiParam::new(Self::convert_type_to_type_ref(&SExprType::Int(false, 64), structs)));
-                        let syscall = module.declare_function("syscall_", Linkage::Import, &syscall_sig).unwrap();
+                        syscall_sig.params.extend(
+                            [AbiParam::new(Self::convert_type_to_type_ref(
+                                &SExprType::Int(false, 64),
+                                structs,
+                            )); 7],
+                        );
+                        syscall_sig
+                            .returns
+                            .push(AbiParam::new(Self::convert_type_to_type_ref(
+                                &SExprType::Int(false, 64),
+                                structs,
+                            )));
+                        let syscall = module
+                            .declare_function("syscall_", Linkage::Import, &syscall_sig)
+                            .unwrap();
                         let syscall = module.declare_func_in_func(syscall, builder.func);
 
-                        let call = builder.ins().call(syscall, &values.into_iter().flatten().collect::<Vec<_>>());
+                        let call = builder
+                            .ins()
+                            .call(syscall, &values.into_iter().flatten().collect::<Vec<_>>());
                         builder.inst_results(call).to_vec()
                     }
 
@@ -293,79 +471,161 @@ impl Generator {
                             (SExprType::Int(_, width1), SExprType::Int(_, width2)) => todo!(),
                             (SExprType::Pointer(_, _), SExprType::Int(_, _)) => vec![values[0][0]],
                             (SExprType::Int(_, _), SExprType::Pointer(_, _)) => vec![values[0][0]],
-                            _ => todo!("casting into {:?} from {:?}", meta.type_, args[0].meta().type_),
+                            _ => todo!(
+                                "casting into {:?} from {:?}",
+                                meta.type_,
+                                args[0].meta().type_
+                            ),
                         }
                     }
 
-                    SExpr::Symbol { value: "alloca", .. } => {
-                        match &meta.type_ {
-                            SExprType::Pointer(_, v) => {
-                                let slot = builder.create_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, Self::size_of(&**v, structs)));
-                                vec![builder.ins().stack_addr(Self::convert_type_to_type_ref(&meta.type_, structs), slot, 0)]
-                            }
-
-                            SExprType::Slice(_, v) => {
-                                const SIZE: u32 = 512;
-                                let len = values[0][0];
-                                let size = builder.ins().imul_imm(len, Self::size_of(&**v, structs) as i64);
-                                let flags = builder.ins().icmp_imm(IntCC::UnsignedLessThanOrEqual, size, SIZE as i64);
-                                builder.ins().trapz(flags, TrapCode::StackOverflow);
-                                let slot = builder.create_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, SIZE));
-                                let reference = builder.ins().stack_addr(Self::convert_type_to_type_ref(&meta.type_, structs), slot, 0);
-                                let slot = builder.create_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16));
-                                vec![len, reference]
-                            }
-
-                            _ => unreachable!(),
+                    SExpr::Symbol {
+                        value: "alloca", ..
+                    } => match &meta.type_ {
+                        SExprType::Pointer(_, v) => {
+                            let slot = builder.create_stack_slot(StackSlotData::new(
+                                StackSlotKind::ExplicitSlot,
+                                Self::size_of(&**v, structs),
+                            ));
+                            vec![builder.ins().stack_addr(
+                                Self::convert_type_to_type_ref(&meta.type_, structs),
+                                slot,
+                                0,
+                            )]
                         }
-                    }
+
+                        SExprType::Slice(_, v) => {
+                            const SIZE: u32 = 512;
+                            let len = values[0][0];
+                            let size = builder
+                                .ins()
+                                .imul_imm(len, Self::size_of(&**v, structs) as i64);
+                            let flags = builder.ins().icmp_imm(
+                                IntCC::UnsignedLessThanOrEqual,
+                                size,
+                                SIZE as i64,
+                            );
+                            builder.ins().trapz(flags, TrapCode::StackOverflow);
+                            let slot = builder.create_stack_slot(StackSlotData::new(
+                                StackSlotKind::ExplicitSlot,
+                                SIZE,
+                            ));
+                            let reference = builder.ins().stack_addr(
+                                Self::convert_type_to_type_ref(&meta.type_, structs),
+                                slot,
+                                0,
+                            );
+                            vec![len, reference]
+                        }
+
+                        _ => unreachable!(),
+                    },
 
                     SExpr::Symbol { value: "get", .. } => {
                         let v = values[0][1];
                         let i = values[1][0];
-                        let v = builder.ins().load(Self::convert_type_to_type_ref(&SExprType::Pointer(true, Box::new(SExprType::F32)), structs), MemFlags::new(), v, 8);
-                        let i = builder.ins().imul_imm(i, Self::size_of(&meta.type_, structs) as i64);
+                        let i = builder
+                            .ins()
+                            .imul_imm(i, Self::size_of(&meta.type_, structs) as i64);
                         let ptr = builder.ins().iadd(v, i);
-                        vec![builder.ins().load(Self::convert_type_to_type_ref(&meta.type_, structs), MemFlags::new(), ptr, 0)]
+                        let mut result = vec![];
+                        let offsets = Self::offsets_and_sizes_of(&meta.type_, structs);
+                        for (t, (offset, _)) in Self::convert_type_to_type(&meta.type_, structs)
+                            .into_iter()
+                            .zip(offsets)
+                        {
+                            result.push(builder.ins().load(t, MemFlags::new(), ptr, offset));
+                        }
+                        result
                     }
 
-                    SExpr::Symbol { value: "&", .. } => vec![builder.ins().band(values[0][0], values[1][0])],
-                    SExpr::Symbol { value: "|", .. } => vec![builder.ins().bor(values[0][0], values[1][0])],
-                    SExpr::Symbol { value: "^", .. } => vec![builder.ins().bxor(values[0][0], values[1][0])],
-                    SExpr::Symbol { value: "<<", .. } => vec![builder.ins().ishl(values[0][0], values[1][0])],
-                    SExpr::Symbol { value: ">>", .. } => vec![builder.ins().ushr(values[0][0], values[1][0])],
+                    SExpr::Symbol { value: "deref", .. } => {
+                        let ptr = values[0][0];
+                        let mut result = vec![];
+                        let offsets = Self::offsets_and_sizes_of(&meta.type_, structs);
+                        for (t, (offset, _)) in Self::convert_type_to_type(&meta.type_, structs)
+                            .into_iter()
+                            .zip(offsets)
+                        {
+                            result.push(builder.ins().load(t, MemFlags::new(), ptr, offset));
+                        }
+                        result
+                    }
+
+                    SExpr::Symbol { value: "&", .. } => {
+                        vec![builder.ins().band(values[0][0], values[1][0])]
+                    }
+                    SExpr::Symbol { value: "|", .. } => {
+                        vec![builder.ins().bor(values[0][0], values[1][0])]
+                    }
+                    SExpr::Symbol { value: "^", .. } => {
+                        vec![builder.ins().bxor(values[0][0], values[1][0])]
+                    }
+                    SExpr::Symbol { value: "<<", .. } => {
+                        vec![builder.ins().ishl(values[0][0], values[1][0])]
+                    }
+                    SExpr::Symbol { value: ">>", .. } => {
+                        vec![builder.ins().ushr(values[0][0], values[1][0])]
+                    }
 
                     SExpr::Symbol { value: "<", .. } => {
                         if meta.type_ == SExprType::F32 || meta.type_ == SExprType::F64 {
-                            vec![builder.ins().fcmp(FloatCC::LessThan, values[0][0], values[1][0])]
+                            vec![builder
+                                .ins()
+                                .fcmp(FloatCC::LessThan, values[0][0], values[1][0])]
                         } else if matches!(meta.type_, SExprType::Int(true, _)) {
-                            vec![builder.ins().icmp(IntCC::SignedLessThan, values[0][0], values[1][0])]
+                            vec![builder.ins().icmp(
+                                IntCC::SignedLessThan,
+                                values[0][0],
+                                values[1][0],
+                            )]
                         } else {
-                            vec![builder.ins().icmp(IntCC::UnsignedLessThan, values[0][0], values[1][0])]
+                            vec![builder.ins().icmp(
+                                IntCC::UnsignedLessThan,
+                                values[0][0],
+                                values[1][0],
+                            )]
                         }
                     }
 
                     SExpr::Symbol { meta, value } => {
                         let mut sig = Signature::new(CallConv::SystemV);
                         if let SExprType::Function(a, r) = &meta.type_ {
-                            sig.params.extend(a.iter().map(|v| Self::convert_type_to_type_ref(v, structs)).map(AbiParam::new));
-                            sig.returns.push(AbiParam::new(Self::convert_type_to_type_ref(&**r, structs)));
+                            sig.params.extend(
+                                a.iter()
+                                    .map(|v| Self::convert_type_to_type_ref(v, structs))
+                                    .map(AbiParam::new),
+                            );
+                            sig.returns
+                                .push(AbiParam::new(Self::convert_type_to_type_ref(&**r, structs)));
                         }
 
                         for scope in var_map.iter().rev() {
                             if let Some(func) = scope.get(value) {
                                 let sig = builder.import_signature(sig);
                                 let func = builder.use_var(func[0]);
-                                let call = builder.ins().call_indirect(sig, func, &values.into_iter().flatten().collect::<Vec<_>>());
+                                let call = builder.ins().call_indirect(
+                                    sig,
+                                    func,
+                                    &values.into_iter().flatten().collect::<Vec<_>>(),
+                                );
                                 return builder.inst_results(call).to_vec();
                             }
                         }
 
                         if let SExprType::Function(a, r) = &meta.type_ {
-                            let func = module.declare_function(&Self::mangle_func(value, a.iter(), &**r), Linkage::Import, &sig).unwrap();
+                            let func = module
+                                .declare_function(
+                                    &Self::mangle_func(value, a.iter(), &**r),
+                                    Linkage::Import,
+                                    &sig,
+                                )
+                                .unwrap();
                             let func = module.declare_func_in_func(func, builder.func);
 
-                            let call = builder.ins().call(func, &values.into_iter().flatten().collect::<Vec<_>>());
+                            let call = builder
+                                .ins()
+                                .call(func, &values.into_iter().flatten().collect::<Vec<_>>());
                             builder.inst_results(call).to_vec()
                         } else {
                             unreachable!("must be func");
@@ -376,13 +636,28 @@ impl Generator {
                 }
             }
 
-            SExpr::StructSet { meta, name, values } => {
+            SExpr::StructSet { name, values, .. } => {
                 if let Some(struct_) = structs.get(name) {
                     let mut result = vec![vec![]; struct_.fields.len()];
-                    let fields: HashMap<_, _> = struct_.fields.iter().enumerate().map(|(i, (name, _))| (*name, i)).collect();
+                    let fields: HashMap<_, _> = struct_
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (name, _))| (*name, i))
+                        .collect();
 
                     for (field, value) in values {
-                        let value = Self::translate_expr(value, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+                        let value = Self::translate_expr(
+                            value,
+                            builder,
+                            var_map,
+                            var_index,
+                            break_block,
+                            module,
+                            ctx,
+                            data_ctx,
+                            structs,
+                        );
                         result[*fields.get(field).unwrap()] = value;
                     }
 
@@ -392,11 +667,29 @@ impl Generator {
                 }
             }
 
-            SExpr::Declare { meta, mutable, variable, value } => {
-                let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+            SExpr::Declare {
+                meta,
+                variable,
+                value,
+                ..
+            } => {
+                let val = Self::translate_expr(
+                    &**value,
+                    builder,
+                    var_map,
+                    var_index,
+                    break_block,
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                );
                 let mut vars = vec![];
                 let mut result = vec![];
-                for (val, typ) in val.into_iter().zip(Self::convert_type_to_type(&meta.type_, structs)) {
+                for (val, typ) in val
+                    .into_iter()
+                    .zip(Self::convert_type_to_type(&meta.type_, structs))
+                {
                     let var = Variable::new(*var_index);
                     *var_index += 1;
                     builder.declare_var(var, typ);
@@ -408,12 +701,26 @@ impl Generator {
                 result
             }
 
-            SExpr::Assign { meta, lvalue: LValue::Symbol(variable), value } => {
+            SExpr::Assign {
+                lvalue: LValue::Symbol(variable),
+                value,
+                ..
+            } => {
                 for scope in var_map.iter().rev() {
                     if let Some(v) = scope.get(variable) {
                         let mut result = vec![];
                         let vars = v.clone();
-                        let val = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+                        let val = Self::translate_expr(
+                            &**value,
+                            builder,
+                            var_map,
+                            var_index,
+                            break_block,
+                            module,
+                            ctx,
+                            data_ctx,
+                            structs,
+                        );
                         for (&var, val) in vars.iter().zip(val) {
                             builder.def_var(var, val);
                             result.push(builder.use_var(var));
@@ -425,15 +732,52 @@ impl Generator {
                 unreachable!();
             }
 
-            SExpr::Assign { meta, lvalue, value } => {
-                let value = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
-                let lvalue = Self::get_pointer(&meta.type_, lvalue, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
-                //builder.ins().store(MemFlags::new(), value, lvalue, 0);
-                value
+            SExpr::Assign {
+                meta,
+                lvalue,
+                value,
+            } => {
+                let values = Self::translate_expr(
+                    &**value,
+                    builder,
+                    var_map,
+                    var_index,
+                    break_block,
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                );
+                let lvalues = Self::get_pointer(
+                    &meta.type_,
+                    lvalue,
+                    builder,
+                    var_map,
+                    var_index,
+                    break_block,
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                );
+                for (lvalue, &value) in lvalues.into_iter().zip(values.iter()) {
+                    builder.ins().store(MemFlags::new(), value, lvalue, 0);
+                }
+                values
             }
 
-            SExpr::Attribute { meta, top, attrs } => {
-                let val = Self::translate_expr(top, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+            SExpr::Attribute { top, attrs, .. } => {
+                let val = Self::translate_expr(
+                    top,
+                    builder,
+                    var_map,
+                    var_index,
+                    break_block,
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                );
                 match &top.meta().type_ {
                     /*
                     Slices are of the following form:
@@ -447,32 +791,41 @@ impl Generator {
                         ptr: 64..127
                     }
                     */
-                    SExprType::Slice(_, _) => {
-                        match attrs[0] {
-                            "len" | "cap" => {
-                                vec![val[0]]
-                            }
-
-                            "ptr" => {
-                                vec![val[1]]
-                            }
-
-                            _ => unreachable!(),
+                    SExprType::Slice(_, _) => match attrs[0] {
+                        "len" | "cap" => {
+                            vec![val[0]]
                         }
-                    }
+
+                        "ptr" => {
+                            vec![val[1]]
+                        }
+
+                        _ => unreachable!(),
+                    },
 
                     SExprType::Struct(name, generics) => {
                         let struct_ = structs.get(name).unwrap();
-                        let (mut i, (_, mut t)) = struct_.fields.iter().cloned().enumerate().find(|(_, (v, _))| *v == attrs[0]).unwrap();
-                        let mut v = &val[i..Self::convert_type_to_type(&t, structs).len()];
+                        let (mut i, (_, mut t)) = struct_
+                            .fields
+                            .iter()
+                            .cloned()
+                            .enumerate()
+                            .find(|(_, (v, _))| *v == attrs[0])
+                            .unwrap();
+                        let mut v = &val[i..i + Self::convert_type_to_type(&t, structs).len()];
                         for attr in attrs.iter().skip(1) {
                             if let SExprType::Struct(name, _) = t {
-                                let (j, (_, u)) = struct_.fields.iter().enumerate().find(|(_, (v, _))| v == attr).unwrap();
+                                let (j, (_, u)) = struct_
+                                    .fields
+                                    .iter()
+                                    .enumerate()
+                                    .find(|(_, (v, _))| v == attr)
+                                    .unwrap();
                                 i += j;
                                 t = u.clone();
-                                v = &val[i..Self::convert_type_to_type(&t, structs).len()];
+                                v = &val[i..i + Self::convert_type_to_type(&t, structs).len()];
                             } else if let SExprType::Slice(_, _) = t {
-                                match attrs[0] {
+                                match *attr {
                                     "len" | "cap" => {
                                         return vec![val[i]];
                                     }
@@ -500,8 +853,18 @@ impl Generator {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn get_pointer<'a>(type_: &SExprType, lvalue: &LValue<'a>, builder: &mut FunctionBuilder, var_map: &mut Vec<HashMap<&'a str, Vec<Variable>>>, var_index: &mut usize, break_block: Option<Block>, module: &mut ObjectModule, ctx: &mut Context, data_ctx: &mut DataContext, structs: &HashMap<&str, Struct>) -> Vec<Value> {
-        /*
+    fn get_pointer<'a>(
+        type_: &SExprType,
+        lvalue: &LValue<'a>,
+        builder: &mut FunctionBuilder,
+        var_map: &mut Vec<HashMap<&'a str, Vec<Variable>>>,
+        var_index: &mut usize,
+        break_block: Option<Block>,
+        module: &mut ObjectModule,
+        ctx: &mut Context,
+        data_ctx: &mut DataContext,
+        structs: &HashMap<&str, Struct>,
+    ) -> Vec<Value> {
         match lvalue {
             LValue::Symbol(v) => {
                 for scope in var_map.iter().rev() {
@@ -517,7 +880,18 @@ impl Generator {
 
             LValue::Deref(v) => {
                 let parent_type = SExprType::Pointer(true, Box::new(type_.clone()));
-                let ret = Self::get_pointer(&parent_type, v, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+                let ret = Self::get_pointer(
+                    &parent_type,
+                    v,
+                    builder,
+                    var_map,
+                    var_index,
+                    break_block,
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                );
 
                 if let LValue::Symbol(_) = **v {
                     ret
@@ -527,31 +901,61 @@ impl Generator {
                     ret.into_iter()
                         .zip(t)
                         .zip(offsets)
-                        .map(|((v, t), (offset, _))| builder.ins().load(t, MemFlags::new(), v, offset))
+                        .map(|((v, t), (offset, _))| {
+                            builder.ins().load(t, MemFlags::new(), v, offset)
+                        })
                         .collect()
                 }
             }
 
             LValue::Get(v, i) => {
                 let parent_type = SExprType::Slice(true, Box::new(type_.clone()));
-                let i = Self::translate_expr(&**i, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs)[0];
+                let i = Self::translate_expr(
+                    &**i,
+                    builder,
+                    var_map,
+                    var_index,
+                    break_block,
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                )[0];
 
-                let offset = builder.ins().imul_imm(i, Self::size_of(type_, structs) as i64);
-                let ptr = Self::get_pointer(child_type, v, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
-                let ptr = if let LValue::Symbol(_) = **v {
-                    ptr
-                } else {
-                    builder.ins().load(Self::convert_type_to_type_ref(&SExprType::Pointer(true, Box::new(SExprType::F32)), structs), MemFlags::new(), ptr, 0)
-                };
-                let ptr = builder.ins().load(Self::convert_type_to_type_ref(&SExprType::Pointer(true, Box::new(SExprType::F32)), structs), MemFlags::new(), ptr, 8);
-                builder.ins().iadd(ptr, offset)
+                let offset = builder
+                    .ins()
+                    .imul_imm(i, Self::size_of(type_, structs) as i64);
+                // TODO: is this okay?
+                let ptr = Self::get_pointer(
+                    &parent_type,
+                    v,
+                    builder,
+                    var_map,
+                    var_index,
+                    break_block,
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                )[1];
+                let ptr = builder.ins().iadd(ptr, offset);
+
+                let offsets = Self::offsets_and_sizes_of(type_, structs);
+                let mut result = vec![];
+                for (offset, _) in offsets {
+                    let v = builder.ins().iadd_imm(ptr, offset as i64);
+                    result.push(v);
+                }
+                result
             }
         }
-        */
-        vec![]
     }
 
-    fn convert_type_to_type_helper(t: &SExprType, structs: &HashMap<&str, Struct>, map: &HashMap<&str, Vec<Type>>) -> Vec<Type> {
+    fn convert_type_to_type_helper(
+        t: &SExprType,
+        structs: &HashMap<&str, Struct>,
+        map: &HashMap<&str, Vec<Type>>,
+    ) -> Vec<Type> {
         match t {
             SExprType::Int(_, width) if *width == 1 => vec![types::B1],
             SExprType::Int(_, width) if *width == 8 => vec![types::I8],
@@ -561,24 +965,27 @@ impl Generator {
             SExprType::F32 => vec![types::F32],
             SExprType::F64 => vec![types::F64],
 
-            SExprType::Tuple(v) if v.is_empty() => vec![types::B1],
+            SExprType::Tuple(v) if v.is_empty() => vec![],
 
             SExprType::Pointer(_, _) => vec![types::I64],
             SExprType::Slice(_, _) => vec![types::I64, types::I64],
 
-            SExprType::Generic(g) => {
-                map.get(g).unwrap().clone()
-            }
+            SExprType::Generic(g) => map.get(g).unwrap().clone(),
 
             SExprType::Struct(name, v) => {
                 let struct_ = structs.get(name).unwrap();
-                let map = struct_.generics.iter().zip(v.iter()).map(|(a, b)| {
-                    if let SExprType::Generic(v) = a {
-                        (*v, Self::convert_type_to_type_helper(b, structs, map))
-                    } else {
-                        unreachable!();
-                    }
-                }).collect();
+                let map = struct_
+                    .generics
+                    .iter()
+                    .zip(v.iter())
+                    .map(|(a, b)| {
+                        if let SExprType::Generic(v) = a {
+                            (*v, Self::convert_type_to_type_helper(b, structs, map))
+                        } else {
+                            unreachable!();
+                        }
+                    })
+                    .collect();
                 let mut fields = vec![];
                 for (_, field) in struct_.fields.iter() {
                     fields.extend(Self::convert_type_to_type_helper(field, structs, &map));
@@ -681,7 +1088,17 @@ impl Generator {
                 mangled.push('S');
                 Self::mangle_type(mangled, &**v);
             }
-            SExprType::Struct(_, _) => todo!(),
+
+            SExprType::Struct(name, generics) => {
+                mangled.push('T');
+                mangled.push_str(*name);
+                mangled.push('@');
+                for generic in generics {
+                    Self::mangle_type(mangled, generic);
+                }
+                mangled.push('#');
+            }
+
             SExprType::Function(a, r) => {
                 mangled.push('U');
                 for (i, a) in a.iter().enumerate() {
@@ -698,8 +1115,13 @@ impl Generator {
         }
     }
 
-    fn mangle_func<'a, 'b>(name: &str, args: impl Iterator<Item=&'a SExprType<'b>>, ret: &SExprType) -> String
-        where 'b: 'a
+    fn mangle_func<'a, 'b>(
+        name: &str,
+        args: impl Iterator<Item = &'a SExprType<'b>>,
+        ret: &SExprType,
+    ) -> String
+    where
+        'b: 'a,
     {
         if name == "main" {
             return String::from("main");
