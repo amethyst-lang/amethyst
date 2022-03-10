@@ -1,0 +1,6 @@
+(defun print (str (@ mut u8))
+    (seqn
+        (syscall 1 1 (cast str.ptr) str.len 0 0 0)))
+
+(defun main
+    (print "hewo\n"))

@@ -79,7 +79,8 @@ impl Generator {
                 builder.switch_to_block(entry_block);
                 let mut var_map = vec![HashMap::new()];
                 let mut var_index = 0;
-                for (i, (name, typ)) in args.iter().enumerate() {
+                let mut i = 0;
+                for (name, typ) in args.iter() {
                     let mut vars = vec![];
                     for t in Self::convert_type_to_type(typ, structs) {
                         let var = Variable::new(var_index);
@@ -87,6 +88,7 @@ impl Generator {
                         builder.declare_var(var, t);
                         builder.def_var(var, builder.block_params(entry_block)[i]);
                         vars.push(var);
+                        i += 1;
                     }
                     var_map[0].insert(*name, (vars, typ.clone()));
                 }
@@ -162,11 +164,12 @@ impl Generator {
                 if let SExprType::Function(a, r) = &meta.type_ {
                     sig.params.extend(
                         a.iter()
-                            .map(|v| Self::convert_type_to_type_ref(v, structs))
+                            .map(|v| Self::convert_type_to_type(v, structs))
+                            .flatten()
                             .map(AbiParam::new),
                     );
                     sig.returns
-                        .push(AbiParam::new(Self::convert_type_to_type_ref(&**r, structs)));
+                        .extend(Self::convert_type_to_type(&**r, structs).into_iter().map(AbiParam::new));
                     let func = module
                         .declare_function(
                             &Self::mangle_func(value, a.iter(), &**r),
@@ -203,7 +206,7 @@ impl Generator {
                 data_ctx.clear();
                 let val = module.declare_data_in_func(sym, builder.func);
                 let size = builder.ins().iconst(
-                    Self::convert_type_to_type_ref(&SExprType::Int(false, 64), structs),
+                    Self::convert_type_to_type(&SExprType::Int(false, 64), structs)[0],
                     value.len() as i64,
                 );
                 let reference = builder
@@ -450,17 +453,17 @@ impl Generator {
                     } => {
                         let mut syscall_sig = Signature::new(CallConv::SystemV);
                         syscall_sig.params.extend(
-                            [AbiParam::new(Self::convert_type_to_type_ref(
+                            [AbiParam::new(Self::convert_type_to_type(
                                 &SExprType::Int(false, 64),
                                 structs,
-                            )); 7],
+                            )[0]); 7],
                         );
                         syscall_sig
                             .returns
-                            .push(AbiParam::new(Self::convert_type_to_type_ref(
+                            .push(AbiParam::new(Self::convert_type_to_type(
                                 &SExprType::Int(false, 64),
                                 structs,
-                            )));
+                            )[0]));
                         let syscall = module
                             .declare_function("syscall_", Linkage::Import, &syscall_sig)
                             .unwrap();
@@ -638,11 +641,12 @@ impl Generator {
                         if let SExprType::Function(a, r) = &meta.type_ {
                             sig.params.extend(
                                 a.iter()
-                                    .map(|v| Self::convert_type_to_type_ref(v, structs))
+                                    .map(|v| Self::convert_type_to_type(v, structs))
+                                    .flatten()
                                     .map(AbiParam::new),
                             );
                             sig.returns
-                                .push(AbiParam::new(Self::convert_type_to_type_ref(&**r, structs)));
+                                .extend(Self::convert_type_to_type(&**r, structs).into_iter().map(AbiParam::new));
                         }
 
                         for scope in var_map.iter().rev() {
