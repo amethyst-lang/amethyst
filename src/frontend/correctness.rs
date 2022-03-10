@@ -473,7 +473,35 @@ fn traverse_lvalue<'a>(
             todo!("error handling");
         }
 
-        LValue::Attribute(_, _) => todo!(),
+        LValue::Attribute(v, attrs) => {
+            let mut t = traverse_lvalue(&mut **v, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+            for &mut attr in attrs {
+                if let Type::Struct(name, generics) = t {
+                    if let Some(struct_) = struct_map.get(name) {
+                        let mut map = struct_.generics.iter().zip(generics).map(|(key, val)| {
+                            if let &Type::Generic(key) = key {
+                                (key, val)
+                            } else {
+                                unreachable!();
+                            }
+                        }).collect();
+
+                        if let Some((_, typ)) = struct_.fields.iter().find(|(v, _)| *v == attr) {
+                            t = typ.clone();
+                            t.replace_generics(type_var_counter, &mut map);
+                        } else {
+                            todo!("error handling");
+                        }
+                    } else {
+                        todo!("error handling");
+                    }
+                } else {
+                    todo!("error handling");
+                }
+            }
+
+            Ok(t)
+        }
 
         LValue::Deref(v) => {
             let mut type_ = traverse_lvalue(&mut **v, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;

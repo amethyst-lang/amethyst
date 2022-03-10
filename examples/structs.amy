@@ -6,7 +6,8 @@
     (seq
         (let if =
             (inst IntFloat
-                (int 69)
+                (int 68)
                 (float 420.0)))
         if.float
+        //(set if.int = 69)
         if.int))
