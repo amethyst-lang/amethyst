@@ -589,6 +589,18 @@ fn flatten_substitution<'a>(t1: &mut Type<'a>, substitutions: &HashMap<u64, Type
     }
 }
 
+fn apply_lvalue_substitutions<'a>(lvalue: &mut LValue<'a>, substitutions: &HashMap<u64, Type<'a>>) {
+    match lvalue {
+        LValue::Symbol(_) => (),
+        LValue::Attribute(v, _) => apply_lvalue_substitutions(&mut **v, substitutions),
+        LValue::Deref(v) => apply_lvalue_substitutions(&mut **v, substitutions),
+        LValue::Get(v, i) => {
+            apply_lvalue_substitutions(&mut **v, substitutions);
+            apply_substitutions(&mut **i, substitutions);
+        }
+    }
+}
+
 fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, Type<'a>>) {
     flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
 
@@ -635,7 +647,12 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, T
         }
 
         SExpr::Declare { value, .. } => apply_substitutions(&mut **value, substitutions),
-        SExpr::Assign { value, .. } => apply_substitutions(&mut **value, substitutions),
+
+        SExpr::Assign { lvalue, value, .. } => {
+            apply_substitutions(&mut **value, substitutions);
+            apply_lvalue_substitutions(lvalue, substitutions);
+        }
+
         SExpr::Attribute { top, .. } => apply_substitutions(&mut **top, substitutions),
 
         _ => (),
@@ -680,7 +697,23 @@ pub fn check<'a>(
 
                 for (&i, &coercion) in coercions.iter() {
                     match substitutions.entry(i) {
-                        Entry::Occupied(_) => (),
+                        Entry::Occupied(v) => {
+                            let mut t = v.get().clone();
+                            while let Type::TypeVariable(j) = t {
+                                if let Some(v) = substitutions.get(&j) {
+                                    t = v.clone();
+                                } else {
+                                    match coercion {
+                                        FloatOrInt::Float => t = Type::F64,
+                                        FloatOrInt::Int => t = Type::Int(true, 32),
+                                    };
+                                    println!("uwu");
+                                    substitutions.insert(j, t);
+                                    break;
+                                }
+                            }
+                        }
+
                         Entry::Vacant(v) => {
                             match coercion {
                                 FloatOrInt::Float => v.insert(Type::F64),
@@ -734,12 +767,12 @@ pub struct Signature<'a> {
 pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
     let mut map = HashMap::new();
     map.insert("+", Signature {
-        arg_types: vec![Type::Generic("a"), Type::Generic("b")],
+        arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
     });
     map.insert("-", Signature {
-        arg_types: vec![Type::Generic("a"), Type::Generic("b")],
+        arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
     });

@@ -543,7 +543,7 @@ impl Generator {
                         result
                     }
 
-                    SExpr::Symbol { meta, value: "ref" } => {
+                    SExpr::Symbol { value: "ref", .. } => {
                         if let SExprType::Pointer(_, t) = &meta.type_ {
                             let value = &values[0];
                             let slot = builder.create_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, Self::size_of(&**t, structs)));
@@ -945,7 +945,6 @@ impl Generator {
                                     i += j;
                                     t = u.clone();
                                     t.replace_generics(&mut tvc, &mut map);
-                                    println!("{:?} vs {:?} vs {:?} vs {:?}", val, i, Self::convert_type_to_type(&t, structs), t);
                                     v = &val[i..i + Self::convert_type_to_type(&t, structs).len()];
                                 } else {
                                     unreachable!();

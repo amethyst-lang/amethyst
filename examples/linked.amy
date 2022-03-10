@@ -1,13 +1,12 @@
 (defun main : i32
     (seq
-        (let n2 = (alloca))
-        (set (deref n2) =
+        (let n2 = 
             (inst Linked
                 (v 1)))
         (let n1 =
             (inst Linked
                 (v 0)
-                (next n2)))
+                (next (ref n2))))
         (deref n1.next).v))
 
 (defstruct Linked
