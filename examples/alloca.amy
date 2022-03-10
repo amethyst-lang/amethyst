@@ -1,10 +1,8 @@
 (defun main : i32
     (seq
-        (let p = (alloca))
-        (set (deref p) = 'h')
-        (syscall 1 1 (cast p) 1 0 0 0)
-        (let p = (alloca 2))
-        (set (get p 0) = 'i')
-        (set (get p 1) = '\n')
+        (let p = (alloca 3))
+        (set (get p 0) = 'h')
+        (set (get p 1) = 'i')
+        (set (get p 2) = '\n')
         (syscall 1 1 (cast p.ptr) p.len 0 0 0)
         0))
