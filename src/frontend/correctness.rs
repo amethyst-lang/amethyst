@@ -168,10 +168,10 @@ fn traverse_sexpr<'a>(
             }
 
             if let Some(var_type) = var_type {
-                meta.type_ = var_type.clone();
+                substitute(&mut meta.type_, var_type, substitutions, coercions)?;
                 Ok(())
             } else if let Some(func) = func_map.get(value) {
-                meta.type_ = Type::Function(func.arg_types.clone(), Box::new(func.ret_type.clone()));
+                substitute(&mut meta.type_, &Type::Function(func.arg_types.clone(), Box::new(func.ret_type.clone())), substitutions, coercions)?;
                 if meta.type_.has_generic() {
                     let mut map = HashMap::new();
                     meta.type_.replace_generics(type_var_counter, &mut map);
@@ -198,7 +198,7 @@ fn traverse_sexpr<'a>(
             }
 
             if let Some(last) = values.last() {
-                meta.type_ = last.meta().type_.clone();
+                substitute(&mut meta.type_, &last.meta().type_, substitutions, coercions)?;
             }
 
             scopes.pop();
@@ -250,11 +250,12 @@ fn traverse_sexpr<'a>(
             let mut break_type = Some(Type::Unknown);
             traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, &mut break_type)?;
 
-            meta.type_ = match break_type {
+            let t = match break_type {
                 Some(Type::Unknown) => Type::Tuple(vec![]),
                 Some(v) => v,
                 None => unreachable!(),
             };
+            substitute(&mut meta.type_, &t, substitutions, coercions)?;
             scopes.pop();
 
             Ok(())
@@ -298,7 +299,7 @@ fn traverse_sexpr<'a>(
                     substitute(&mut arg.meta_mut().type_, type_, substitutions, coercions)?;
                 }
 
-                meta.type_ = (**ret_type).clone();
+                substitute(&mut meta.type_, &**ret_type, substitutions, coercions)?;
 
                 Ok(())
             } else {
@@ -308,11 +309,42 @@ fn traverse_sexpr<'a>(
 
         SExpr::StructDef { .. } => Ok(()),
 
-        SExpr::StructSet { meta, name, values } => todo!(),
+        SExpr::StructSet { meta, name, values } => {
+            if let Some(struct_) = struct_map.get(name) {
+                let mut map = HashMap::new();
+                let mut generics = vec![];
+                for g in struct_.generics.iter() {
+                    if let &Type::Generic(g) = g {
+                        map.insert(g, Type::TypeVariable(*type_var_counter));
+                        generics.push(Type::TypeVariable(*type_var_counter));
+                        *type_var_counter += 1;
+                    } else {
+                        unreachable!();
+                    }
+                }
+
+                for (field, value) in values {
+                    traverse_sexpr(value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+                    if let Some((_, typ)) = struct_.fields.iter().find(|(v, _)| v == field) {
+                        let mut typ = typ.clone();
+                        typ.replace_generics(type_var_counter, &mut map);
+                        substitute(&mut value.meta_mut().type_, &typ, substitutions, coercions)?;
+                    } else {
+                        todo!("error handling");
+                    }
+                }
+
+                substitute(&mut meta.type_, &Type::Struct(name, generics), substitutions, coercions)?;
+
+                Ok(())
+            } else {
+                todo!("error handling");
+            }
+        }
 
         SExpr::Declare { meta, variable, value, .. } => {
             traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
-            meta.type_ = value.meta().type_.clone();
+            substitute(&mut meta.type_, &value.meta().type_, substitutions, coercions)?;
             scopes.last_mut().unwrap().insert(*variable, meta.type_.clone());
             Ok(())
         }
@@ -330,7 +362,7 @@ fn traverse_sexpr<'a>(
 
             if let Some(var_type) = var_type {
                 substitute(var_type, &value.meta().type_, substitutions, coercions)?;
-                meta.type_ = var_type.clone();
+                substitute(&mut meta.type_, var_type, substitutions, coercions)?;
                 Ok(())
             } else {
                 todo!("error handling");
@@ -339,7 +371,7 @@ fn traverse_sexpr<'a>(
 
         SExpr::Assign { meta, lvalue, value } => {
             let type_ = traverse_lvalue(lvalue, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
-            meta.type_ = type_;
+            substitute(&mut meta.type_, &type_, substitutions, coercions)?;
             traverse_sexpr(&mut **value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
             substitute(&mut value.meta_mut().type_, &meta.type_, substitutions, coercions)
         }
@@ -355,23 +387,65 @@ fn traverse_sexpr<'a>(
 
                     match attrs[0] {
                         "ptr" => {
-                            meta.type_ = Type::Pointer(true, t.clone());
+                            substitute(&mut meta.type_, &Type::Pointer(true, t.clone()), substitutions, coercions)
                         }
 
                         "len" | "cap" => {
-                            meta.type_ = Type::Int(false, 64);
+                            substitute(&mut meta.type_, &Type::Int(false, 64), substitutions, coercions)
                         }
 
                         _ => todo!("error handling"),
                     }
                 }
 
-                Type::Struct(_, _) => todo!(),
+                Type::Struct(_, _) => {
+                    let mut t = top.meta().type_.clone();
+                    for &mut attr in attrs {
+                        match t {
+                            Type::Slice(_, u) => {
+                                match attr {
+                                    "ptr" => {
+                                        t = Type::Pointer(true, u.clone());
+                                    }
+
+                                    "len" | "cap" => {
+                                        t = Type::Int(false, 64);
+                                    }
+
+                                    _ => todo!("error handling"),
+                                }
+                            }
+
+                            Type::Struct(name, generics) => {
+                                if let Some(struct_) = struct_map.get(name) {
+                                    let mut map = struct_.generics.iter().zip(generics).map(|(key, val)| {
+                                        if let &Type::Generic(key) = key {
+                                            (key, val)
+                                        } else {
+                                            unreachable!();
+                                        }
+                                    }).collect();
+
+                                    if let Some((_, typ)) = struct_.fields.iter().find(|(v, _)| *v == attr) {
+                                        t = typ.clone();
+                                        t.replace_generics(type_var_counter, &mut map);
+                                    } else {
+                                        todo!("error handling");
+                                    }
+                                } else {
+                                    todo!("error handling");
+                                }
+                            }
+
+                            _ => todo!("error handling"),
+                        }
+                    }
+
+                    substitute(&mut meta.type_, &t, substitutions, coercions)
+                }
 
                 _ => todo!("error handling"),
             }
-
-            Ok(())
         }
     }
 }
