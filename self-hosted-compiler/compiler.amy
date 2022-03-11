@@ -98,7 +98,14 @@
     (free16384 (* mut FreeBucket))
     (free65536 (* mut FreeBucket)))
 
-//(defun alloc (A Allocator) ())
+(defun alloc-helper (A Allocator) (size u64) : (* mut 'a)
+    (cast (: u64 0)))
+
+(defun alloc (A Allocator) : (* mut 'a)
+    (alloc-helper A (sizeof 'a)))
+
+(defun alloc-array (A Allocator) (len u64) : (@ mut 'a)
+    (alloc-helper A (* len (sizeof 'a))))
 
 
 

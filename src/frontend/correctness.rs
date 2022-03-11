@@ -456,11 +456,7 @@ fn traverse_sexpr<'a>(
             }
         }
 
-        SExpr::SizeOf { type_, .. } => {
-            let mut map = HashMap::new();
-            type_.replace_generics(type_var_counter, &mut map);
-            Ok(())
-        }
+        SExpr::SizeOf { .. } => Ok(()),
     }
 }
 
@@ -703,7 +699,6 @@ pub fn check<'a>(
                     &mut None,
                 )?;
 
-                println!("{:?} {:?}", expr.meta().type_, ret_type);
                 substitute(&mut expr.meta_mut().type_, ret_type, &mut substitutions, &mut coercions)?;
 
                 for (&i, &coercion) in coercions.iter() {
@@ -745,8 +740,11 @@ pub fn check<'a>(
                 flatten_substitution(&mut t, &substitutions);
                 let mut monomorphised = sexprs[index].clone();
 
-                if let SExpr::FuncDef { meta, args, ret_type, .. } = &mut monomorphised {
+                if let SExpr::FuncDef { meta, args, ret_type, expr, .. } = &mut monomorphised {
                     meta.type_ = t.clone();
+                    let mut map = HashMap::new();
+                    extract_generics(&meta.type_, &t, &mut map);
+                    update_generic_refs(expr, &mut map);
                     if let Type::Function(a, r) = t {
                         for (i, (_, arg)) in args.iter_mut().enumerate() {
                             *arg = a[i].clone();
@@ -766,6 +764,105 @@ pub fn check<'a>(
     } {}
 
     Ok(())
+}
+
+fn update_generic_refs_lvalue<'a>(lvalue: &mut LValue<'a>, map: &mut HashMap<&'a str, Type<'a>>) {
+    match lvalue {
+        LValue::Symbol(_) => (),
+        LValue::Attribute(v, _) => update_generic_refs_lvalue(&mut **v, map),
+        LValue::Deref(v) => update_generic_refs_lvalue(&mut **v, map),
+        LValue::Get(v, i) => {
+            update_generic_refs_lvalue(&mut **v, map);
+            update_generic_refs(&mut **i, map);
+        }
+    }
+}
+
+fn update_generic_refs<'a>(expr: &mut SExpr<'a>, map: &mut HashMap<&'a str, Type<'a>>) {
+    match expr {
+        SExpr::List { .. } => todo!(),
+        SExpr::Quote { .. } => todo!(),
+        SExpr::Comma { .. } => todo!(),
+        SExpr::Backtick { .. } => todo!(),
+        SExpr::Splice { .. } => todo!(),
+
+        SExpr::Seq { values, .. } => {
+            for value in values {
+                update_generic_refs(value, map);
+            }
+        }
+
+        SExpr::Cond { values, elsy, .. } => {
+            for (cond, then) in values {
+                update_generic_refs(cond, map);
+                update_generic_refs(then, map);
+            }
+
+            if let Some(elsy) = elsy {
+                update_generic_refs(&mut **elsy, map);
+            }
+        }
+
+        SExpr::Loop { value, .. } => update_generic_refs(&mut **value, map),
+
+        SExpr::Break { value: Some(value), .. } => update_generic_refs(&mut **value, map),
+        SExpr::Type { value, .. } => update_generic_refs(&mut **value, map),
+        SExpr::FuncCall { func, values, .. } => {
+            update_generic_refs(&mut **func, map);
+            for value in values {
+                update_generic_refs(value, map);
+            }
+        }
+        SExpr::StructSet { values, .. } => {
+            for (_, value) in values {
+                update_generic_refs(value, map);
+            }
+        }
+        SExpr::Declare { value, .. } => update_generic_refs(&mut **value, map),
+        SExpr::Assign { lvalue, value, .. } => {
+            update_generic_refs_lvalue(lvalue, map);
+            update_generic_refs(&mut **value, map);
+        }
+        SExpr::Attribute { top, .. } => update_generic_refs(&mut **top, map),
+        SExpr::SizeOf { type_, .. } => {
+            let mut tvc = 0;
+            type_.replace_generics(&mut tvc, map);
+        }
+
+        _ => (),
+    }
+}
+
+fn extract_generics<'a>(original: &Type<'a>, monomorphised: &Type<'a>, map: &mut HashMap<&'a str, Type<'a>>) {
+    match (original, monomorphised) {
+        (Type::Tuple(v1), Type::Tuple(v2)) => {
+            for (v1, v2) in v1.iter().zip(v2) {
+                extract_generics(v1, v2, map);
+            }
+        }
+        (Type::Pointer(_, v1), Type::Pointer(_, v2)) => extract_generics(&**v1, &**v2, map),
+        (Type::Slice(_, v1), Type::Slice(_, v2)) => extract_generics(&**v1, &**v2, map),
+
+        (Type::Struct(_, v1), Type::Struct(_, v2)) => {
+            for (v1, v2) in v1.iter().zip(v2) {
+                extract_generics(v1, v2, map);
+            }
+        }
+
+        (Type::Generic(g), v) => {
+            map.insert(*g, v.clone());
+        }
+
+        (Type::Function(a1, r1), Type::Function(a2, r2)) => {
+            for (a1, a2) in a1.iter().zip(a2) {
+                extract_generics(a1, a2, map);
+            }
+
+            extract_generics(&**r1, &**r2, map);
+        }
+
+        _ => (),
+    }
 }
 
 #[derive(Debug, Clone)]
