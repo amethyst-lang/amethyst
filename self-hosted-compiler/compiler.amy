@@ -84,11 +84,15 @@
     (seqn
         (syscall 11 (cast addr) len 0 0 0 0)))
 
+(defun null : (* mut 'a)
+    (cast (: u64 0)))
+
 // Defines a free bucket linked list node for the memory allocator.
 (defstruct FreeBucket
     (size u64)
     (next (* mut FreeBucket)))
 
+// Defines an allocator.
 (defstruct Allocator
     (free16    (* mut FreeBucket))
     (free64    (* mut FreeBucket))
@@ -98,14 +102,28 @@
     (free16384 (* mut FreeBucket))
     (free65536 (* mut FreeBucket)))
 
+// Helper function for allocation.
 (defun alloc-helper (A Allocator) (size u64) : (* mut 'a)
     (cast (: u64 0)))
 
+// Allocates a pointer to some data.
 (defun alloc (A Allocator) : (* mut 'a)
     (alloc-helper A (sizeof 'a)))
 
+// Allocates an array of data.
 (defun alloc-array (A Allocator) (len u64) : (@ mut 'a)
     (alloc-helper A (* len (sizeof 'a))))
+
+// Creates a new empty allocator.
+(defun new-alloc : Allocator
+    (inst Allocator
+        (free16    (null))
+        (free64    (null))
+        (free256   (null))
+        (free1024  (null))
+        (free4096  (null))
+        (free16384 (null))
+        (free65536 (null))))
 
 
 

@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use super::ast_lowering::{LValue, SExpr, Type};
 
@@ -669,6 +669,7 @@ pub fn check<'a>(
     struct_map: &HashMap<&'a str, Struct<'a>>,
 ) -> Result<(), CorrectnessError> {
     let mut skip = 0;
+    let mut done = HashSet::new();
 
     while {
         let mut monomorphisms = vec![];
@@ -738,6 +739,12 @@ pub fn check<'a>(
         if !monomorphisms.is_empty() {
             for (mut t, index) in monomorphisms {
                 flatten_substitution(&mut t, &substitutions);
+
+                if done.contains(&(t.clone(), index)) {
+                    continue;
+                }
+                done.insert((t.clone(), index));
+
                 let mut monomorphised = sexprs[index].clone();
 
                 if let SExpr::FuncDef { meta, args, ret_type, expr, .. } = &mut monomorphised {
