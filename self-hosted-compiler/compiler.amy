@@ -144,6 +144,7 @@
             (let ptr = (deref A).free16)
             (set (deref A).free16 = (deref ptr).next)
             (cast (- (: u64 (cast ptr)) 8))))
+
         ((<= size 56) (seq
             (cond
                 ((== (deref A).free64 (null)) (seqn
@@ -159,6 +160,7 @@
             (let ptr = (deref A).free256)
             (set (deref A).free256 = (deref ptr).next)
             (cast (- (: u64 (cast ptr)) 248))))
+
         ((<= size 1016) (seq
             (cond
                 ((== (deref A).free1024 (null)) (seqn
@@ -166,6 +168,7 @@
             (let ptr = (deref A).free1024)
             (set (deref A).free1024 = (deref ptr).next)
             (cast (- (: u64 (cast ptr)) 1016))))
+
         ((<= size 4088) (seq
             (cond
                 ((== (deref A).free4096 (null)) (seqn
@@ -173,6 +176,7 @@
             (let ptr = (deref A).free4096)
             (set (deref A).free4096 = (deref ptr).next)
             (cast (- (: u64 (cast ptr)) 4088))))
+
         ((<= size 16376) (seq
             (cond
                 ((== (deref A).free16384 (null)) (seqn
@@ -180,6 +184,7 @@
             (let ptr = (deref A).free16384)
             (set (deref A).free16384 = (deref ptr).next)
             (cast (- (: u64 (cast ptr)) 16376))))
+
         ((<= size 65528) (seq
             (cond
                 ((== (deref A).free65536 (null)) (seqn
@@ -187,28 +192,57 @@
             (let ptr = (deref A).free65536)
             (set (deref A).free65536 = (deref ptr).next)
             (cast (- (: u64 (cast ptr)) 65528))))
+
         (:else
             (mmap size))))
 
 // Helper function for deallocation.
 (defun dealloc-helper (A (* mut Allocator)) (ptr (* mut 'a)) (size u64)
     (cond
-        ((<= size 8)
-            ())
-        ((<= size 56)
-            ())
-        ((<= size 248)
-            ())
-        ((<= size 1016)
-            ())
-        ((<= size 4088)
-            ())
-        ((<= size 16376)
-            ())
-        ((<= size 65528)
-            ())
+        ((<= size 8) (seqn
+            (let p = (ptr-add (: (* mut u8) (cast ptr)) 8))
+            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (set (deref bucket).next = (deref A).free16)
+            (set (deref A).free16 = bucket)))
+
+        ((<= size 56) (seqn
+            (let p = (ptr-add (: (* mut u8) (cast ptr)) 56))
+            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (set (deref bucket).next = (deref A).free64)
+            (set (deref A).free64 = bucket)))
+
+        ((<= size 248) (seqn
+            (let p = (ptr-add (: (* mut u8) (cast ptr)) 248))
+            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (set (deref bucket).next = (deref A).free256)
+            (set (deref A).free256 = bucket)))
+
+        ((<= size 1016) (seqn
+            (let p = (ptr-add (: (* mut u8) (cast ptr)) 1016))
+            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (set (deref bucket).next = (deref A).free1024)
+            (set (deref A).free1024 = bucket)))
+
+        ((<= size 4088) (seqn
+            (let p = (ptr-add (: (* mut u8) (cast ptr)) 4088))
+            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (set (deref bucket).next = (deref A).free4096)
+            (set (deref A).free4096 = bucket)))
+
+        ((<= size 16376) (seqn
+            (let p = (ptr-add (: (* mut u8) (cast ptr)) 16376))
+            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (set (deref bucket).next = (deref A).free16384)
+            (set (deref A).free16384 = bucket)))
+
+        ((<= size 65528) (seqn
+            (let p = (ptr-add (: (* mut u8) (cast ptr)) 65528))
+            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (set (deref bucket).next = (deref A).free65536)
+            (set (deref A).free65536 = bucket)))
+
         (:else
-            ())))
+            (munmap ptr size))))
 
 // Allocates a pointer to some data.
 (defun alloc (A (* mut Allocator)) : (* mut 'a)
@@ -280,5 +314,6 @@
         (file-close file)
         (let A = (new-alloc))
         (let p = (alloc (ref A)))
-        (set (deref p) = 0)))
+        (set (deref p) = 0)
+        (dealloc (ref A) p)))
 
