@@ -124,7 +124,7 @@ fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &
             }
 
             (a, b) if *a == b => Ok(()),
-            _ => todo!("error handling"),
+            (a, b) => todo!("error handling: {:?} vs {:?} over {:?} with coercions {:?}", a, b, substitutions, coercions),
         }
     }
 }
@@ -141,6 +141,8 @@ fn traverse_sexpr<'a>(
     scopes: &mut Vec<HashMap<&'a str, Type<'a>>>,
     break_type: &mut Option<Type<'a>>,
 ) -> Result<(), CorrectnessError> {
+    println!("{:?}: {:?}\n", sexpr.meta().range, sexpr);
+
     let t = &mut sexpr.meta_mut().type_;
     if *t == Type::UnknownInt {
         *t = Type::TypeVariable(*type_var_counter);

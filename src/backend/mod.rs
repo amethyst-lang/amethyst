@@ -49,6 +49,7 @@ impl Generator {
     }
 
     fn translate(&mut self, sexprs: &[SExpr<'_>], structs: &HashMap<&str, Struct>) {
+        let mut var_index = 0;
         for sexpr in sexprs {
             if let SExpr::FuncDef {
                 name,
@@ -78,7 +79,6 @@ impl Generator {
                 builder.append_block_params_for_function_params(entry_block);
                 builder.switch_to_block(entry_block);
                 let mut var_map = vec![HashMap::new()];
-                let mut var_index = 0;
                 let mut i = 0;
                 for (name, typ) in args.iter() {
                     let mut vars = vec![];
@@ -484,6 +484,7 @@ impl Generator {
                             (SExprType::Int(false, width1), SExprType::Int(_, width2)) => vec![builder.ins().uextend(t, values[0][0])],
                             (SExprType::Pointer(_, _), SExprType::Int(_, _)) => vec![values[0][0]],
                             (SExprType::Int(_, _), SExprType::Pointer(_, _)) => vec![values[0][0]],
+                            (SExprType::Pointer(_, _), SExprType::Pointer(_, _)) => vec![values[0][0]],
                             (SExprType::Int(true, _), SExprType::F32 | SExprType::F64) => vec![builder.ins().fcvt_to_sint(t, values[0][0])],
                             (SExprType::Int(false, _), SExprType::F32 | SExprType::F64) => vec![builder.ins().fcvt_to_uint(t, values[0][0])],
                             (SExprType::F32 | SExprType::F64, SExprType::Int(true, _)) => vec![builder.ins().fcvt_from_sint(t, values[0][0])],
@@ -1026,10 +1027,9 @@ impl Generator {
 
             LValue::Attribute(v, attrs) => {
                 let (val, mut t) = Self::get_pointer(&**v, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
-                let mut v = &val[..];
-                let mut i = 0;
+                let mut offset = 0;
                 for attr in attrs.iter() {
-                    if let SExprType::Struct(name, _) = t {
+                    if let SExprType::Struct(name, generics) = t {
                         if let Some(struct_) = structs.get(name) {
                             let (j, (_, u)) = struct_
                                 .fields
@@ -1037,9 +1037,27 @@ impl Generator {
                                 .enumerate()
                                 .find(|(_, (v, _))| v == attr)
                                 .unwrap();
-                            i += j;
+                            let mut map = struct_.generics.iter().zip(&generics).map(|(g, t)| {
+                                if let &SExprType::Generic(g) = g {
+                                    (g, t.clone())
+                                } else {
+                                    unreachable!();
+                                }
+                            }).collect();
+                            let mut tvc = 0;
+                            let j: usize = struct_
+                                .fields
+                                .iter()
+                                .take(j)
+                                .map(|(_, t)| {
+                                    let mut t = t.clone();
+                                    t.replace_generics(&mut tvc, &mut map);
+                                    Self::convert_type_to_type(&t, structs).len()
+                                }).sum();
+                            offset += Self::offsets_and_sizes_of(&SExprType::Struct(name, generics), structs)
+                                [j].0;
                             t = u.clone();
-                            v = &val[i..i + Self::convert_type_to_type(&t, structs).len()];
+                            t.replace_generics(&mut tvc, &mut map);
                         } else {
                             unreachable!()
                         }
@@ -1048,7 +1066,7 @@ impl Generator {
                     }
                 }
 
-                (v.to_vec(), t)
+                (vec![builder.ins().iadd_imm(*val.last().unwrap(), offset as i64)], t)
             }
 
             LValue::Deref(v) => {

@@ -33,6 +33,23 @@
     (seqn
         (syscall 1 1 (cast str.ptr) str.len 0 0 0)))
 
+// Prints out a number onto stdout.
+(defun print-int (i u64)
+    (seqn
+        (cond
+            ((== i 0) (print "0\n"))
+            (:else (seqn
+                (let p = (alloca 21))
+                (set (get p 20) = '\n')
+                (let start = 20)
+                (while (!= i 0) (seqn
+                    (let c = (+ '0' (cast (% i 10))))
+                    (set start = (- start 1))
+                    (set (get p start) = c)
+                    (set i = (/ i 10))))
+                (print (subslice p start p.len))
+                )))))
+
 // Prints out a string onto stderr.
 (defun eprint (str (@ mut u8))
     (seqn
@@ -76,20 +93,20 @@
         (syscall 3 (cast file.descriptor) 0 0 0 0 0)))
 
 // Maps memory for the program.
-(defun mmap (len u64) (prot u64) (flags u64) : (* mut 'a)
-    (cast (syscall 9 0 len prot flags (- 0 1) 0)))
+(defun mmap (len u64) : (* mut 'a)
+    (cast (syscall 9 0 len 3 34 (- 0 1) 0)))
 
 // Unmaps memory previously mapped by mmap.
 (defun munmap (addr (* mut 'a)) (len u64)
     (seqn
         (syscall 11 (cast addr) len 0 0 0 0)))
 
+// Creates a null constant.
 (defun null : (* mut 'a)
     (cast (: u64 0)))
 
 // Defines a free bucket linked list node for the memory allocator.
 (defstruct FreeBucket
-    (size u64)
     (next (* mut FreeBucket)))
 
 // Defines an allocator.
@@ -102,17 +119,112 @@
     (free16384 (* mut FreeBucket))
     (free65536 (* mut FreeBucket)))
 
+(defun create-buckets (bucket-size u64) : (* mut FreeBucket)
+    (seq
+        (let p = (: (* mut u8) (mmap 65536)))
+        (let i = (- bucket-size (sizeof FreeBucket)))
+        (let q = (cast (ptr-add p i)))
+        (while (< i 65536) (seqn
+            (let q = (: (* mut FreeBucket) (cast (ptr-add p i))))
+            (set i = (+ i bucket-size))
+            (cond
+                ((< i 65536) (seqn
+                    (set (deref q).next = (cast (ptr-add p i)))))
+                (:else (seqn
+                    (set (deref q).next = (null)))))))
+        q))
+
 // Helper function for allocation.
-(defun alloc-helper (A Allocator) (size u64) : (* mut 'a)
-    (cast (: u64 0)))
+(defun alloc-helper (A (* mut Allocator)) (size u64) : (* mut 'a)
+    (cond
+        ((<= size 8) (seq
+            (cond
+                ((== (deref A).free16 (null)) (seqn
+                    (set (deref A).free16 = (create-buckets 16)))))
+            (let ptr = (deref A).free16)
+            (set (deref A).free16 = (deref ptr).next)
+            (cast (- (: u64 (cast ptr)) 8))))
+        ((<= size 56) (seq
+            (cond
+                ((== (deref A).free64 (null)) (seqn
+                    (set (deref A).free64 = (create-buckets 64)))))
+            (let ptr = (deref A).free64)
+            (set (deref A).free64 = (deref ptr).next)
+            (cast (- (: u64 (cast ptr)) 56))))
+
+        ((<= size 248) (seq
+            (cond
+                ((== (deref A).free256 (null)) (seqn
+                    (set (deref A).free256 = (create-buckets 256)))))
+            (let ptr = (deref A).free256)
+            (set (deref A).free256 = (deref ptr).next)
+            (cast (- (: u64 (cast ptr)) 248))))
+        ((<= size 1016) (seq
+            (cond
+                ((== (deref A).free1024 (null)) (seqn
+                    (set (deref A).free1024 = (create-buckets 1024)))))
+            (let ptr = (deref A).free1024)
+            (set (deref A).free1024 = (deref ptr).next)
+            (cast (- (: u64 (cast ptr)) 1016))))
+        ((<= size 4088) (seq
+            (cond
+                ((== (deref A).free4096 (null)) (seqn
+                    (set (deref A).free4096 = (create-buckets 4096)))))
+            (let ptr = (deref A).free4096)
+            (set (deref A).free4096 = (deref ptr).next)
+            (cast (- (: u64 (cast ptr)) 4088))))
+        ((<= size 16376) (seq
+            (cond
+                ((== (deref A).free16384 (null)) (seqn
+                    (set (deref A).free16384 = (create-buckets 16384)))))
+            (let ptr = (deref A).free16384)
+            (set (deref A).free16384 = (deref ptr).next)
+            (cast (- (: u64 (cast ptr)) 16376))))
+        ((<= size 65528) (seq
+            (cond
+                ((== (deref A).free65536 (null)) (seqn
+                    (set (deref A).free65536 = (create-buckets 65536)))))
+            (let ptr = (deref A).free65536)
+            (set (deref A).free65536 = (deref ptr).next)
+            (cast (- (: u64 (cast ptr)) 65528))))
+        (:else
+            (mmap size))))
+
+// Helper function for deallocation.
+(defun dealloc-helper (A (* mut Allocator)) (ptr (* mut 'a)) (size u64)
+    (cond
+        ((<= size 8)
+            ())
+        ((<= size 56)
+            ())
+        ((<= size 248)
+            ())
+        ((<= size 1016)
+            ())
+        ((<= size 4088)
+            ())
+        ((<= size 16376)
+            ())
+        ((<= size 65528)
+            ())
+        (:else
+            ())))
 
 // Allocates a pointer to some data.
-(defun alloc (A Allocator) : (* mut 'a)
+(defun alloc (A (* mut Allocator)) : (* mut 'a)
     (alloc-helper A (sizeof 'a)))
 
+// Deallocates a pointer.
+(defun dealloc (A (* mut Allocator)) (ptr (* mut 'a))
+    (dealloc-helper A ptr (sizeof 'a)))
+
 // Allocates an array of data.
-(defun alloc-array (A Allocator) (len u64) : (@ mut 'a)
-    (alloc-helper A (* len (sizeof 'a))))
+(defun alloc-array (A (* mut Allocator)) (len u64) : (@ mut 'a)
+    (slice len (alloc-helper A (* len (sizeof 'a)))))
+
+// Deallocates an array of data.
+(defun dealloc-array (A (* mut Allocator)) (s (@ mut 'a))
+    (dealloc-helper A s.ptr (* s.len (sizeof 'a))))
 
 // Creates a new empty allocator.
 (defun new-alloc : Allocator
@@ -165,5 +277,8 @@
             (:else (seq
                 (eprint "failed to open file :(\n")
                 (exit 1))))
-        (file-close file)))
+        (file-close file)
+        (let A = (new-alloc))
+        (let p = (alloc (ref A)))
+        (set (deref p) = 0)))
 
