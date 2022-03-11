@@ -455,6 +455,12 @@ fn traverse_sexpr<'a>(
                 _ => todo!("error handling"),
             }
         }
+
+        SExpr::SizeOf { type_, .. } => {
+            let mut map = HashMap::new();
+            type_.replace_generics(type_var_counter, &mut map);
+            Ok(())
+        }
     }
 }
 
@@ -655,6 +661,8 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, T
 
         SExpr::Attribute { top, .. } => apply_substitutions(&mut **top, substitutions),
 
+        SExpr::SizeOf { type_, .. } => flatten_substitution(type_, substitutions),
+
         _ => (),
     }
 }
@@ -694,6 +702,9 @@ pub fn check<'a>(
                     &mut scopes,
                     &mut None,
                 )?;
+
+                println!("{:?} {:?}", expr.meta().type_, ret_type);
+                substitute(&mut expr.meta_mut().type_, ret_type, &mut substitutions, &mut coercions)?;
 
                 for (&i, &coercion) in coercions.iter() {
                     match substitutions.entry(i) {
@@ -793,22 +804,22 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
     });
     map.insert("<", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
-        ret_type: Type::Generic("a"),
+        ret_type: Type::Int(false, 1),
         index: None,
     });
     map.insert(">", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
-        ret_type: Type::Generic("a"),
+        ret_type: Type::Int(false, 1),
         index: None,
     });
     map.insert("<=", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
-        ret_type: Type::Generic("a"),
+        ret_type: Type::Int(false, 1),
         index: None,
     });
     map.insert(">=", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
-        ret_type: Type::Generic("a"),
+        ret_type: Type::Int(false, 1),
         index: None,
     });
     map.insert("<<", Signature {
@@ -838,26 +849,11 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
     });
     map.insert("==", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
-        ret_type: Type::Generic("a"),
+        ret_type: Type::Int(false, 1),
         index: None,
     });
     map.insert("!=", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
-        ret_type: Type::Generic("a"),
-        index: None,
-    });
-    map.insert("and", Signature {
-        arg_types: vec![Type::Int(false, 1), Type::Int(false, 1)],
-        ret_type: Type::Int(false, 1),
-        index: None,
-    });
-    map.insert("or", Signature {
-        arg_types: vec![Type::Int(false, 1), Type::Int(false, 1)],
-        ret_type: Type::Int(false, 1),
-        index: None,
-    });
-    map.insert("xor", Signature {
-        arg_types: vec![Type::Int(false, 1), Type::Int(false, 1)],
         ret_type: Type::Int(false, 1),
         index: None,
     });

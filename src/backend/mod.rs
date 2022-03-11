@@ -995,6 +995,8 @@ impl Generator {
                 }
             }
 
+            SExpr::SizeOf { meta, type_ } => vec![builder.ins().iconst(Self::convert_type_to_type(&meta.type_, structs)[0], Self::size_of(type_, structs) as i64)],
+
             _ => todo!(),
         }
     }

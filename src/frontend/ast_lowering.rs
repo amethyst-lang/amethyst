@@ -283,6 +283,11 @@ pub enum SExpr<'a> {
         top: Box<SExpr<'a>>,
         attrs: Vec<&'a str>,
     },
+
+    SizeOf {
+        meta: Metadata<'a>,
+        type_: Type<'a>,
+    },
 }
 
 impl<'a> SExpr<'a> {
@@ -309,7 +314,8 @@ impl<'a> SExpr<'a> {
             | SExpr::StructSet { meta, .. }
             | SExpr::Declare { meta, .. }
             | SExpr::Assign { meta, .. }
-            | SExpr::Attribute { meta, .. } => meta,
+            | SExpr::Attribute { meta, .. }
+            | SExpr::SizeOf { meta, ..} => meta,
         }
     }
 
@@ -336,7 +342,8 @@ impl<'a> SExpr<'a> {
             | SExpr::StructSet { meta, .. }
             | SExpr::Declare { meta, .. }
             | SExpr::Assign { meta, .. }
-            | SExpr::Attribute { meta, .. } => meta,
+            | SExpr::Attribute { meta, .. }
+            | SExpr::SizeOf { meta, ..} => meta,
         }
     }
 }
@@ -356,6 +363,7 @@ pub enum LoweringError {
     InvalidDefStruct,
     InvalidInst,
     InvalidLvalue,
+    InvalidSizeOf,
 }
 
 fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
@@ -870,6 +878,20 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             }
                         } else {
                             return Err(LoweringError::InvalidSet);
+                        }
+                    }
+
+                    Ast::Symbol(_, "sizeof") => {
+                        if sexpr.len() == 2 {
+                            SExpr::SizeOf {
+                                meta: Metadata {
+                                    range,
+                                    type_: Type::UnknownInt,
+                                },
+                                type_: parse_type(sexpr.remove(1))?,
+                            }
+                        } else {
+                            return Err(LoweringError::InvalidSizeOf);
                         }
                     }
 

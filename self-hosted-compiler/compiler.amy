@@ -4,8 +4,6 @@
 // ==================================================================================================
 //
 
-
-
 // Loops while a condition is true.
 (defmacro
     while condy
@@ -15,6 +13,20 @@
         (cond
             (condy stat)
             (:else (break else)))))
+
+// Performs a short circuiting logical and.
+(defmacro
+    and x y
+    (cond
+        (x y)
+        (:else 0)))
+
+// Performs a short circuiting logical or.
+(defmacro
+    or x y
+    (cond
+        (x 1)
+        (:else y)))
 
 // Prints out a string onto stdout.
 (defun print (str (@ mut u8))
@@ -63,6 +75,31 @@
     (seqn
         (syscall 3 (cast file.descriptor) 0 0 0 0 0)))
 
+// Maps memory for the program.
+(defun mmap (len u64) (prot u64) (flags u64) : (* mut 'a)
+    (cast (syscall 9 0 len prot flags (- 0 1) 0)))
+
+// Unmaps memory previously mapped by mmap.
+(defun munmap (addr (* mut 'a)) (len u64)
+    (seqn
+        (syscall 11 (cast addr) len 0 0 0 0)))
+
+// Defines a free bucket linked list node for the memory allocator.
+(defstruct FreeBucket
+    (size u64)
+    (next (* mut FreeBucket)))
+
+(defstruct Allocator
+    (free16    (* mut FreeBucket))
+    (free64    (* mut FreeBucket))
+    (free256   (* mut FreeBucket))
+    (free1024  (* mut FreeBucket))
+    (free4096  (* mut FreeBucket))
+    (free16384 (* mut FreeBucket))
+    (free65536 (* mut FreeBucket)))
+
+//(defun alloc (A Allocator) ())
+
 
 
 //
@@ -70,8 +107,6 @@
 // LEXING
 // ==================================================================================================
 //
-
-
 
 // Defines a location in source code.
 (defstruct Location
@@ -94,8 +129,6 @@
 // MAIN
 // ==================================================================================================
 //
-
-
 
 (defun main
     (seqn
