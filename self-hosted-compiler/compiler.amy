@@ -47,8 +47,7 @@
                     (set start = (- start 1))
                     (set (get p start) = c)
                     (set i = (/ i 10))))
-                (print (subslice p start p.len))
-                )))))
+                (print (subslice p start p.len)))))))
 
 // Prints out a string onto stderr.
 (defun eprint (str (@ mut u8))
@@ -271,6 +270,41 @@
         (free16384 (null))
         (free65536 (null))))
 
+// Defines a vector (ie a list).
+(defstruct Vec
+    (vals (@ mut 'a))
+    (len u64)
+    (A (* mut Allocator)))
+
+// Creates a new empty vector.
+(defun new-vec (A (* mut Allocator)) : (Vec 'a)
+    (inst Vec
+        (vals (slice 0 (null)))
+        (len 0)
+        (A A)))
+
+// Gets the ith element of a vector.
+(defun vec-get (v (Vec 'a)) (i u64) : (* mut 'a)
+    (cond
+        ((< i v.len) (ptr-add v.vals.ptr i))
+        (:else (null))))
+
+// Pushes a value onto a vector.
+(defun vec-push (vec (* mut (Vec 'a))) (v 'a) (seqn
+    (cond
+        ((<= (deref vec).vals.cap (deref vec).len) (seqn
+            (let new-cap = (cond
+                ((== (deref vec).vals.cap 0) 8)
+                (:else (* (deref vec).vals.cap 2))))
+            (let new-vals = (alloc-array (deref vec).A new-cap))
+            (let i = 0)
+            (while (< i (deref vec).vals.cap) (seqn
+                (set (get new-vals i) = (get (deref vec).vals i))
+                (set i = (+ i 1))))
+            (set (deref vec).vals = new-vals))))
+            (set (get (deref vec).vals (deref vec).len) = v)
+            (set (deref vec).len = (+ (deref vec).len 1))))
+
 
 
 //
@@ -313,7 +347,11 @@
                 (exit 1))))
         (file-close file)
         (let A = (new-alloc))
-        (let p = (alloc (ref A)))
-        (set (deref p) = 0)
-        (dealloc (ref A) p)))
+        (let vec = (ref (new-vec (ref A))))
+        (vec-push vec 1)
+        (vec-push vec 2)
+        (vec-push vec 3)
+        (print-int (deref (vec-get (deref vec) 0)))
+        (print-int (deref (vec-get (deref vec) 1)))
+        (print-int (deref (vec-get (deref vec) 2)))))
 

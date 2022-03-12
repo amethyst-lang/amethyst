@@ -892,8 +892,10 @@ impl Generator {
                     data_ctx,
                     structs,
                 ).0;
-                for (lvalue, &value) in lvalues.into_iter().zip(values.iter()) {
-                    builder.ins().store(MemFlags::new(), value, lvalue, 0);
+                let offsets = Self::offsets_and_sizes_of(&value.meta().type_, structs);
+                let lvalue = lvalues[0];
+                for (&value, (offset, _)) in values.iter().zip(offsets) {
+                    builder.ins().store(MemFlags::new(), value, lvalue, offset);
                 }
                 values
             }
@@ -1054,8 +1056,7 @@ impl Generator {
                                     t.replace_generics(&mut tvc, &mut map);
                                     Self::convert_type_to_type(&t, structs).len()
                                 }).sum();
-                            offset += Self::offsets_and_sizes_of(&SExprType::Struct(name, generics), structs)
-                                [j].0;
+                            offset += Self::offsets_and_sizes_of(&SExprType::Struct(name, generics), structs)[j].0;
                             t = u.clone();
                             t.replace_generics(&mut tvc, &mut map);
                         } else {
@@ -1129,7 +1130,11 @@ impl Generator {
                     data_ctx,
                     structs,
                 );
-                let ptr = ptr[1];
+                let ptr = if let LValue::Symbol(_) = &**v {
+                    ptr[1]
+                } else {
+                    builder.ins().load(Self::convert_type_to_type_ref(&SExprType::Pointer(true, Box::new(SExprType::F32)), structs), MemFlags::new(), ptr[0], 8)
+                };
                 let type_ = if let SExprType::Slice(_, t) = typ {
                     *t
                 } else {
@@ -1140,14 +1145,7 @@ impl Generator {
                     .ins()
                     .imul_imm(i, Self::size_of(&type_, structs) as i64);
                 let ptr = builder.ins().iadd(ptr, offset);
-
-                let offsets = Self::offsets_and_sizes_of(&type_, structs);
-                let mut result = vec![];
-                for (offset, _) in offsets {
-                    let v = builder.ins().iadd_imm(ptr, offset as i64);
-                    result.push(v);
-                }
-                (result, type_)
+                (vec![ptr], type_)
             }
         }
     }

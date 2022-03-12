@@ -15,7 +15,6 @@ syscall_:
     mov rdx, rcx
     mov r10, r8
     mov r8, r9
-    ; TODO: 6th syscall argument
     mov r9, [rsp - 16]
     syscall
     ret
