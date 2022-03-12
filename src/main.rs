@@ -33,7 +33,7 @@ fn main() {
         .unwrap()
         .wait()
         .unwrap();
-    assert_eq!(code.code(), 0);
+    assert_eq!(code.code().unwrap(), 0);
     let code = Command::new("ld")
         .arg("_start.o")
         .arg(&object)
@@ -43,5 +43,5 @@ fn main() {
         .unwrap()
         .wait()
         .unwrap();
-    assert_eq!(code.code(), 0);
+    assert_eq!(code.code().unwrap(), 0);
 }
