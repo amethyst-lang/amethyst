@@ -128,6 +128,7 @@
     (free16384 (* mut FreeBucket))
     (free65536 (* mut FreeBucket)))
 
+// Helper function for allocation to create size buckets.
 (defun create-buckets (bucket-size u64) : (* mut FreeBucket)
     (seq
         (let p = (: (* mut u8) (mmap 65536)))
@@ -315,6 +316,7 @@
             (set (get (deref vec).vals (deref vec).len) = v)
             (set (deref vec).len = (+ (deref vec).len 1))))
 
+// Creates a slice from a vector.
 (defun vec-slice (vec (* mut (Vec 'a))) : (@ mut 'a)
     (subslice (deref vec).vals 0 (deref vec).len))
 
@@ -341,20 +343,24 @@
 (defmacro TOKEN_TYPE_INVALID 1)
 (defmacro TOKEN_TYPE_LPAREN  2)
 (defmacro TOKEN_TYPE_RPAREN  3)
+(defmacro TOKEN_TYPE_INT     4)
 
+// Defines a lexer.
 (defstruct Lexer
-    (str (Vec u8))
+    (str (@ mut u8))
     (pos u64)
     (tokens (Vec Token))
     (token-pos u64))
 
-(defun new-lexer (A (* mut Allocator)) (str (Vec u8)) : Lexer
+// Creates a new lexer.
+(defun new-lexer (A (* mut Allocator)) (str (@ mut u8)) : Lexer
     (inst Lexer
         (str str)
         (pos 0)
         (tokens (new-vec A))
         (token-pos 0)))
 
+// Lexes a string.
 (defun lex (lexer (* mut Lexer)) : Token
     (cond
         ((< (deref lexer).token-pos (deref lexer).tokens.len) (seq
@@ -366,18 +372,34 @@
             (let state = 0)
             (let type = (TOKEN_TYPE_INVALID))
             (while (< i (deref lexer).str.len) (seqn
-                (let c = (deref (vec-get (ref (deref lexer).str) i)))
+                (let c = (get (deref lexer).str i))
                 (set i = (+ i 1))
                 (cond
                     // Initial state
                     ((== state 0) (cond
+                        // Left parenthesis
                         ((== c 0x28) (seqn
                             (set type = (TOKEN_TYPE_LPAREN))
                             (break)))
+
+                        // Right parenthesis
                         ((== c 0x29) (seqn
                             (set type = (TOKEN_TYPE_RPAREN))
                             (break)))
-                        (:else (break)))))))
+
+                        ((and (<= '0' c) (<= c '9')) (seqn
+                            (set type = (TOKEN_TYPE_INT))
+                            (set state = 1)))
+
+                        // Everything else is invalid
+                        (:else (break))))
+
+                    // Integers
+                    ((== type (TOKEN_TYPE_INT))
+                        (cond
+                            ((or (> '0' c) (> c '9')) (seqn
+                                (set i = (- i 1))
+                                (break))))))))
 
             (let start = (deref lexer).pos)
             (set (deref lexer).pos = i)
@@ -386,12 +408,13 @@
                     (start start)
                     (end i)))
                 (type type)
-                (value (subslice (vec-slice (ref (deref lexer).str)) start i))))
+                (value (subslice (deref lexer).str start i))))
             (let token-vec = (ref (deref lexer).tokens))
             (vec-push token-vec token)
             (set (deref lexer).tokens = (deref token-vec))
             token))))
 
+// Prints out a token.
 (defun print-token (token Token) (seqn
     (print "Token: ")
     (print-int token.loc.start)
@@ -407,6 +430,8 @@
             (print "LPAREN"))
         ((== token.type (TOKEN_TYPE_RPAREN))
             (print "RPAREN"))
+        ((== token.type (TOKEN_TYPE_INT))
+            (print "INT"))
         (:else
             (print "UNKNOWN")))
     (print " ")
@@ -423,7 +448,7 @@
 
 (defun main
     (seqn
-        (let file = (file-open "examples/ret-69.amy" (FILE_OPEN_FLAG_READ_ONLY)))
+        (let file = (file-open "test.amy" (FILE_OPEN_FLAG_READ_ONLY)))
         (cond
             ((file-is-valid file)
                 (print "opened file!\n"))
@@ -433,7 +458,7 @@
         (let A = (ref (new-alloc)))
         (let contents = (file-read-all file A))
         (file-close file)
-        (let lexer = (ref (new-lexer A contents)))
+        (let lexer = (ref (new-lexer A (vec-slice (ref contents)))))
         (let token = (lex lexer))
         (print-token token)))
 
