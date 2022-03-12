@@ -86,6 +86,17 @@
             (descriptor
                 (cast (syscall 2 (cast null-term.ptr) flags 0 0 0 0))))))
 
+// Reads a file into a vec of u8s.
+(defun file-read-all (file File) (A (* mut Allocator)) : (Vec u8) (seq
+    (let vec = (ref (new-vec A)))
+    (let slice = (alloca 64))
+    (while (let len = (syscall 0 (cast file.descriptor) (cast slice.ptr) slice.len 0 0 0)) (seqn
+        (let i = 0)
+        (while (< i len) (seqn
+            (vec-push vec (get slice i))
+            (set i = (+ i 1))))))
+    (deref vec)))
+
 // Closes a previously opened file.
 (defun file-close (file File)
     (seqn
@@ -284,7 +295,7 @@
         (A A)))
 
 // Gets the ith element of a vector.
-(defun vec-get (v (Vec 'a)) (i u64) : (* mut 'a)
+(defun vec-get (v (* mut (Vec 'a))) (i u64) : (* mut 'a)
     (cond
         ((< i v.len) (ptr-add v.vals.ptr i))
         (:else (null))))
@@ -304,6 +315,9 @@
             (set (deref vec).vals = new-vals))))
             (set (get (deref vec).vals (deref vec).len) = v)
             (set (deref vec).len = (+ (deref vec).len 1))))
+
+(defun vec-slice (vec (* mut (Vec 'a))) : (@ mut 'a)
+    (subslice (deref vec).vals 0 (deref vec).len))
 
 
 
@@ -345,13 +359,9 @@
             (:else (seq
                 (eprint "failed to open file :(\n")
                 (exit 1))))
+        (let A = (ref (new-alloc)))
+        (let contents = (file-read-all file A))
+        (print contents.vals)
         (file-close file)
-        (let A = (new-alloc))
-        (let vec = (ref (new-vec (ref A))))
-        (vec-push vec 1)
-        (vec-push vec 2)
-        (vec-push vec 3)
-        (print-int (deref (vec-get (deref vec) 0)))
-        (print-int (deref (vec-get (deref vec) 1)))
-        (print-int (deref (vec-get (deref vec) 2)))))
+        ))
 
