@@ -43,7 +43,7 @@ Float: Ast<'input> =
     <s:@L> <v:FloatRaw> <e:@R> => Ast::Float(s..e, v);
 
 Char: Ast<'input> = {
-    <s:@L> <v:r"'[^\\']'"> <e:@R> => Ast::Char(s..e, v.bytes().skip(1).next().unwrap()),
+    <s:@L> <v:r"'[^\\']'"> <e:@R> => Ast::Char(s..e, v.bytes().nth(1).unwrap()),
     <s:@L> <v:"'\\n'"> <e:@R> => Ast::Char(s..e, b'\n'),
     <s:@L> <v:"'\\r'"> <e:@R> => Ast::Char(s..e, b'\r'),
     <s:@L> <v:"'\\t'"> <e:@R> => Ast::Char(s..e, b'\t'),

@@ -37,17 +37,16 @@
 (defun print-int (i u64)
     (seqn
         (cond
-            ((== i 0) (print "0\n"))
+            ((== i 0) (print "0"))
             (:else (seqn
-                (let p = (alloca 21))
-                (set (get p 20) = '\n')
-                (let start = 20)
+                (let p = (alloca 20))
+                (let start = 19)
                 (while (!= i 0) (seqn
                     (let c = (+ '0' (cast (% i 10))))
                     (set start = (- start 1))
                     (set (get p start) = c)
                     (set i = (/ i 10))))
-                (print (subslice p start p.len)))))))
+                (print (subslice p start (- p.len 1))))))))
 
 // Prints out a string onto stderr.
 (defun eprint (str (@ mut u8))
@@ -297,7 +296,7 @@
 // Gets the ith element of a vector.
 (defun vec-get (v (* mut (Vec 'a))) (i u64) : (* mut 'a)
     (cond
-        ((< i v.len) (ptr-add v.vals.ptr i))
+        ((< i (deref v).len) (ptr-add (deref v).vals.ptr i))
         (:else (null))))
 
 // Pushes a value onto a vector.
@@ -338,8 +337,81 @@
     (type u64)
     (value (@ mut u8)))
 
-(defmacro TOKEN_TYPE_EOF 0)
-(defmacro TOKEN_TYPE_INT 1)
+(defmacro TOKEN_TYPE_EOF     0)
+(defmacro TOKEN_TYPE_INVALID 1)
+(defmacro TOKEN_TYPE_LPAREN  2)
+(defmacro TOKEN_TYPE_RPAREN  3)
+
+(defstruct Lexer
+    (str (Vec u8))
+    (pos u64)
+    (tokens (Vec Token))
+    (token-pos u64))
+
+(defun new-lexer (A (* mut Allocator)) (str (Vec u8)) : Lexer
+    (inst Lexer
+        (str str)
+        (pos 0)
+        (tokens (new-vec A))
+        (token-pos 0)))
+
+(defun lex (lexer (* mut Lexer)) : Token
+    (cond
+        ((< (deref lexer).token-pos (deref lexer).tokens.len) (seq
+            (let v = (vec-get (ref (deref lexer).tokens) (deref lexer).token-pos))
+            (set (deref lexer).token-pos = (+ (deref lexer).token-pos 1))
+            (deref v)))
+        (:else (seq
+            (let i = (deref lexer).pos)
+            (let state = 0)
+            (let type = (TOKEN_TYPE_INVALID))
+            (while (< i (deref lexer).str.len) (seqn
+                (let c = (deref (vec-get (ref (deref lexer).str) i)))
+                (set i = (+ i 1))
+                (cond
+                    // Initial state
+                    ((== state 0) (cond
+                        ((== c 0x28) (seqn
+                            (set type = (TOKEN_TYPE_LPAREN))
+                            (break)))
+                        ((== c 0x29) (seqn
+                            (set type = (TOKEN_TYPE_RPAREN))
+                            (break)))
+                        (:else (break)))))))
+
+            (let start = (deref lexer).pos)
+            (set (deref lexer).pos = i)
+            (let token = (inst Token
+                (loc (inst Location
+                    (start start)
+                    (end i)))
+                (type type)
+                (value (subslice (vec-slice (ref (deref lexer).str)) start i))))
+            (let token-vec = (ref (deref lexer).tokens))
+            (vec-push token-vec token)
+            (set (deref lexer).tokens = (deref token-vec))
+            token))))
+
+(defun print-token (token Token) (seqn
+    (print "Token: ")
+    (print-int token.loc.start)
+    (print "..")
+    (print-int token.loc.end)
+    (print " ")
+    (cond
+        ((== token.type (TOKEN_TYPE_EOF))
+            (print "EOF"))
+        ((== token.type (TOKEN_TYPE_INVALID))
+            (print "INVALID"))
+        ((== token.type (TOKEN_TYPE_LPAREN))
+            (print "LPAREN"))
+        ((== token.type (TOKEN_TYPE_RPAREN))
+            (print "RPAREN"))
+        (:else
+            (print "UNKNOWN")))
+    (print " ")
+    (print token.value)
+    (print "\n")))
 
 
 
@@ -351,8 +423,7 @@
 
 (defun main
     (seqn
-        (print "hewo\n")
-        (let file = (file-open "self-hosted-compiler/compiler.amy" (FILE_OPEN_FLAG_READ_ONLY)))
+        (let file = (file-open "examples/ret-69.amy" (FILE_OPEN_FLAG_READ_ONLY)))
         (cond
             ((file-is-valid file)
                 (print "opened file!\n"))
@@ -361,7 +432,8 @@
                 (exit 1))))
         (let A = (ref (new-alloc)))
         (let contents = (file-read-all file A))
-        (print contents.vals)
         (file-close file)
-        ))
+        (let lexer = (ref (new-lexer A contents)))
+        (let token = (lex lexer))
+        (print-token token)))
 
