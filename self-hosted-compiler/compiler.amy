@@ -377,6 +377,10 @@
                 (cond
                     // Initial state
                     ((== state 0) (cond
+                        // Whitespace
+                        ((or (== c ' ') (or (== c '\t') (or (== c '\n') (== c '\r')))) (seqn
+                            (set (deref lexer).pos = i)))
+
                         // Left parenthesis
                         ((== c 0x28) (seqn
                             (set type = (TOKEN_TYPE_LPAREN))
@@ -402,6 +406,8 @@
                                 (break))))))))
 
             (let start = (deref lexer).pos)
+            (cond ((== start i) (seqn
+                (set type = (TOKEN_TYPE_EOF)))))
             (set (deref lexer).pos = i)
             (let token = (inst Token
                 (loc (inst Location
@@ -411,6 +417,7 @@
                 (value (subslice (deref lexer).str start i))))
             (let token-vec = (ref (deref lexer).tokens))
             (vec-push token-vec token)
+            (set (deref lexer).token-pos = (+ (deref lexer).token-pos 1))
             (set (deref lexer).tokens = (deref token-vec))
             token))))
 
@@ -448,7 +455,7 @@
 
 (defun main
     (seqn
-        (let file = (file-open "test.amy" (FILE_OPEN_FLAG_READ_ONLY)))
+        (let file = (file-open "examples/ret-69.amy" (FILE_OPEN_FLAG_READ_ONLY)))
         (cond
             ((file-is-valid file)
                 (print "opened file!\n"))
@@ -459,6 +466,6 @@
         (let contents = (file-read-all file A))
         (file-close file)
         (let lexer = (ref (new-lexer A (vec-slice (ref contents)))))
-        (let token = (lex lexer))
-        (print-token token)))
+        (while (!= (let token = (lex lexer)).type (TOKEN_TYPE_EOF))
+            (print-token token))))
 
