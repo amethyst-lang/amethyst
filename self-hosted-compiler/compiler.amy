@@ -389,7 +389,7 @@
                     ((and (== comment-mode 2) (and (== c '*') (== next '/'))) (seqn
                         (set comment-mode = 0)
                         (set i = (+ i 1))
-                        (set (deref lexer).pos = (+ i 1))))
+                        (set (deref lexer).pos = i)))
                     ((== comment-mode 2) ())
 
                     // Initial state
