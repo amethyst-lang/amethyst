@@ -524,9 +524,14 @@
                 (value (subslice (deref lexer).str start i))))
             (let token-vec = (ref (deref lexer).tokens))
             (vec-push token-vec token)
-            (set (deref lexer).token-pos = (+ (deref lexer).token-pos 1))
             (set (deref lexer).tokens = (deref token-vec))
+            (set (deref lexer).token-pos = (+ (deref lexer).token-pos 1))
             token))))
+
+(defun lex-peek (lexer (* mut Lexer)) : Token (seq
+    (let token = (lex lexer))
+    (set (deref lexer).token-pos = (- (deref lexer).token-pos 1))
+    token))
 
 // Drops a lexer.
 (defun lexer-drop (lexer (* mut Lexer))
@@ -565,6 +570,47 @@
     (print "\n")))
 
 
+
+//
+// ==================================================================================================
+// PARSER
+// ==================================================================================================
+//
+
+(defstruct Ast
+    (type u64)
+    (value (@ mut u8))
+    (children (Vec Ast)))
+
+(defstruct ParseResult
+    (ast Ast)
+    (success u1))
+
+(defun parse-fail : ParseResult
+    (inst ParseResult
+        (success false)
+        (ast (inst Ast
+            (type 0)
+            (value (slice 0 (null)))
+            (children (new-vec (null)))))))
+
+(defmacro
+    pguard var = value
+        stats
+    (seq
+        (let var = value)
+        (cond
+            (var.success (seq
+                (let var = var.ast)
+                stats))
+            (:else var))))
+
+(defun parse-sexpr (lexer (* mut Lexer)) : ParseResult
+    (pguard v = (parse-fail)
+        (parse-fail)))
+
+(defun parse (lexer (* mut Lexer)) : ParseResult
+    (parse-fail))
 
 //
 // ==================================================================================================

@@ -99,7 +99,7 @@ fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &
             (Type::Pointer(_, a), Type::Pointer(_, b)) => substitute(&mut **a, &*b, substitutions, coercions),
             (Type::Slice(_, a), Type::Slice(_, b)) => substitute(&mut **a, &*b, substitutions, coercions),
 
-            (Type::Struct(_, v1), Type::Struct(_, v2)) => {
+            (Type::Struct(n1, v1), Type::Struct(n2, v2)) if *n1 == n2 => {
                 if v1.len() != v2.len() {
                     todo!("error handling");
                 }

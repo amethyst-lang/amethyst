@@ -106,7 +106,7 @@ impl Generator {
                 );
                 builder.ins().return_(&ret_value);
                 builder.seal_all_blocks();
-                println!("{}", builder.func);
+                //println!("{}", builder.func);
                 builder.finalize();
                 self.ctx.func = func;
 
@@ -1153,7 +1153,7 @@ impl Generator {
     fn convert_type_to_type_helper(
         t: &SExprType,
         structs: &HashMap<&str, Struct>,
-        map: &HashMap<&str, Vec<Type>>,
+        map: &HashMap<&str, SExprType>,
     ) -> Vec<Type> {
         match t {
             SExprType::Int(_, width) if *width == 1 => vec![types::B1],
@@ -1169,7 +1169,7 @@ impl Generator {
             SExprType::Pointer(_, _) => vec![types::I64],
             SExprType::Slice(_, _) => vec![types::I64, types::I64],
 
-            SExprType::Generic(g) => map.get(g).unwrap().clone(),
+            SExprType::Generic(g) => Self::convert_type_to_type_helper(map.get(g).unwrap(), structs, map),
 
             SExprType::Struct(name, v) => {
                 let struct_ = structs.get(name).unwrap();
@@ -1179,7 +1179,7 @@ impl Generator {
                     .zip(v.iter())
                     .map(|(a, b)| {
                         if let SExprType::Generic(v) = a {
-                            (*v, Self::convert_type_to_type_helper(b, structs, map))
+                            (*v, b.clone())
                         } else {
                             unreachable!();
                         }
