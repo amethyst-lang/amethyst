@@ -370,13 +370,38 @@
         (:else (seq
             (let i = (deref lexer).pos)
             (let state = 0)
+            (let comment-mode = 0)
             (let type = (TOKEN_TYPE_INVALID))
             (while (< i (deref lexer).str.len) (seqn
                 (let c = (get (deref lexer).str i))
                 (set i = (+ i 1))
+                (let next = (cond
+                    ((< i (deref lexer).str.len) (get (deref lexer).str i))
+                    (:else 0)))
                 (cond
+                    // Line comments
+                    ((and (== comment-mode 1) (== c '\n')) (seqn
+                        (set comment-mode = 0)
+                        (set (deref lexer).pos = i)))
+                    ((== comment-mode 1) ())
+
+                    // Block comments
+                    ((and (== comment-mode 2) (and (== c '*') (== next '/'))) (seqn
+                        (set comment-mode = 0)
+                        (set i = (+ i 1))
+                        (set (deref lexer).pos = (+ i 1))))
+                    ((== comment-mode 2) ())
+
                     // Initial state
                     ((== state 0) (cond
+                        // Line comments
+                        ((and (== c '/') (== next '/')) (seqn
+                            (set comment-mode = 1)))
+
+                        // Block comments
+                        ((and (== c '/') (== next '*')) (seqn
+                            (set comment-mode = 2)))
+
                         // Whitespace
                         ((or (== c ' ') (or (== c '\t') (or (== c '\n') (== c '\r')))) (seqn
                             (set (deref lexer).pos = i)))
@@ -455,7 +480,7 @@
 
 (defun main
     (seqn
-        (let file = (file-open "examples/ret-69.amy" (FILE_OPEN_FLAG_READ_ONLY)))
+        (let file = (file-open "test.amy" (FILE_OPEN_FLAG_READ_ONLY)))
         (cond
             ((file-is-valid file)
                 (print "opened file!\n"))
