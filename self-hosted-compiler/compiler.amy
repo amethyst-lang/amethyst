@@ -380,6 +380,8 @@
 (defmacro TOKEN_TYPE_RPAREN  3)
 (defmacro TOKEN_TYPE_INT     4)
 (defmacro TOKEN_TYPE_SYMBOL  5)
+(defmacro TOKEN_TYPE_KEY     6)
+(defmacro TOKEN_TYPE_DOT     7)
 
 // Defines a lexer.
 (defstruct Lexer
@@ -452,6 +454,11 @@
                             (set type = (TOKEN_TYPE_RPAREN))
                             (break)))
 
+                        // Dot
+                        ((== c '.') (seqn
+                            (set type = (TOKEN_TYPE_DOT))
+                            (break)))
+
                         // Integers
                         ((and (<= '0' c) (<= c '9')) (seqn
                             (set type = (TOKEN_TYPE_INT))
@@ -467,6 +474,11 @@
                             (set type = (TOKEN_TYPE_SYMBOL))
                             (set state = 1)))
 
+                        // Keys
+                        ((== c ':') (seqn
+                            (set type = (TOKEN_TYPE_KEY))
+                            (set state = 1)))
+
                         // Everything else is invalid
                         (:else (break))))
 
@@ -479,6 +491,13 @@
 
                     // Symbols
                     ((== type (TOKEN_TYPE_SYMBOL))
+                        (cond
+                            ((or (not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c)) (and (== c '/') (== next '*'))) (seqn
+                                (set i = (- i 1))
+                                (break)))))
+
+                    // Keys
+                    ((== type (TOKEN_TYPE_KEY))
                         (cond
                             ((or (not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c)) (and (== c '/') (== next '*'))) (seqn
                                 (set i = (- i 1))
@@ -524,6 +543,10 @@
             (print "INT"))
         ((== token.type (TOKEN_TYPE_SYMBOL))
             (print "SYMBOL"))
+        ((== token.type (TOKEN_TYPE_DOT))
+            (print "DOT"))
+        ((== token.type (TOKEN_TYPE_KEY))
+            (print "KEY"))
         (:else
             (print "UNKNOWN")))
     (print " ")
