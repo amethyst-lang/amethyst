@@ -327,6 +327,10 @@
 (defun vec-slice (vec (* mut (Vec 'a))) : (@ mut 'a)
     (subslice (deref vec).vals 0 (deref vec).len))
 
+// Drops a vector
+(defun vec-drop (vec (* mut (Vec 'a))) (seqn
+    (dealloc-array (deref vec).A (deref vec).vals)))
+
 // Checks if a string slice contains a character.
 (defun str-contains (str (@ mut u8)) (c u8) : u1 (seq
     (let i = 0)
@@ -458,6 +462,7 @@
                             (set type = (TOKEN_TYPE_SYMBOL))
                             (break)))
 
+                        // Symbols
                         ((str-contains "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c) (seqn
                             (set type = (TOKEN_TYPE_SYMBOL))
                             (set state = 1)))
@@ -494,6 +499,10 @@
             (set (deref lexer).token-pos = (+ (deref lexer).token-pos 1))
             (set (deref lexer).tokens = (deref token-vec))
             token))))
+
+// Drops a lexer.
+(defun lexer-drop (lexer (* mut Lexer))
+    (vec-drop (ref (deref lexer).tokens)))
 
 // Prints out a token.
 (defun print-token (token Token) (seqn
@@ -544,5 +553,7 @@
         (file-close file)
         (let lexer = (ref (new-lexer A (vec-slice (ref contents)))))
         (while (!= (let token = (lex lexer)).type (TOKEN_TYPE_EOF))
-            (print-token token))))
+            (print-token token))
+        (lexer-drop lexer)
+        (vec-drop (ref contents))))
 
