@@ -3,6 +3,8 @@ global syscall_
 extern main
 
 _start:
+    pop rsi
+    mov rdi, rsp
     call main
     mov rdi, rax
     mov rax, 60

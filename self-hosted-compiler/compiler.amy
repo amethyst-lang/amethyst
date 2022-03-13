@@ -337,6 +337,20 @@
         (set i = (+ i 1)))
     :else false)))
 
+(defun get-argv (argv (* mut (* mut u8))) (i u64) : (@ mut u8) (seq
+    (let j = 0)
+    (while (< j i) (seqn
+        (cond
+            ((== (deref (ptr-add argv j)) (null))
+                (break (slice 0 (null)))))
+        (set j = (+ j 1)))
+    :else (seq
+        (let p = (deref (ptr-add argv i)))
+        (let len = 0)
+        (while (deref (ptr-add p len)) (seqn
+            (set len = (+ len 1))))
+        (slice len p)))))
+
 
 
 //
@@ -421,7 +435,7 @@
                             (set comment-mode = 2)))
 
                         // Whitespace
-                        ((or (== c ' ') (or (== c '\t') (or (== c '\n') (== c '\r')))) (seqn
+                        ((str-contains " \n\t\r" c) (seqn
                             (set (deref lexer).pos = i)))
 
                         // Left parenthesis
@@ -458,7 +472,8 @@
                                 (set i = (- i 1))
                                 (break)))))
 
-                    ((and (== type (TOKEN_TYPE_SYMBOL)) (== state 1))
+                    // Symbols
+                    ((== type (TOKEN_TYPE_SYMBOL))
                         (cond
                             ((not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c)) (seqn
                                 (set i = (- i 1))
@@ -514,9 +529,10 @@
 // ==================================================================================================
 //
 
-(defun main
+(defun main (argv (* mut (* mut u8))) (argc u64)
     (seqn
-        (let file = (file-open "examples/ret-69.amy" (FILE_OPEN_FLAG_READ_ONLY)))
+        (let file = (get-argv argv 1))
+        (let file = (file-open file (FILE_OPEN_FLAG_READ_ONLY)))
         (cond
             ((file-is-valid file)
                 (print "opened file!\n"))
