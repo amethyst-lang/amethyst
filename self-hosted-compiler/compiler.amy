@@ -154,6 +154,7 @@
 // Helper function for allocation.
 (defun alloc-helper (A (* mut Allocator)) (size u64) : (* mut 'a)
     (cond
+        ((== size 0) (null))
         ((<= size 8) (seq
             (cond
                 ((== (deref A).free16 (null)) (seqn
@@ -216,6 +217,7 @@
 // Helper function for deallocation.
 (defun dealloc-helper (A (* mut Allocator)) (ptr (* mut 'a)) (size u64)
     (cond
+        ((or (== size 0) (== ptr (null))) ())
         ((<= size 8) (seqn
             (let p = (ptr-add (: (* mut u8) (cast ptr)) 8))
             (let bucket = (: (* mut FreeBucket) (cast p)))
@@ -319,9 +321,10 @@
             (while (< i (deref vec).vals.cap) (seqn
                 (set (get new-vals i) = (get (deref vec).vals i))
                 (set i = (+ i 1))))
+            (dealloc-array (deref vec).A (deref vec).vals)
             (set (deref vec).vals = new-vals))))
-            (set (get (deref vec).vals (deref vec).len) = v)
-            (set (deref vec).len = (+ (deref vec).len 1))))
+    (set (get (deref vec).vals (deref vec).len) = v)
+    (set (deref vec).len = (+ (deref vec).len 1))))
 
 // Creates a slice from a vector.
 (defun vec-slice (vec (* mut (Vec 'a))) : (@ mut 'a)
@@ -382,6 +385,7 @@
 (defmacro TOKEN_TYPE_SYMBOL  5)
 (defmacro TOKEN_TYPE_KEY     6)
 (defmacro TOKEN_TYPE_DOT     7)
+(defmacro TOKEN_TYPE_QUOTE   8)
 
 // Defines a lexer.
 (defstruct Lexer
@@ -457,6 +461,11 @@
                         // Dot
                         ((== c '.') (seqn
                             (set type = (TOKEN_TYPE_DOT))
+                            (break)))
+
+                        // Quote
+                        ((== c '\'') (seqn
+                            (set type = (TOKEN_TYPE_QUOTE))
                             (break)))
 
                         // Integers
@@ -547,6 +556,8 @@
             (print "DOT"))
         ((== token.type (TOKEN_TYPE_KEY))
             (print "KEY"))
+        ((== token.type (TOKEN_TYPE_QUOTE))
+            (print "QUOTE"))
         (:else
             (print "UNKNOWN")))
     (print " ")
