@@ -475,7 +475,7 @@
                     // Symbols
                     ((== type (TOKEN_TYPE_SYMBOL))
                         (cond
-                            ((not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c)) (seqn
+                            ((or (not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c)) (and (== c '/') (== next '*'))) (seqn
                                 (set i = (- i 1))
                                 (break))))))))
 
