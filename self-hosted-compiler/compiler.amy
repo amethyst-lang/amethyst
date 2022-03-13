@@ -28,6 +28,13 @@
         (x 1)
         (:else y)))
 
+// Performs a logical not
+(defmacro
+    not x
+    (cond
+        (x 0)
+        (:else 1)))
+
 // Prints out a string onto stdout.
 (defun print (str (@ mut u8))
     (seqn
@@ -320,6 +327,16 @@
 (defun vec-slice (vec (* mut (Vec 'a))) : (@ mut 'a)
     (subslice (deref vec).vals 0 (deref vec).len))
 
+// Checks if a string slice contains a character.
+(defun str-contains (str (@ mut u8)) (c u8) : u1 (seq
+    (let i = 0)
+    (while (< i str.len) (seqn
+        (cond
+            ((== c (get str i))
+                (break true)))
+        (set i = (+ i 1)))
+    :else false)))
+
 
 
 //
@@ -344,6 +361,7 @@
 (defmacro TOKEN_TYPE_LPAREN  2)
 (defmacro TOKEN_TYPE_RPAREN  3)
 (defmacro TOKEN_TYPE_INT     4)
+(defmacro TOKEN_TYPE_SYMBOL  5)
 
 // Defines a lexer.
 (defstruct Lexer
@@ -416,8 +434,18 @@
                             (set type = (TOKEN_TYPE_RPAREN))
                             (break)))
 
+                        // Integers
                         ((and (<= '0' c) (<= c '9')) (seqn
                             (set type = (TOKEN_TYPE_INT))
+                            (set state = 1)))
+
+                        // Colon symbol
+                        ((and (== c ':') (not (str-contains "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" next))) (seqn
+                            (set type = (TOKEN_TYPE_SYMBOL))
+                            (break)))
+
+                        ((str-contains "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c) (seqn
+                            (set type = (TOKEN_TYPE_SYMBOL))
                             (set state = 1)))
 
                         // Everything else is invalid
@@ -427,6 +455,12 @@
                     ((== type (TOKEN_TYPE_INT))
                         (cond
                             ((or (> '0' c) (> c '9')) (seqn
+                                (set i = (- i 1))
+                                (break)))))
+
+                    ((and (== type (TOKEN_TYPE_SYMBOL)) (== state 1))
+                        (cond
+                            ((not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c)) (seqn
                                 (set i = (- i 1))
                                 (break))))))))
 
@@ -464,6 +498,8 @@
             (print "RPAREN"))
         ((== token.type (TOKEN_TYPE_INT))
             (print "INT"))
+        ((== token.type (TOKEN_TYPE_SYMBOL))
+            (print "SYMBOL"))
         (:else
             (print "UNKNOWN")))
     (print " ")
@@ -480,7 +516,7 @@
 
 (defun main
     (seqn
-        (let file = (file-open "test.amy" (FILE_OPEN_FLAG_READ_ONLY)))
+        (let file = (file-open "examples/ret-69.amy" (FILE_OPEN_FLAG_READ_ONLY)))
         (cond
             ((file-is-valid file)
                 (print "opened file!\n"))
