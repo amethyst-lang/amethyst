@@ -141,7 +141,7 @@ fn traverse_sexpr<'a>(
     scopes: &mut Vec<HashMap<&'a str, Type<'a>>>,
     break_type: &mut Option<Type<'a>>,
 ) -> Result<(), CorrectnessError> {
-    println!("{:?}: {:?}\n", sexpr.meta().range, sexpr);
+    //println!("{:?}: {:?}\n", sexpr.meta().range, sexpr);
 
     let t = &mut sexpr.meta_mut().type_;
     if *t == Type::UnknownInt {
@@ -716,7 +716,6 @@ pub fn check<'a>(
                                         FloatOrInt::Float => t = Type::F64,
                                         FloatOrInt::Int => t = Type::Int(true, 32),
                                     };
-                                    println!("uwu");
                                     substitutions.insert(j, t);
                                     break;
                                 }
@@ -750,10 +749,10 @@ pub fn check<'a>(
                 let mut monomorphised = sexprs[index].clone();
 
                 if let SExpr::FuncDef { meta, args, ret_type, expr, .. } = &mut monomorphised {
-                    meta.type_ = t.clone();
                     let mut map = HashMap::new();
                     extract_generics(&meta.type_, &t, &mut map);
                     update_generic_refs(expr, &mut map);
+                    meta.type_ = t.clone();
                     if let Type::Function(a, r) = t {
                         for (i, (_, arg)) in args.iter_mut().enumerate() {
                             *arg = a[i].clone();
