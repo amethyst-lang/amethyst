@@ -571,6 +571,7 @@
 
 (defstruct LexerResult
     (token Token)
+    (fail ParseFailure)
     (success u1))
 
 (defun lexer-expect (lexer (* mut Lexer)) (type u64) : LexerResult
@@ -578,10 +579,25 @@
         ((== type (lex-peek lexer).type)
             (inst LexerResult
                 (token (lex-next lexer))
+                (fail (inst ParseFailure
+                    (loc (inst Location
+                        (start 0)
+                        (end 0)))
+                    (expected 0)
+                    (received 0)))
                 (success true)))
         (:else
             (inst LexerResult
-                (token (lex-peek lexer))
+                (token (inst Token
+                    (loc (inst Location
+                        (start 0)
+                        (end 0)))
+                    (type 0)
+                    (value "")))
+                (fail (inst ParseFailure
+                    (loc (lex-peek lexer).loc)
+                    (expected type)
+                    (received (lex-peek lexer).type)))
                 (success false)))))
 
 
@@ -592,12 +608,14 @@
 // ==================================================================================================
 //
 
-(defmacro AST_NODE_TYPE_INVALID 0)
-(defmacro AST_NODE_TYPE_ROOT    1)
-(defmacro AST_NODE_TYPE_SEXPR   2)
-(defmacro AST_NODE_TYPE_INT     3)
-(defmacro AST_NODE_TYPE_SYMBOL  4)
-(defmacro AST_NODE_TYPE_KEY     5)
+(defmacro AST_NODE_TYPE_INVALID  0)
+(defmacro AST_NODE_TYPE_ROOT     1)
+(defmacro AST_NODE_TYPE_SEXPR    2)
+(defmacro AST_NODE_TYPE_INT      3)
+(defmacro AST_NODE_TYPE_SYMBOL   4)
+(defmacro AST_NODE_TYPE_KEY      5)
+
+(defmacro ERROR_TYPE_VALUE (- 0 1))
 
 (defstruct Ast
     (type u64)
@@ -640,25 +658,113 @@
 (defun print-ast (ast (* mut Ast))
     (print-ast-helper ast 0))
 
+(defstruct LineColumn
+    (line-start u64)
+    (col-start u64)
+    (line-end u64)
+    (col-end u64))
+
+(defun loc-to-line-col (contents (@ mut u8)) (loc Location) : LineColumn (seq
+    (let i = 0)
+    (let line-start = 1)
+    (let col-start = 0)
+    (while (< i loc.start) (seqn
+        (cond
+            ((== (get contents i) '\n') (seqn
+                (set line-start = (+ line-start 1))
+                (set col-start = 0)))
+            (:else (seqn
+                (set col-start = (+ col-start 1)))))
+        (set i = (+ i 1))))
+    (let line-end = line-start)
+    (let col-end = col-start)
+    (while (< i loc.end) (seqn
+        (cond
+            ((== (get contents i) '\n') (seqn
+                (set line-end = (+ line-end 1))
+                (set col-end = 0)))
+            (:else (seqn
+                (set col-end = (+ col-end 1)))))
+        (set i = (+ i 1))))
+    (inst LineColumn
+        (line-start line-start)
+        (col-start col-start)
+        (line-end line-end)
+        (col-end col-end))))
+
+(defun print-parse-error-helper (type u64)
+    (cond
+        ((== type (ERROR_TYPE_VALUE))
+            (print "VALUE"))
+        ((== type (TOKEN_TYPE_EOF))
+            (print "EOF"))
+        ((== type (TOKEN_TYPE_INVALID))
+            (print "INVALID"))
+        ((== type (TOKEN_TYPE_LPAREN))
+            (print "LPAREN"))
+        ((== type (TOKEN_TYPE_RPAREN))
+            (print "RPAREN"))
+        ((== type (TOKEN_TYPE_INT))
+            (print "INT"))
+        ((== type (TOKEN_TYPE_SYMBOL))
+            (print "SYMBOL"))
+        ((== type (TOKEN_TYPE_KEY))
+            (print "KEY"))
+        ((== type (TOKEN_TYPE_DOT))
+            (print "DOT"))
+        ((== type (TOKEN_TYPE_QUOTE))
+            (print "QUOTE"))
+        (:else
+            (print "UNKNOWN"))))
+
+(defun print-parse-error (contents (@ mut u8)) (fail (* mut ParseFailure)) (seqn
+    (print "error: expected ")
+    (print-parse-error-helper (deref fail).expected)
+    (print ", got ")
+    (print-parse-error-helper (deref fail).received)
+    (let line-col = (loc-to-line-col contents (deref fail).loc))
+    (print " (")
+    (print-int line-col.line-start)
+    (print ":")
+    (print-int line-col.col-start)
+    (print "..")
+    (print-int line-col.line-end)
+    (print ":")
+    (print-int line-col.col-end)
+    (print ")\n")))
+
+(defstruct ParseFailure
+    (loc Location)
+    (expected u64)
+    (received u64))
+
 (defstruct ParseResult
     (ast Ast)
+    (fail ParseFailure)
     (success u1))
 
-(defun parse-fail : ParseResult
+(defun parse-fail (fail ParseFailure) : ParseResult
     (inst ParseResult
-        (success false)
         (ast (inst Ast
             (type 0)
             (loc (inst Location
                 (start 0)
                 (end 0)))
             (value (slice 0 (null)))
-            (children (new-vec (null)))))))
+            (children (new-vec (null)))))
+        (fail fail)
+        (success false)))
 
 (defun parse-success (ast Ast) : ParseResult
     (inst ParseResult
-        (success true)
-        (ast ast)))
+        (ast ast)
+        (fail (inst ParseFailure
+            (loc (inst Location
+                (start 0)
+                (end 0)))
+            (expected 0)
+            (received 0)))
+        (success true)))
 
 (defmacro
     pguard var = value
@@ -686,7 +792,7 @@
                 stats))
             (:else (seq
                 else
-                (parse-fail))))))
+                (parse-fail var.fail))))))
 
 (defun parse-value (lexer (* mut Lexer)) : ParseResult
     (seq
@@ -719,7 +825,10 @@
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
 
-            (:else (parse-fail)))))
+            (:else (parse-fail (inst ParseFailure
+                (loc token.loc)
+                (expected (ERROR_TYPE_VALUE))
+                (received token.type)))))))
 
 (defun parse-sexpr (lexer (* mut Lexer)) : ParseResult
     (lguard left = (lexer-expect lexer (TOKEN_TYPE_LPAREN)) (seq
@@ -738,18 +847,23 @@
 
 (defun parse (lexer (* mut Lexer)) : ParseResult (seq
     (let asts = (ref (new-vec (deref lexer).tokens.A)))
-    (while (let ast = (parse-sexpr lexer)).success
-        (vec-push asts ast.ast))
-    (lguard eof = (lexer-expect lexer (TOKEN_TYPE_EOF))
-        (parse-success
-            (inst Ast
-                (type (AST_NODE_TYPE_ROOT))
-                (loc (inst Location
-                    (start 0)
-                    (end eof.loc.end)))
-                (value (slice 0 (null)))
-                (children (deref asts))))
-    :else (vec-drop asts))))
+    (let end = 0)
+    (while (!= (lex-peek lexer).type (TOKEN_TYPE_EOF)) (seqn
+        (let sexpr = (parse-sexpr lexer))
+        (cond
+            ((not sexpr.success) (seqn
+                (vec-drop asts)
+                (break sexpr))))
+        (set end = sexpr.ast.loc.end)
+        (vec-push asts sexpr.ast))
+    :else (parse-success
+        (inst Ast
+            (type (AST_NODE_TYPE_ROOT))
+            (loc (inst Location
+                (start 0)
+                (end end)))
+            (value (slice 0 (null)))
+            (children (deref asts)))))))
 
 
 
@@ -771,12 +885,14 @@
                 (exit 1))))
         (let A = (ref (new-alloc)))
         (let contents = (file-read-all file A))
+        (let contents-ref = (vec-slice (ref contents)))
         (file-close file)
-        (let lexer = (ref (new-lexer A (vec-slice (ref contents)))))
-        (cond ((let ast = (parse lexer)).success (seq
-            (let ast = ast.ast)
+        (let lexer = (ref (new-lexer A contents-ref)))
+        (let result = (parse lexer))
+        (cond (result.success (seq
+            (let ast = result.ast)
             (print-ast (ref ast))))
-        (:else (print "oh no\n")))
+        (:else (print-parse-error contents-ref (ref result.fail))))
         (lexer-drop lexer)
         (vec-drop (ref contents))))
 
