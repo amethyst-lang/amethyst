@@ -593,14 +593,15 @@
 //
 
 (defmacro AST_NODE_TYPE_INVALID 0)
-(defmacro AST_NODE_TYPE_SEXPR   1)
-(defmacro AST_NODE_TYPE_INT     2)
-(defmacro AST_NODE_TYPE_SYMBOL  3)
+(defmacro AST_NODE_TYPE_ROOT    1)
+(defmacro AST_NODE_TYPE_SEXPR   2)
+(defmacro AST_NODE_TYPE_INT     3)
+(defmacro AST_NODE_TYPE_SYMBOL  4)
+(defmacro AST_NODE_TYPE_KEY     5)
 
 (defstruct Ast
     (type u64)
-    (start u64)
-    (end u64)
+    (loc Location)
     (value (@ mut u8))
     (children (Vec Ast)))
 
@@ -609,19 +610,23 @@
     (while (< i level) (seqn
         (print "    ")
         (set i = (+ i 1))))
-    (print-int (deref ast).start)
+    (print-int (deref ast).loc.start)
     (print "..")
-    (print-int (deref ast).end)
+    (print-int (deref ast).loc.end)
     (print " ")
     (cond
         ((== (deref ast).type (AST_NODE_TYPE_INVALID))
             (print "INVALID"))
+        ((== (deref ast).type (AST_NODE_TYPE_ROOT))
+            (print "ROOT"))
         ((== (deref ast).type (AST_NODE_TYPE_SEXPR))
             (print "SEXPR"))
         ((== (deref ast).type (AST_NODE_TYPE_INT))
             (print "INT"))
         ((== (deref ast).type (AST_NODE_TYPE_SYMBOL))
             (print "SYMBOL"))
+        ((== (deref ast).type (AST_NODE_TYPE_KEY))
+            (print "KEY"))
         (:else
             (print "UNKNOWN")))
     (print " ")
@@ -644,8 +649,9 @@
         (success false)
         (ast (inst Ast
             (type 0)
-            (start 0)
-            (end 0)
+            (loc (inst Location
+                (start 0)
+                (end 0)))
             (value (slice 0 (null)))
             (children (new-vec (null)))))))
 
@@ -693,8 +699,7 @@
                 (lex-next lexer)
                 (parse-success (inst Ast
                     (type (AST_NODE_TYPE_SYMBOL))
-                    (start token.loc.start)
-                    (end token.loc.end)
+                    (loc token.loc)
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
 
@@ -702,8 +707,15 @@
                 (lex-next lexer)
                 (parse-success (inst Ast
                     (type (AST_NODE_TYPE_INT))
-                    (start token.loc.start)
-                    (end token.loc.end)
+                    (loc token.loc)
+                    (value token.value)
+                    (children (new-vec (deref lexer).tokens.A))))))
+
+            ((== token.type (TOKEN_TYPE_KEY)) (seq
+                (lex-next lexer)
+                (parse-success (inst Ast
+                    (type (AST_NODE_TYPE_KEY))
+                    (loc token.loc)
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
 
@@ -717,14 +729,27 @@
         (lguard right = (lexer-expect lexer (TOKEN_TYPE_RPAREN))
             (parse-success (inst Ast
                 (type (AST_NODE_TYPE_SEXPR))
-                (start left.loc.start)
-                (end right.loc.end)
+                (loc (inst Location
+                    (start left.loc.start)
+                    (end right.loc.end)))
                 (value "")
                 (children (deref v))))
         :else (vec-drop v)))))
 
-(defun parse (lexer (* mut Lexer)) : ParseResult
-    (parse-sexpr lexer))
+(defun parse (lexer (* mut Lexer)) : ParseResult (seq
+    (let asts = (ref (new-vec (deref lexer).tokens.A)))
+    (while (let ast = (parse-sexpr lexer)).success
+        (vec-push asts ast.ast))
+    (lguard eof = (lexer-expect lexer (TOKEN_TYPE_EOF))
+        (parse-success
+            (inst Ast
+                (type (AST_NODE_TYPE_ROOT))
+                (loc (inst Location
+                    (start 0)
+                    (end eof.loc.end)))
+                (value (slice 0 (null)))
+                (children (deref asts))))
+    :else (vec-drop asts))))
 
 
 
