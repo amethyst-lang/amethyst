@@ -608,7 +608,7 @@ impl Generator {
                     }
 
                     &SExpr::Symbol { value, .. } if value == "<" || value == ">" || value == "<=" || value == ">=" || value == "!=" || value == "==" => {
-                        if meta.type_ == SExprType::F32 || meta.type_ == SExprType::F64 {
+                        if args[0].meta().type_ == SExprType::F32 || args[0].meta().type_ == SExprType::F64 {
                             vec![builder
                                 .ins()
                                 .fcmp(match value {
@@ -620,7 +620,7 @@ impl Generator {
                                     "==" => FloatCC::Equal,
                                     _ => unreachable!(),
                                 }, values[0][0], values[1][0])]
-                        } else if matches!(meta.type_, SExprType::Int(true, _)) {
+                        } else if matches!(args[0].meta().type_, SExprType::Int(true, _)) {
                             vec![builder.ins().icmp(
                                 match value {
                                     "<" => IntCC::SignedLessThan,

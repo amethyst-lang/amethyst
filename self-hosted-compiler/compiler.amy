@@ -40,11 +40,11 @@
     (seqn
         (syscall 1 1 (cast str.ptr) str.len 0 0 0)))
 
-// Prints out a number onto stdout.
-(defun print-int (i u64)
+// Helper function for printing out an integer
+(defun print-int-helper (i u64) (printer (fn ((@ mut u8))))
     (seqn
         (cond
-            ((== i 0) (print "0"))
+            ((== i 0) (printer "0"))
             (:else (seqn
                 (let p = (alloca 20))
                 (let start = 19)
@@ -53,7 +53,15 @@
                     (set start = (- start 1))
                     (set (get p start) = c)
                     (set i = (/ i 10))))
-                (print (subslice p start (- p.len 1))))))))
+                (printer (subslice p start (- p.len 1))))))))
+
+// Prints out a number onto stdout.
+(defun print-int (i u64)
+    (print-int-helper i print))
+
+// Prints out a number onto stderr.
+(defun eprint-int (i u64)
+    (print-int-helper i eprint))
 
 // Prints out a string onto stderr.
 (defun eprint (str (@ mut u8))
@@ -74,7 +82,7 @@
     (descriptor i32))
 
 (defun file-is-valid (file File) : u1
-    (!= file.descriptor (- 0 1)))
+    (> file.descriptor 0))
 
 (defmacro FILE_OPEN_FLAG_READ_ONLY 0)
 
@@ -695,43 +703,43 @@
 (defun print-parse-error-helper (type u64)
     (cond
         ((== type (ERROR_TYPE_VALUE))
-            (print "VALUE"))
+            (eprint "VALUE"))
         ((== type (TOKEN_TYPE_EOF))
-            (print "EOF"))
+            (eprint "EOF"))
         ((== type (TOKEN_TYPE_INVALID))
-            (print "INVALID"))
+            (eprint "INVALID"))
         ((== type (TOKEN_TYPE_LPAREN))
-            (print "LPAREN"))
+            (eprint "LPAREN"))
         ((== type (TOKEN_TYPE_RPAREN))
-            (print "RPAREN"))
+            (eprint "RPAREN"))
         ((== type (TOKEN_TYPE_INT))
-            (print "INT"))
+            (eprint "INT"))
         ((== type (TOKEN_TYPE_SYMBOL))
-            (print "SYMBOL"))
+            (eprint "SYMBOL"))
         ((== type (TOKEN_TYPE_KEY))
-            (print "KEY"))
+            (eprint "KEY"))
         ((== type (TOKEN_TYPE_DOT))
-            (print "DOT"))
+            (eprint "DOT"))
         ((== type (TOKEN_TYPE_QUOTE))
-            (print "QUOTE"))
+            (eprint "QUOTE"))
         (:else
-            (print "UNKNOWN"))))
+            (eprint "UNKNOWN"))))
 
 (defun print-parse-error (contents (@ mut u8)) (fail (* mut ParseFailure)) (seqn
-    (print "error: expected ")
+    (eprint "error: expected ")
     (print-parse-error-helper (deref fail).expected)
-    (print ", got ")
+    (eprint ", got ")
     (print-parse-error-helper (deref fail).received)
     (let line-col = (loc-to-line-col contents (deref fail).loc))
-    (print " (")
-    (print-int line-col.line-start)
-    (print ":")
-    (print-int line-col.col-start)
-    (print "..")
-    (print-int line-col.line-end)
-    (print ":")
-    (print-int line-col.col-end)
-    (print ")\n")))
+    (eprint " (")
+    (eprint-int line-col.line-start)
+    (eprint ":")
+    (eprint-int line-col.col-start)
+    (eprint "..")
+    (eprint-int line-col.line-end)
+    (eprint ":")
+    (eprint-int line-col.col-end)
+    (eprint ")\n")))
 
 (defstruct ParseFailure
     (loc Location)
@@ -875,13 +883,13 @@
 
 (defun main (argv (* mut (* mut u8))) (argc u64)
     (seqn
-        (let file = (get-argv argv 1))
-        (let file = (file-open file (FILE_OPEN_FLAG_READ_ONLY)))
+        (let filename = (get-argv argv 1))
+        (let file = (file-open filename (FILE_OPEN_FLAG_READ_ONLY)))
         (cond
-            ((file-is-valid file)
-                (print "opened file!\n"))
-            (:else (seq
-                (eprint "failed to open file :(\n")
+            ((not (file-is-valid file)) (seqn
+                (eprint "error: failed to open file ")
+                (eprint filename)
+                (eprint "\n")
                 (exit 1))))
         (let A = (ref (new-alloc)))
         (let contents = (file-read-all file A))
