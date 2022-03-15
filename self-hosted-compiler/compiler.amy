@@ -629,6 +629,7 @@
 (defmacro AST_NODE_TYPE_INT      3)
 (defmacro AST_NODE_TYPE_SYMBOL   4)
 (defmacro AST_NODE_TYPE_KEY      5)
+(defmacro AST_NODE_TYPE_ATTR     6)
 
 (defmacro ERROR_TYPE_VALUE (- 0 1))
 
@@ -663,6 +664,8 @@
             (print "SYMBOL"))
         ((== (deref ast).type (AST_NODE_TYPE_KEY))
             (print "KEY"))
+        ((== (deref ast).type (AST_NODE_TYPE_ATTR))
+            (print "ATTRIBUTE"))
         (:else
             (print "UNKNOWN")))
     (print " ")
@@ -848,10 +851,57 @@
                 (expected (ERROR_TYPE_VALUE))
                 (received token.type)))))))
 
+(defun parse-attr-item (lexer (* mut Lexer)) : ParseResult (seq
+    (let token = (lex-peek lexer))
+    (cond
+        ((== token.type (TOKEN_TYPE_SYMBOL)) (seq
+            (lex-next lexer)
+            (parse-success (inst Ast
+                (type (AST_NODE_TYPE_SYMBOL))
+                (loc token.loc)
+                (value token.value)
+                (children (new-vec (deref lexer).tokens.A))))))
+
+        ((== token.type (TOKEN_TYPE_LPAREN))
+            (parse-sexpr lexer))
+
+        (:else (parse-fail (inst ParseFailure
+                (loc token.loc)
+                (expected (ERROR_TYPE_VALUE))
+                (received token.type)))))))
+
+(defun parse-attribute (lexer (* mut Lexer)) : ParseResult
+    (pguard top = (parse-value lexer)
+        (seq
+            (let attrs = (ref (new-vec (deref lexer).tokens.A)))
+            (vec-push attrs top)
+            (while (== (lex-peek lexer).type (TOKEN_TYPE_DOT))
+                (seqn
+                    (lex-next lexer)
+                    (let attr = (parse-attr-item lexer))
+                    (cond
+                        (attr.success
+                            (vec-push attrs attr.ast))
+                        (:else (seqn
+                            (vec-drop attrs ast-drop)
+                            (break attr)))))
+            :else (cond
+                ((> (deref attrs).len 1)
+                    (parse-success (inst Ast
+                        (type (AST_NODE_TYPE_ATTR))
+                        (loc (inst Location
+                            (start top.loc.start)
+                            (end (deref (vec-get attrs (- (deref attrs).len 1))).loc.end)))
+                        (value "")
+                        (children (deref attrs)))))
+                (:else (seq
+                    (vec-drop attrs empty-dealloc)
+                    (parse-success top))))))))
+
 (defun parse-sexpr (lexer (* mut Lexer)) : ParseResult
     (lguard left = (lexer-expect lexer (TOKEN_TYPE_LPAREN)) (seq
         (let v = (ref (new-vec (deref lexer).tokens.A)))
-        (while (let var = (parse-value lexer)).success (seqn
+        (while (let var = (parse-attribute lexer)).success (seqn
             (vec-push v var.ast)))
         (lguard right = (lexer-expect lexer (TOKEN_TYPE_RPAREN))
             (parse-success (inst Ast

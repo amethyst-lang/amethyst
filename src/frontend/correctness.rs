@@ -141,7 +141,7 @@ fn traverse_sexpr<'a>(
     scopes: &mut Vec<HashMap<&'a str, Type<'a>>>,
     break_type: &mut Option<Type<'a>>,
 ) -> Result<(), CorrectnessError> {
-    //println!("{:?}: {:?}\n", sexpr.meta().range, sexpr);
+    println!("{:?}: {:?}\n", sexpr.meta().range, sexpr);
 
     let t = &mut sexpr.meta_mut().type_;
     if *t == Type::UnknownInt {
