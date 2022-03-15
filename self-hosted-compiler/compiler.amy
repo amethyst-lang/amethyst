@@ -338,8 +338,15 @@
 (defun vec-slice (vec (* mut (Vec 'a))) : (@ mut 'a)
     (subslice (deref vec).vals 0 (deref vec).len))
 
+// Empty deallocator
+(defun empty-dealloc (v (* mut 'a)) ())
+
 // Drops a vector
-(defun vec-drop (vec (* mut (Vec 'a))) (seqn
+(defun vec-drop (vec (* mut (Vec 'a))) (callback (fn ((* mut 'a)))) (seqn
+    (let i = 0)
+    (while (< i (deref vec).len) (seqn
+        (callback (ptr-add (deref vec).vals.ptr i))
+        (set i = (+ i 1))))
     (dealloc-array (deref vec).A (deref vec).vals)))
 
 // Checks if a string slice contains a character.
@@ -543,7 +550,7 @@
 
 // Drops a lexer.
 (defun lexer-drop (lexer (* mut Lexer))
-    (vec-drop (ref (deref lexer).tokens)))
+    (vec-drop (ref (deref lexer).tokens) empty-dealloc))
 
 // Prints out a token.
 (defun print-token (token Token) (seqn
@@ -630,6 +637,9 @@
     (loc Location)
     (value (@ mut u8))
     (children (Vec Ast)))
+
+(defun ast-drop (ast (* mut Ast))
+    (vec-drop (ref (deref ast).children) ast-drop))
 
 (defun print-ast-helper (ast (* mut Ast)) (level u64) (seqn
     (let i = 0)
@@ -851,7 +861,7 @@
                     (end right.loc.end)))
                 (value "")
                 (children (deref v))))
-        :else (vec-drop v)))))
+        :else (vec-drop v ast-drop)))))
 
 (defun parse (lexer (* mut Lexer)) : ParseResult (seq
     (let asts = (ref (new-vec (deref lexer).tokens.A)))
@@ -860,7 +870,7 @@
         (let sexpr = (parse-sexpr lexer))
         (cond
             ((not sexpr.success) (seqn
-                (vec-drop asts)
+                (vec-drop asts ast-drop)
                 (break sexpr))))
         (set end = sexpr.ast.loc.end)
         (vec-push asts sexpr.ast))
@@ -902,5 +912,5 @@
             (print-ast (ref ast))))
         (:else (print-parse-error contents-ref (ref result.fail))))
         (lexer-drop lexer)
-        (vec-drop (ref contents))))
+        (vec-drop (ref contents) empty-dealloc)))
 
