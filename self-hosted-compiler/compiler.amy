@@ -402,6 +402,7 @@
 (defmacro TOKEN_TYPE_DOT     7)
 (defmacro TOKEN_TYPE_QUOTE   8)
 (defmacro TOKEN_TYPE_STRING  9)
+(defmacro TOKEN_TYPE_CHAR   10)
 
 // Defines a lexer.
 (defstruct Lexer
@@ -481,8 +482,8 @@
 
                         // Quote
                         ((== c '\'') (seqn
-                            (set type = (TOKEN_TYPE_QUOTE))
-                            (break)))
+                            (set type = (TOKEN_TYPE_CHAR))
+                            (set state = 1)))
 
                         // Integers
                         ((and (<= '0' c) (<= c '9')) (seqn
@@ -542,7 +543,37 @@
 
                     // String escaped character
                     ((and (== type (TOKEN_TYPE_STRING)) (== state 2)) (seqn
-                        (set state = 1))))))
+                        (set state = 1)))
+
+                    // Beginning of a character
+                    ((and (== type (TOKEN_TYPE_CHAR)) (== state 1))
+                        (cond
+                            ((== c '\\') (seqn
+                                (set state = 2)))
+                            ((!= next '\'') (seqn
+                                (set i = (- i 1))
+                                (set type = (TOKEN_TYPE_QUOTE))
+                                (break)))
+                            (:else (seqn
+                                (set state = 3)))))
+
+                    // Escaped character
+                    ((and (== type (TOKEN_TYPE_CHAR)) (== state 2))
+                        (cond
+                            ((str-contains "nrt0\\'\"" c) (seqn
+                                (set state = 3)))
+                            (:else (seqn
+                                (set type = (TOKEN_TYPE_INVALID))
+                                (break)))))
+
+                    // End of character
+                    ((and (== type (TOKEN_TYPE_CHAR)) (== state 3))
+                        (cond
+                            ((== c '\'')
+                                (break))
+                            (:else (seqn
+                                (set type = (TOKEN_TYPE_INVALID))
+                                (break))))))))
 
             (let start = (deref lexer).pos)
             (cond ((== start i) (seqn
@@ -560,6 +591,7 @@
             (set (deref lexer).token-pos = (+ (deref lexer).token-pos 1))
             token))))
 
+// Peeks into the lexer and returns the next token without consuming it.
 (defun lex-peek (lexer (* mut Lexer)) : Token (seq
     (let token = (lex-next lexer))
     (set (deref lexer).token-pos = (- (deref lexer).token-pos 1))
@@ -575,6 +607,7 @@
     (fail ParseFailure)
     (success u1))
 
+// Expects a type of token and fails if the token is not next.
 (defun lexer-expect (lexer (* mut Lexer)) (type u64) : LexerResult
     (cond
         ((== type (lex-peek lexer).type)
@@ -618,6 +651,7 @@
 (defmacro AST_NODE_TYPE_ATTR     6)
 (defmacro AST_NODE_TYPE_QUOTE    7)
 (defmacro AST_NODE_TYPE_STRING   8)
+(defmacro AST_NODE_TYPE_CHAR     9)
 
 (defmacro ERROR_TYPE_VALUE (- 0 1))
 
@@ -658,6 +692,8 @@
             (print "QUOTE"))
         ((== (deref ast).type (AST_NODE_TYPE_STRING))
             (print "STRING"))
+        ((== (deref ast).type (AST_NODE_TYPE_CHAR))
+            (print "CHAR"))
         (:else
             (print "UNKNOWN")))
     (print " ")
@@ -729,6 +765,8 @@
             (eprint "QUOTE"))
         ((== type (TOKEN_TYPE_STRING))
             (eprint "STRING"))
+        ((== type (TOKEN_TYPE_CHAR))
+            (eprint "CHAR"))
         (:else
             (eprint "UNKNOWN"))))
 
@@ -855,6 +893,14 @@
                 (lex-next lexer)
                 (parse-success (inst Ast
                     (type (AST_NODE_TYPE_STRING))
+                    (loc token.loc)
+                    (value token.value)
+                    (children (new-vec (deref lexer).tokens.A))))))
+
+            ((== token.type (TOKEN_TYPE_CHAR)) (seq
+                (lex-next lexer)
+                (parse-success (inst Ast
+                    (type (AST_NODE_TYPE_CHAR))
                     (loc token.loc)
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
