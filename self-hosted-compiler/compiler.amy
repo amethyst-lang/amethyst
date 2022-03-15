@@ -630,6 +630,7 @@
 (defmacro AST_NODE_TYPE_SYMBOL   4)
 (defmacro AST_NODE_TYPE_KEY      5)
 (defmacro AST_NODE_TYPE_ATTR     6)
+(defmacro AST_NODE_TYPE_QUOTE    7)
 
 (defmacro ERROR_TYPE_VALUE (- 0 1))
 
@@ -666,6 +667,8 @@
             (print "KEY"))
         ((== (deref ast).type (AST_NODE_TYPE_ATTR))
             (print "ATTRIBUTE"))
+        ((== (deref ast).type (AST_NODE_TYPE_QUOTE))
+            (print "QUOTE"))
         (:else
             (print "UNKNOWN")))
     (print " ")
@@ -845,6 +848,17 @@
                     (loc token.loc)
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
+
+            ((== token.type (TOKEN_TYPE_QUOTE)) (seq
+                (lex-next lexer)
+                (pguard quoted = (parse-value lexer) (seq
+                    (let children = (ref (new-vec (deref lexer).tokens.A)))
+                    (vec-push children quoted)
+                    (parse-success (inst Ast
+                        (type (AST_NODE_TYPE_QUOTE))
+                        (loc token.loc)
+                        (value "")
+                        (children (deref children))))))))
 
             (:else (parse-fail (inst ParseFailure
                 (loc token.loc)
