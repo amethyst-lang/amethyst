@@ -466,12 +466,12 @@
                             (set (deref lexer).pos = i)))
 
                         // Left parenthesis
-                        ((== c 0x28) (seqn
+                        ((== c 40) (seqn
                             (set type = (TOKEN_TYPE_LPAREN))
                             (break)))
 
                         // Right parenthesis
-                        ((== c 0x29) (seqn
+                        ((== c 41) (seqn
                             (set type = (TOKEN_TYPE_RPAREN))
                             (break)))
 
