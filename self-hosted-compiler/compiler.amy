@@ -401,6 +401,7 @@
 (defmacro TOKEN_TYPE_KEY     6)
 (defmacro TOKEN_TYPE_DOT     7)
 (defmacro TOKEN_TYPE_QUOTE   8)
+(defmacro TOKEN_TYPE_STRING  9)
 
 // Defines a lexer.
 (defstruct Lexer
@@ -489,18 +490,22 @@
                             (set state = 1)))
 
                         // Colon symbol
-                        ((and (== c ':') (not (str-contains "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" next))) (seqn
+                        ((and (== c ':') (not (str-contains "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*<>" next))) (seqn
                             (set type = (TOKEN_TYPE_SYMBOL))
                             (break)))
 
                         // Symbols
-                        ((str-contains "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c) (seqn
+                        ((str-contains "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*<>" c) (seqn
                             (set type = (TOKEN_TYPE_SYMBOL))
                             (set state = 1)))
 
                         // Keys
                         ((== c ':') (seqn
                             (set type = (TOKEN_TYPE_KEY))
+                            (set state = 1)))
+
+                        ((== c '"') (seqn
+                            (set type = (TOKEN_TYPE_STRING))
                             (set state = 1)))
 
                         // Everything else is invalid
@@ -516,16 +521,28 @@
                     // Symbols
                     ((== type (TOKEN_TYPE_SYMBOL))
                         (cond
-                            ((or (not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c)) (and (== c '/') (== next '*'))) (seqn
+                            ((or (not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*<>" c)) (and (== c '/') (== next '*'))) (seqn
                                 (set i = (- i 1))
                                 (break)))))
 
                     // Keys
                     ((== type (TOKEN_TYPE_KEY))
                         (cond
-                            ((or (not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*" c)) (and (== c '/') (== next '*'))) (seqn
+                            ((or (not (str-contains "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_=+|/?~!@$%^&*<>" c)) (and (== c '/') (== next '*'))) (seqn
                                 (set i = (- i 1))
-                                (break))))))))
+                                (break)))))
+
+                    // String unescaped character
+                    ((and (== type (TOKEN_TYPE_STRING)) (== state 1))
+                        (cond
+                            ((== c '\\') (seqn
+                                (set state = 2)))
+                            ((== c '"')
+                                (break))))
+
+                    // String escaped character
+                    ((and (== type (TOKEN_TYPE_STRING)) (== state 2)) (seqn
+                        (set state = 1))))))
 
             (let start = (deref lexer).pos)
             (cond ((== start i) (seqn
@@ -553,37 +570,6 @@
     (vec-drop (ref (deref lexer).tokens) empty-dealloc))
 
 // Prints out a token.
-(defun print-token (token Token) (seqn
-    (print "Token: ")
-    (print-int token.loc.start)
-    (print "..")
-    (print-int token.loc.end)
-    (print " ")
-    (cond
-        ((== token.type (TOKEN_TYPE_EOF))
-            (print "EOF"))
-        ((== token.type (TOKEN_TYPE_INVALID))
-            (print "INVALID"))
-        ((== token.type (TOKEN_TYPE_LPAREN))
-            (print "LPAREN"))
-        ((== token.type (TOKEN_TYPE_RPAREN))
-            (print "RPAREN"))
-        ((== token.type (TOKEN_TYPE_INT))
-            (print "INT"))
-        ((== token.type (TOKEN_TYPE_SYMBOL))
-            (print "SYMBOL"))
-        ((== token.type (TOKEN_TYPE_DOT))
-            (print "DOT"))
-        ((== token.type (TOKEN_TYPE_KEY))
-            (print "KEY"))
-        ((== token.type (TOKEN_TYPE_QUOTE))
-            (print "QUOTE"))
-        (:else
-            (print "UNKNOWN")))
-    (print " ")
-    (print token.value)
-    (print "\n")))
-
 (defstruct LexerResult
     (token Token)
     (fail ParseFailure)
@@ -631,6 +617,7 @@
 (defmacro AST_NODE_TYPE_KEY      5)
 (defmacro AST_NODE_TYPE_ATTR     6)
 (defmacro AST_NODE_TYPE_QUOTE    7)
+(defmacro AST_NODE_TYPE_STRING   8)
 
 (defmacro ERROR_TYPE_VALUE (- 0 1))
 
@@ -669,6 +656,8 @@
             (print "ATTRIBUTE"))
         ((== (deref ast).type (AST_NODE_TYPE_QUOTE))
             (print "QUOTE"))
+        ((== (deref ast).type (AST_NODE_TYPE_STRING))
+            (print "STRING"))
         (:else
             (print "UNKNOWN")))
     (print " ")
@@ -738,6 +727,8 @@
             (eprint "DOT"))
         ((== type (TOKEN_TYPE_QUOTE))
             (eprint "QUOTE"))
+        ((== type (TOKEN_TYPE_STRING))
+            (eprint "STRING"))
         (:else
             (eprint "UNKNOWN"))))
 
@@ -859,6 +850,14 @@
                         (loc token.loc)
                         (value "")
                         (children (deref children))))))))
+
+            ((== token.type (TOKEN_TYPE_STRING)) (seq
+                (lex-next lexer)
+                (parse-success (inst Ast
+                    (type (AST_NODE_TYPE_STRING))
+                    (loc token.loc)
+                    (value token.value)
+                    (children (new-vec (deref lexer).tokens.A))))))
 
             (:else (parse-fail (inst ParseFailure
                 (loc token.loc)
