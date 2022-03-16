@@ -359,6 +359,18 @@
         (set i = (+ i 1)))
     :else false)))
 
+(defun str-equals (a (@ mut u8)) (b (@ mut u8)) : u1
+    (cond
+        ((!= a.len b.len) false)
+        (:else (seq
+            (let i = 0)
+            (while (< i a.len) (seqn
+                (cond
+                    ((!= (get a i) (get b i))
+                        (break false)))
+                (set i = (+ i 1)))
+            :else true)))))
+
 (defun get-argv (argv (* mut (* mut u8))) (i u64) : (@ mut u8) (seq
     (let j = 0)
     (while (< j i) (seqn
@@ -372,6 +384,10 @@
         (while (deref (ptr-add p len)) (seqn
             (set len = (+ len 1))))
         (slice len p)))))
+
+(defstruct Pair
+    (a 'a)
+    (b 'b))
 
 
 
@@ -996,6 +1012,109 @@
 
 //
 // ==================================================================================================
+// MACROS
+// ==================================================================================================
+//
+
+(defmacro MACRO_ARG_TYPE_ORDERED  0)
+(defmacro MACRO_ARG_TYPE_ATOM     1)
+(defmacro MACRO_ARG_TYPE_KEY      2)
+(defmacro MACRO_ARG_TYPE_REST     3)
+
+(defstruct MacroArg
+    (name (@ mut u8))
+    (type u64)
+    (value Ast))
+
+(defstruct Macro
+    (name (@ mut u8))
+    (args (Vec MacroArg))
+    (body Ast))
+
+(defun extract-macros (map (* mut (Vec (Pair (@ mut u8) Macro)))) (root (* mut Ast)) (seqn
+    (let i = 0)
+    (while (< i (deref root).children.len) (seqn
+        (let ast = (vec-get (ref (deref root).children) i))
+        (let contents = (ref (deref ast).children))
+        (cond
+            ((and (>= (deref contents).len 2) (== (deref ast).type (AST_NODE_TYPE_SEXPR))) (seqn
+                (let name = (vec-get contents 0))
+                (cond
+                    ((and (== (deref name).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref name).value "defmacro"))
+                        (seqn
+                            (let name = (vec-get contents 1))
+                            (cond
+                                ((== (deref name).type (AST_NODE_TYPE_SYMBOL)) (seqn
+                                    (let name = (deref name).value)
+                                    (let args = (ref (new-vec (deref contents).A)))
+                                    (let type = (MACRO_ARG_TYPE_ORDERED))
+                                    (let i = 2)
+                                    (while (< i (- (deref contents).len 1)) (seqn
+                                        (let arg = (vec-get contents i))
+                                        (cond
+                                            ((and (== (deref arg).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref arg).value "&key")) (seqn
+                                                (set type = (MACRO_ARG_TYPE_KEY))))
+                                            ((and (== (deref arg).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref arg).value "&rest")) (seqn
+                                                (set type = (MACRO_ARG_TYPE_REST))))
+
+                                            ((== (deref arg).type (AST_NODE_TYPE_SYMBOL)) (seqn
+                                                (vec-push args (inst MacroArg
+                                                    (name (deref arg).value)
+                                                    (type type)
+                                                    (value (inst Ast
+                                                        (type 0)
+                                                        (loc (inst Location
+                                                            (start 0)
+                                                            (end 0)))
+                                                        (value "")
+                                                        (children (new-vec (deref args).A))))))))
+
+                                            ((and (== (deref arg).type (AST_NODE_TYPE_SEXPR)) (== (deref arg).children.len 2)) (seqn
+                                                (let ast = (deref (vec-get (ref (deref arg).children) 1)))
+                                                (let name = (deref (vec-get (ref (deref arg).children) 0)))
+                                                (cond
+                                                    ((== name.type (AST_NODE_TYPE_SYMBOL))
+                                                        (vec-push args (inst MacroArg
+                                                            (name name.value)
+                                                            (type type)
+                                                            (value ast)))))))
+
+                                            ((and (== (deref arg).type (AST_NODE_TYPE_QUOTE)) (== (deref (vec-get (ref (deref arg).children) 0)).type (AST_NODE_TYPE_SYMBOL)))
+                                                (vec-push args (inst MacroArg
+                                                    (name (deref (vec-get (ref (deref arg).children) 0)).value)
+                                                    (type (MACRO_ARG_TYPE_ATOM))
+                                                    (value (inst Ast
+                                                        (type 0)
+                                                        (loc (inst Location
+                                                            (start 0)
+                                                            (end 0)))
+                                                        (value "")
+                                                        (children (new-vec (deref args).A))))))))
+
+                                        (set i = (+ i 1))))
+
+                                    (let ast = (cond
+                                        ((> (deref contents).len 2)
+                                            (deref (vec-get contents (- (deref contents).len 1))))
+                                        (:else (inst Ast
+                                            (type 0)
+                                            (loc (inst Location
+                                                (start 0)
+                                                (end 0)))
+                                            (value "")
+                                            (children (new-vec (deref args).A))))))
+                                    (vec-push map (inst Pair
+                                        (a name)
+                                        (b (inst Macro
+                                            (name name)
+                                            (args (deref args))
+                                            (body ast))))))))))))))
+        (set i = (+ i 1))))))
+
+
+
+//
+// ==================================================================================================
 // MAIN
 // ==================================================================================================
 //
@@ -1018,7 +1137,9 @@
         (let result = (parse lexer))
         (cond (result.success (seq
             (let ast = result.ast)
-            (print-ast (ref ast))))
+            (print-ast (ref ast))
+            (let macros = (ref (new-vec A)))
+            (extract-macros macros (ref ast))))
         (:else (print-parse-error contents-ref (ref result.fail))))
         (lexer-drop lexer)
         (vec-drop (ref contents) empty-dealloc)))
