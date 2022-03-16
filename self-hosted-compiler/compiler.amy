@@ -692,7 +692,7 @@
         (let children = (ref (new-vec ast.children.A)))
         (let i = 0)
         (while (< i ast.children.len) (seqn
-            (vec-push children (deref (vec-get (ref ast.children) i)))
+            (vec-push children (ast-clone (deref (vec-get (ref ast.children) i))))
             (set i = (+ i 1))))
         (inst Ast
             (type ast.type)
