@@ -971,7 +971,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
     Ok(sexpr)
 }
 
-fn lvalue_creator<'a>(ast: Ast<'a>) -> Result<LValue<'a>, LoweringError> {
+fn lvalue_creator(ast: Ast<'_>) -> Result<LValue<'_>, LoweringError> {
     match ast {
         Ast::Symbol(_, sym) => Ok(LValue::Symbol(sym)),
 
@@ -988,7 +988,7 @@ fn lvalue_creator<'a>(ast: Ast<'a>) -> Result<LValue<'a>, LoweringError> {
                     Ok(LValue::Deref(Box::new(lvalue_creator(v.remove(0))?)))
                 }
 
-                _ => return Err(LoweringError::InvalidLvalue),
+                _ => Err(LoweringError::InvalidLvalue),
             }
         }
 

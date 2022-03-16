@@ -1306,6 +1306,98 @@
 
 //
 // ==================================================================================================
+// SEXPR LOWERING
+// ==================================================================================================
+//
+
+(defstruct SExprMetadata
+    (loc Location)
+    (type Type))
+
+(defmacro TYPE_TYPE_UNKNOWN        0)
+(defmacro TYPE_TYPE_UNKNOWN_INT    1)
+(defmacro TYPE_TYPE_UNKNOWN_FLOAT  2)
+(defmacro TYPE_TYPE_INT            3)
+(defmacro TYPE_TYPE_F32            4)
+(defmacro TYPE_TYPE_F64            5)
+(defmacro TYPE_TYPE_TUPLE          6)
+(defmacro TYPE_TYPE_POINTER        7)
+(defmacro TYPE_TYPE_SLICE          8)
+(defmacro TYPE_TYPE_STRUCT         9)
+(defmacro TYPE_TYPE_GENERIC       10)
+(defmacro TYPE_TYPE_FUNCTION      11)
+(defmacro TYPE_TYPE_TYPE_VARIABLE 12)
+
+// Defines a type
+// Representation of a and b:
+// UNKNOWN - nothing
+// UNKNOWN INT - nothing
+// UNKNOWN FLOAT - nothing
+// INT - a = signed?, b = width
+// F32 - nothing
+// F64 - nothing
+// TUPLE - a = Vec Type, b = nothing
+// POINTER - a = mutable?, b = Type (type pointed to)
+// SLICE - a = mutable?, b = Type (type pointed to)
+// STRUCT - a = Vec u8, b = Vec Type (generics)
+// GENERIC - a = name length, b = name pointer
+// FUNCTION - a = Vec Type (arg types), b = Type (return type)
+// TYPE VARIABLE - a = type variable index, b = nothing
+(defstruct Type
+    (type u64)
+    (a u64)
+    (b u64))
+
+(defmacro LVALUE_TYPE_SYMBOL    0)
+(defmacro LVALUE_TYPE_ATTRIBUTE 0)
+(defmacro LVALUE_TYPE_DEREF     0)
+(defmacro LVALUE_TYPE_GET       0)
+
+(defstruct LValue
+    (type u64)
+    (symbol (@ mut u8))
+    (boxed (* mut LValue))
+    (attrs (Vec (@ mut u8)))
+    (index (* mut SExpr)))
+
+(defmacro SEXPR_TYPE_INT         0)
+(defmacro SEXPR_TYPE_FLOAT       1)
+(defmacro SEXPR_TYPE_STR         2)
+(defmacro SEXPR_TYPE_SYMBOL      3)
+(defmacro SEXPR_TYPE_SEQ         4)
+(defmacro SEXPR_TYPE_COND        5)
+(defmacro SEXPR_TYPE_LOOP        6)
+(defmacro SEXPR_TYPE_BREAK       7)
+(defmacro SEXPR_TYPE_NIL         8)
+(defmacro SEXPR_TYPE_TYPE        9)
+(defmacro SEXPR_TYPE_FUNC_DEF   10)
+(defmacro SEXPR_TYPE_FUNC_CALL  11)
+(defmacro SEXPR_TYPE_STRUCT_DEF 12)
+(defmacro SEXPR_TYPE_STRUCT_SET 13)
+(defmacro SEXPR_TYPE_DECLARE    14)
+(defmacro SEXPR_TYPE_ASSIGN     15)
+(defmacro SEXPR_TYPE_ATTRIBUTE  16)
+(defmacro SEXPR_TYPE_SIZE_OF    17)
+
+(defstruct SExpr
+    (meta SExprMetadata)
+    (type u64)
+    (value (@ mut u8))
+    (list (Vec SExpr))
+    (cond-list (Vec (Pair SExpr SExpr)))
+    (child (* mut SExpr))
+    (associated-type Type)
+    (args-fields (Vec (Pair (@ mut u8) Type)))
+    (mutable u1)
+    (lvalue LValue)
+    (attrs (Vec (@ mut u8))))
+
+
+
+
+
+//
+// ==================================================================================================
 // MAIN
 // ==================================================================================================
 //
@@ -1330,9 +1422,7 @@
             (let ast = (ref result.ast))
             (let macros = (ref (new-vec A)))
             (extract-macros macros ast)
-            (print-macros macros)
             (replace-macros macros ast)
-            (print-ast ast)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))
