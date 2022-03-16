@@ -1111,6 +1111,37 @@
                                             (body ast))))))))))))))
         (set i = (+ i 1))))))
 
+(defun print-macros (map (* mut (Vec (Pair (@ mut u8) Macro)))) (seqn
+    (let i = 0)
+    (while (< i (deref map).len) (seqn
+        (let macro = (deref (vec-get map i)).b)
+        (print "Macro ")
+        (print macro.name)
+        (print ":\n    Args:\n")
+        (let j = 0)
+        (while (< j macro.args.len) (seqn
+            (print "        ")
+            (let arg = (deref (vec-get (ref macro.args) j)))
+            (print arg.name)
+            (print " ")
+            (cond
+                ((== arg.type (MACRO_ARG_TYPE_ORDERED))
+                    (print "ORDERED"))
+                ((== arg.type (MACRO_ARG_TYPE_ATOM))
+                    (print "ATOM"))
+                ((== arg.type (MACRO_ARG_TYPE_KEY))
+                    (print "KEY"))
+                ((== arg.type (MACRO_ARG_TYPE_REST))
+                    (print "REST"))
+                (:else
+                    (print "UNKNOWN")))
+            (print "\n")
+            (print-ast-helper (ref arg.value) 3)
+            (set j = (+ j 1))))
+        (print "    Body:\n")
+        (print-ast-helper (ref macro.body) 2)
+        (set i = (+ i 1))))))
+
 
 
 //
@@ -1137,9 +1168,10 @@
         (let result = (parse lexer))
         (cond (result.success (seq
             (let ast = result.ast)
-            (print-ast (ref ast))
             (let macros = (ref (new-vec A)))
-            (extract-macros macros (ref ast))))
+            (extract-macros macros (ref ast))
+            (print-macros macros)
+            (ast-drop (ref ast))))
         (:else (print-parse-error contents-ref (ref result.fail))))
         (lexer-drop lexer)
         (vec-drop (ref contents) empty-dealloc)))
