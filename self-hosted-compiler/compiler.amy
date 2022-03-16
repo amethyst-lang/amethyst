@@ -338,6 +338,16 @@
 (defun vec-slice (vec (* mut (Vec 'a))) : (@ mut 'a)
     (subslice (deref vec).vals 0 (deref vec).len))
 
+(defun vec-find (vec (* mut (Vec 'a))) (pred (fn ((* mut 'a) 'b) : u1)) (data 'b) : (* mut 'a) (seq
+    (let i = 0)
+    (while (< i (deref vec).len) (seqn
+        (let item = (vec-get vec i))
+        (cond
+            ((pred item data)
+                (break item)))
+        (set i = (+ i 1)))
+    :else (null))))
+
 // Empty deallocator
 (defun empty-dealloc (v (* mut 'a)) ())
 
@@ -676,6 +686,19 @@
     (loc Location)
     (value (@ mut u8))
     (children (Vec Ast)))
+
+(defun ast-clone (ast Ast) : Ast
+    (seq
+        (let children = (ref (new-vec ast.children.A)))
+        (let i = 0)
+        (while (< i ast.children.len) (seqn
+            (vec-push children (deref (vec-get (ref ast.children) i)))
+            (set i = (+ i 1))))
+        (inst Ast
+            (type ast.type)
+            (loc ast.loc)
+            (value ast.value)
+            (children (deref children)))))
 
 (defun ast-drop (ast (* mut Ast))
     (vec-drop (ref (deref ast).children) ast-drop))
@@ -1027,7 +1050,6 @@
     (value Ast))
 
 (defstruct Macro
-    (name (@ mut u8))
     (args (Vec MacroArg))
     (body Ast))
 
@@ -1106,7 +1128,6 @@
                                     (vec-push map (inst Pair
                                         (a name)
                                         (b (inst Macro
-                                            (name name)
                                             (args (deref args))
                                             (body ast))))))))))))))
         (set i = (+ i 1))))))
@@ -1114,9 +1135,10 @@
 (defun print-macros (map (* mut (Vec (Pair (@ mut u8) Macro)))) (seqn
     (let i = 0)
     (while (< i (deref map).len) (seqn
-        (let macro = (deref (vec-get map i)).b)
+        (let macro = (deref (vec-get map i)))
         (print "Macro ")
-        (print macro.name)
+        (print macro.a)
+        (let macro = macro.b)
         (print ":\n    Args:\n")
         (let j = 0)
         (while (< j macro.args.len) (seqn
@@ -1140,6 +1162,144 @@
             (set j = (+ j 1))))
         (print "    Body:\n")
         (print-ast-helper (ref macro.body) 2)
+        (set i = (+ i 1))))))
+
+(defun macro-find (pair (* mut (Pair (@ mut u8) Macro))) (name (@ mut u8)) : u1
+    (str-equals (deref pair).a name))
+
+(defmacro CAPTURED_MACRO_ARG_NONE   0)
+(defmacro CAPTURED_MACRO_ARG_SINGLE 1)
+(defmacro CAPTURED_MACRO_ARG_REST   2)
+
+(defstruct CapturedMacroArg
+    (type u64)
+    (start u64))
+
+(defun macro-bindings-find (pair (* mut (Pair (@ mut u8) CapturedMacroArg))) (name (@ mut u8)) : u1
+    (str-equals (deref pair).a name))
+
+(defun macro-bind (args (@ mut Ast)) (macro (* mut Macro)) (arg-bindings (* mut (Vec (Pair (@ mut u8) CapturedMacroArg)))) : u1 (seq
+    (let i = 0)
+    (while (< i (deref macro).args.len) (seqn
+        (let arg = (deref (vec-get (ref (deref macro).args) i)))
+        (cond
+            ((!= arg.type (MACRO_ARG_TYPE_ATOM))
+                (vec-push arg-bindings (inst Pair
+                    (a arg.name)
+                    (b (inst CapturedMacroArg
+                        (type (CAPTURED_MACRO_ARG_NONE))
+                        (start 0)))))))
+        (set i = (+ i 1))))
+
+    (let ordered-arg = 0)
+    (let last-key = "")
+    (let i = 0)
+    (while (< i args.len) (seqn
+        (let arg = (get args i))
+        (cond
+            ((== arg.type (AST_NODE_TYPE_KEY))
+                (cond
+                    (last-key.len
+                        (break false))
+                    ((: u64 (cast (vec-find arg-bindings macro-bindings-find (let key = (subslice arg.value 1 arg.value.len))))) (seqn
+                        (set last-key = key)))
+                    (:else
+                        (break false))))
+            ((> last-key.len 0) (seqn
+                (let arg = (get args (- i 1)))
+                (let binding = (vec-find arg-bindings macro-bindings-find (let key = (subslice arg.value 1 arg.value.len))))
+                (set (deref binding).b = (inst CapturedMacroArg
+                    (type (CAPTURED_MACRO_ARG_SINGLE))
+                    (start i)))
+                (set last-key = "")))
+            ((: u64 (cast (let arg = (vec-get (ref (deref macro).args) ordered-arg)))) (seqn
+                (let arg = (deref arg))
+                (cond
+                    ((== arg.type (MACRO_ARG_TYPE_ORDERED)) (seqn
+                        (let binding = (vec-find arg-bindings macro-bindings-find arg.name))
+                        (set (deref binding).b = (inst CapturedMacroArg
+                            (type (CAPTURED_MACRO_ARG_SINGLE))
+                            (start i)))))
+                    ((== arg.type (MACRO_ARG_TYPE_ATOM)) (seqn
+                        (let arg-actual = (get args i))
+                        (cond
+                            ((or (!= arg-actual.type (AST_NODE_TYPE_SYMBOL)) (not (str-equals arg-actual.value arg.name)))
+                                (break false)))))
+                    ((== arg.type (MACRO_ARG_TYPE_REST)) (seqn
+                        (let j = (+ i 1))
+                        (cond
+                            ((while (< j args.len) (seqn
+                                (let arg = (get args j))
+                                (cond
+                                    ((== arg.type (MACRO_ARG_TYPE_KEY))
+                                        (break true)))
+                                (set j = (+ j 1)))
+                            :else false)
+                                (break false)))
+                        (let binding = (vec-find arg-bindings macro-bindings-find arg.name))
+                        (set (deref binding).b = (inst CapturedMacroArg
+                            (type (CAPTURED_MACRO_ARG_REST))
+                            (start i))))))
+
+                (set ordered-arg = (+ ordered-arg 1))
+                (while (and (: u64 (cast (let v = (vec-get (ref (deref macro).args) ordered-arg)))) (== (deref v).type (MACRO_ARG_TYPE_KEY))) (seqn
+                    (set ordered-arg = (+ ordered-arg 1))))))
+
+            (:else
+                (break false)))
+        (set i = (+ i 1)))
+    :else (not (and (: u64 (cast (let arg = (vec-get (ref (deref macro).args) ordered-arg)))) (== (deref arg).type (MACRO_ARG_TYPE_ORDERED)))))))
+
+(defun bind-macro-args (ast (* mut Ast)) (arg-bindings (* mut (Vec (Pair (@ mut u8) CapturedMacroArg)))) (old (* mut Ast))
+    (cond
+        ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seqn
+            (let bound = (vec-find arg-bindings macro-bindings-find (deref ast).value))
+            (cond
+                ((: u64 (cast bound)) (seqn
+                    (let bound = (deref bound).b)
+                    (cond
+                        ((== bound.type (CAPTURED_MACRO_ARG_NONE)) (seqn
+                            (set (deref ast) = (inst Ast
+                                (type (AST_NODE_TYPE_SEXPR))
+                                (loc (inst Location
+                                    (start 0)
+                                    (end 0)))
+                                (value "")
+                                (children (new-vec (deref arg-bindings).A))))))
+                        ((== bound.type (CAPTURED_MACRO_ARG_SINGLE)) (seqn
+                            (set (deref ast) = (ast-clone (deref (vec-get (ref (deref old).children) (+ bound.start 1)))))))
+
+                        ((== bound.type (CAPTURED_MACRO_ARG_REST)) (seqn
+                            (eprint "&rest for macros is not implemented yet\n")
+                            (exit 1)))))))))
+        (:else (seqn
+            (let i = 0)
+            (while (< i (deref ast).children.len) (seqn
+                (bind-macro-args (vec-get (ref (deref ast).children) i) arg-bindings old)
+                (set i = (+ i 1))))))))
+
+(defun replace-macros (map (* mut (Vec (Pair (@ mut u8) Macro)))) (ast (* mut Ast)) (seqn
+    (cond
+        ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seqn
+            (let sym = (vec-get (ref (deref ast).children) 0))
+            (cond
+                ((and (: u64 (cast sym)) (== (deref sym).type (AST_NODE_TYPE_SYMBOL)))
+                    (cond
+                        ((: u64 (cast (let macro = (vec-find map macro-find (deref sym).value)))) (seqn
+                            (let macro = (ref (deref macro).b))
+                            (let arg-bindings = (ref (new-vec (deref map).A)))
+
+                            (cond
+                                ((macro-bind (subslice (vec-slice (ref (deref ast).children)) 1 (deref ast).children.len) macro arg-bindings) (seqn
+                                    (let old = (deref ast))
+                                    (set (deref ast) = (ast-clone (deref macro).body))
+                                    (bind-macro-args ast arg-bindings (ref old))
+                                    (ast-drop (ref old)))))))))))))
+
+    (let i = 0)
+    (while (< i (deref ast).children.len) (seqn
+        (let child = (vec-get (ref (deref ast).children) i))
+        (replace-macros map child)
         (set i = (+ i 1))))))
 
 
@@ -1167,11 +1327,14 @@
         (let lexer = (ref (new-lexer A contents-ref)))
         (let result = (parse lexer))
         (cond (result.success (seq
-            (let ast = result.ast)
+            (let ast = (ref result.ast))
             (let macros = (ref (new-vec A)))
-            (extract-macros macros (ref ast))
+            (extract-macros macros ast)
             (print-macros macros)
-            (ast-drop (ref ast))))
+            (replace-macros macros ast)
+            (print-ast ast)
+            (ast-drop ast)
+            (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))
         (lexer-drop lexer)
         (vec-drop (ref contents) empty-dealloc)))

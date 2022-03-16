@@ -124,7 +124,7 @@ fn substitute<'a>(assignee: &mut Type<'a>, assigner: &Type<'a>, substitutions: &
             }
 
             (a, b) if *a == b => Ok(()),
-            (a, b) => todo!("error handling: {:?} vs {:?} over {:?} with coercions {:?}", a, b, substitutions, coercions),
+            (a, b) => todo!("error handling: {:?} vs {:?}", a, b),
         }
     }
 }
