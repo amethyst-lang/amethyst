@@ -183,7 +183,7 @@ fn traverse_sexpr<'a>(
                 }
                 Ok(())
             } else {
-                todo!("error handling");
+                todo!("error handling: {}", value);
             }
         }
 
@@ -332,7 +332,7 @@ fn traverse_sexpr<'a>(
                         typ.replace_generics(type_var_counter, &mut map);
                         substitute(&mut value.meta_mut().type_, &typ, substitutions, coercions)?;
                     } else {
-                        todo!("error handling");
+                        todo!("error handling for {}", field);
                     }
                 }
 

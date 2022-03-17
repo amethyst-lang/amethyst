@@ -684,6 +684,7 @@
 (defstruct Ast
     (type u64)
     (loc Location)
+    (typed Type)
     (value (@ mut u8))
     (children (Vec Ast)))
 
@@ -697,10 +698,12 @@
         (inst Ast
             (type ast.type)
             (loc ast.loc)
+            (typed (empty-type ast.children.A))
             (value ast.value)
             (children (deref children)))))
 
 (defun ast-drop (ast (* mut Ast))
+    // TODO: dropping types
     (vec-drop (ref (deref ast).children) ast-drop))
 
 (defun print-ast-helper (ast (* mut Ast)) (level u64) (seqn
@@ -842,6 +845,7 @@
             (loc (inst Location
                 (start 0)
                 (end 0)))
+            (typed (empty-type (null)))
             (value (slice 0 (null)))
             (children (new-vec (null)))))
         (fail fail)
@@ -898,6 +902,7 @@
                 (parse-success (inst Ast
                     (type (AST_NODE_TYPE_SYMBOL))
                     (loc token.loc)
+                    (typed (empty-type (deref lexer).tokens.A))
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
 
@@ -906,6 +911,7 @@
                 (parse-success (inst Ast
                     (type (AST_NODE_TYPE_INT))
                     (loc token.loc)
+                    (typed (empty-type (deref lexer).tokens.A))
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
 
@@ -914,6 +920,7 @@
                 (parse-success (inst Ast
                     (type (AST_NODE_TYPE_KEY))
                     (loc token.loc)
+                    (typed (empty-type (deref lexer).tokens.A))
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
 
@@ -925,6 +932,7 @@
                     (parse-success (inst Ast
                         (type (AST_NODE_TYPE_QUOTE))
                         (loc token.loc)
+                        (typed (empty-type (deref lexer).tokens.A))
                         (value "")
                         (children (deref children))))))))
 
@@ -933,6 +941,7 @@
                 (parse-success (inst Ast
                     (type (AST_NODE_TYPE_STRING))
                     (loc token.loc)
+                    (typed (empty-type (deref lexer).tokens.A))
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
 
@@ -941,6 +950,7 @@
                 (parse-success (inst Ast
                     (type (AST_NODE_TYPE_CHAR))
                     (loc token.loc)
+                    (typed (empty-type (deref lexer).tokens.A))
                     (value token.value)
                     (children (new-vec (deref lexer).tokens.A))))))
 
@@ -957,6 +967,7 @@
             (parse-success (inst Ast
                 (type (AST_NODE_TYPE_SYMBOL))
                 (loc token.loc)
+                (typed (empty-type (deref lexer).tokens.A))
                 (value token.value)
                 (children (new-vec (deref lexer).tokens.A))))))
 
@@ -990,6 +1001,7 @@
                         (loc (inst Location
                             (start top.loc.start)
                             (end (deref (vec-get attrs (- (deref attrs).len 1))).loc.end)))
+                        (typed (empty-type (deref lexer).tokens.A))
                         (value "")
                         (children (deref attrs)))))
                 (:else (seq
@@ -1007,6 +1019,7 @@
                 (loc (inst Location
                     (start left.loc.start)
                     (end right.loc.end)))
+                (typed (empty-type (deref lexer).tokens.A))
                 (value "")
                 (children (deref v))))
         :else (vec-drop v ast-drop)))))
@@ -1028,6 +1041,7 @@
             (loc (inst Location
                 (start 0)
                 (end end)))
+            (typed (empty-type (deref lexer).tokens.A))
             (value (slice 0 (null)))
             (children (deref asts)))))))
 
@@ -1088,6 +1102,7 @@
                                                         (loc (inst Location
                                                             (start 0)
                                                             (end 0)))
+                                                        (typed (empty-type (deref args).A))
                                                         (value "")
                                                         (children (new-vec (deref args).A))))))))
 
@@ -1110,6 +1125,7 @@
                                                         (loc (inst Location
                                                             (start 0)
                                                             (end 0)))
+                                                        (typed (empty-type (deref args).A))
                                                         (value "")
                                                         (children (new-vec (deref args).A))))))))
 
@@ -1123,6 +1139,7 @@
                                             (loc (inst Location
                                                 (start 0)
                                                 (end 0)))
+                                            (typed (empty-type (deref args).A))
                                             (value "")
                                             (children (new-vec (deref args).A))))))
                                     (vec-push map (inst Pair
@@ -1264,6 +1281,7 @@
                                 (loc (inst Location
                                     (start 0)
                                     (end 0)))
+                                (typed (empty-type (deref arg-bindings).A))
                                 (value "")
                                 (children (new-vec (deref arg-bindings).A))))))
                         ((== bound.type (CAPTURED_MACRO_ARG_SINGLE)) (seqn
@@ -1306,13 +1324,9 @@
 
 //
 // ==================================================================================================
-// SEXPR LOWERING
+// TYPE CHECKING
 // ==================================================================================================
 //
-
-(defstruct SExprMetadata
-    (loc Location)
-    (type Type))
 
 (defmacro TYPE_TYPE_UNKNOWN        0)
 (defmacro TYPE_TYPE_UNKNOWN_INT    1)
@@ -1338,51 +1352,15 @@
     (name (@ mut u8))
     (type-var u64))
 
-(defmacro LVALUE_TYPE_SYMBOL    0)
-(defmacro LVALUE_TYPE_ATTRIBUTE 0)
-(defmacro LVALUE_TYPE_DEREF     0)
-(defmacro LVALUE_TYPE_GET       0)
-
-(defstruct LValue
-    (type u64)
-    (symbol (@ mut u8))
-    (boxed (* mut LValue))
-    (attrs (Vec (@ mut u8)))
-    (index (* mut SExpr)))
-
-(defmacro SEXPR_TYPE_INT         0)
-(defmacro SEXPR_TYPE_FLOAT       1)
-(defmacro SEXPR_TYPE_STR         2)
-(defmacro SEXPR_TYPE_SYMBOL      3)
-(defmacro SEXPR_TYPE_SEQ         4)
-(defmacro SEXPR_TYPE_COND        5)
-(defmacro SEXPR_TYPE_LOOP        6)
-(defmacro SEXPR_TYPE_BREAK       7)
-(defmacro SEXPR_TYPE_NIL         8)
-(defmacro SEXPR_TYPE_TYPE        9)
-(defmacro SEXPR_TYPE_FUNC_DEF   10)
-(defmacro SEXPR_TYPE_FUNC_CALL  11)
-(defmacro SEXPR_TYPE_STRUCT_DEF 12)
-(defmacro SEXPR_TYPE_STRUCT_SET 13)
-(defmacro SEXPR_TYPE_DECLARE    14)
-(defmacro SEXPR_TYPE_ASSIGN     15)
-(defmacro SEXPR_TYPE_ATTRIBUTE  16)
-(defmacro SEXPR_TYPE_SIZE_OF    17)
-
-(defstruct SExpr
-    (meta SExprMetadata)
-    (type u64)
-    (value (@ mut u8))
-    (list (Vec SExpr))
-    (cond-list (Vec (Pair SExpr SExpr)))
-    (child (* mut SExpr))
-    (associated-type Type)
-    (args-fields (Vec (Pair (@ mut u8) Type)))
-    (mutable u1)
-    (lvalue LValue)
-    (attrs (Vec (@ mut u8))))
-
-
+(defun empty-type (A (* mut Allocator)) : Type
+    (inst Type
+        (type (TYPE_TYPE_UNKNOWN))
+        (signed-mutable false)
+        (width 0)
+        (subtypes (new-vec A))
+        (boxed (null))
+        (name "")
+        (type-var 0)))
 
 
 
