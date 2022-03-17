@@ -1329,24 +1329,14 @@
 (defmacro TYPE_TYPE_TYPE_VARIABLE 12)
 
 // Defines a type
-// Representation of a and b:
-// UNKNOWN - nothing
-// UNKNOWN INT - nothing
-// UNKNOWN FLOAT - nothing
-// INT - a = signed?, b = width
-// F32 - nothing
-// F64 - nothing
-// TUPLE - a = Vec Type, b = nothing
-// POINTER - a = mutable?, b = Type (type pointed to)
-// SLICE - a = mutable?, b = Type (type pointed to)
-// STRUCT - a = Vec u8, b = Vec Type (generics)
-// GENERIC - a = name length, b = name pointer
-// FUNCTION - a = Vec Type (arg types), b = Type (return type)
-// TYPE VARIABLE - a = type variable index, b = nothing
 (defstruct Type
     (type u64)
-    (a u64)
-    (b u64))
+    (signed-mutable u1)
+    (width u8)
+    (subtypes (Vec Type))
+    (boxed (* mut Type))
+    (name (@ mut u8))
+    (type-var u64))
 
 (defmacro LVALUE_TYPE_SYMBOL    0)
 (defmacro LVALUE_TYPE_ATTRIBUTE 0)
