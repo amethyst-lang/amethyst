@@ -11,11 +11,3 @@ From the r/ProgLangs discord server:
 ## Cool, what does it look like?
 Check out the `examples/` folder for examples, or the `self-hosted-compiler/` folder for the self hosted compiler.
 
-## Features
- - compile time reference counting (akin to lobster)
-     - function argument = increment reference counter in current function and decrement if not returned
-     - out of scope = decrement reference counter
-     - variable assignment = increment reference counter
-     - variable no longer used/out of scope = decrement reference counter
-     - reference counter reaches 0 = free
- - RAII
