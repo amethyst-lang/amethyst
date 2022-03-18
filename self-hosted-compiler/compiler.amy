@@ -1366,9 +1366,15 @@
     (index u64))
 
 (defstruct TypeError
-    (loc Location))
+    (loc Location)
+    (message (@ mut u8)))
 
-(defun parse-int (str (@ mut u8)) (errors (* mut (Vec TypeError))) : u64 (seq
+(defun type-error (loc Location) (message (@ mut u8)) : TypeError
+    (inst TypeError
+        (loc loc)
+        (message message)))
+
+(defun parse-int (loc Location) (str (@ mut u8)) (errors (* mut (Vec TypeError))) : u64 (seq
     (let i = 0)
     (let n = 0)
     (while (< i str.len) (seqn
@@ -1377,7 +1383,7 @@
             ((and (<= '0' c) (<= c '9')) (seqn
                 (set n = (+ (* n 10) (cast (- c '0'))))))
             (:else (seqn
-                // TODO: add error to errors
+                (vec-push errors (type-error loc "could not parse int type"))
                 (break 0))))
         (set i = (+ i 1)))
     :else n)))
@@ -1393,7 +1399,7 @@
             (deref type)))
         ((and (== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (or (== (get (deref ast).value 0) 'i') (== (get (deref ast).value 0) 'u'))) (seq
             (set (deref type).type = (TYPE_TYPE_INT))
-            (set (deref type).type-var-width = (parse-int (subslice (deref ast).value 1 (deref ast).value.len) errors))
+            (set (deref type).type-var-width = (parse-int (deref ast).loc (subslice (deref ast).value 1 (deref ast).value.len) errors))
             (set (deref type).signed-mutable = (== (get (deref ast).value 0) 'i'))
             (deref type)))
         ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seq
@@ -1414,9 +1420,8 @@
                         (vec-push v (parse-type (vec-get (ref (deref child).children) i) errors))
                         (set i = (+ i 1))))
                     (set (deref type).subtypes = (deref v))))
-                (:else (seqn
-                    // TODO: add error into error vec
-                    ())))
+                (:else
+                    (vec-push errors (type-error (deref child).loc "could not parse quoted type"))))
             (deref type)))
 
         ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0)) (seq
@@ -1442,9 +1447,8 @@
                                     (set (deref type).boxed = (alloc (deref ast).children.A))
                                     (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 2) errors))))
 
-                                (:else (seqn
-                                    // TODO: error handling
-                                    ()))))
+                                (:else
+                                    (vec-push errors (type-error (deref ast).loc "could not parse pointer type")))))
 
                         ((str-equals (deref first).value "@")
                             (cond
@@ -1460,9 +1464,8 @@
                                     (set (deref type).boxed = (alloc (deref ast).children.A))
                                     (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 2) errors))))
 
-                                (:else (seqn
-                                    // TODO: error handling
-                                    ()))))
+                                (:else
+                                    (vec-push errors (type-error (deref ast).loc "could not parse slice type")))))
 
                         ((str-equals (deref first).value "fn")
                             (cond
@@ -1475,9 +1478,8 @@
                                             (while (< i (deref args).children.len) (seqn
                                                 (vec-push arg-types (parse-type (vec-get (ref (deref args).children) i) errors))
                                                 (set i = (+ i 1))))))
-                                        (:else (seqn
-                                            // TODO: error handling
-                                            ())))
+                                        (:else
+                                            (vec-push errors (type-error (deref ast).loc "could not parse function arg types"))))
 
                                     (let ret-type = (ref (empty-type (deref args).children.A)))
                                     (cond
@@ -1485,17 +1487,15 @@
                                             (set (deref ret-type) = (parse-type (vec-get (ref (deref ast).children) 3) errors))))
                                         ((== (deref ast).children.len 2) (seqn
                                             (set (deref ret-type).type = (TYPE_TYPE_TUPLE))))
-                                        (:else (seqn
-                                            // TODO: error handling
-                                            ())))
+                                        (:else
+                                            (vec-push errors (type-error (deref ast).loc "could not parse function return type"))))
                                     (set (deref type).type = (TYPE_TYPE_FUNCTION))
                                     (set (deref type).subtypes = (deref arg-types))
                                     (set (deref type).boxed = (alloc (deref args).children.A))
                                     (set (deref (deref type).boxed) = (deref ret-type))
                                     ))
-                                (:else (seqn
-                                    // TODO: error handling
-                                    ()))))
+                                (:else
+                                    (vec-push errors (type-error (deref ast).loc "could not parse function type")))))
 
                         (:else (seqn
                             (set (deref type).type = (TYPE_TYPE_STRUCT))
@@ -1507,9 +1507,8 @@
                                 (set i = (+ i 1))))
                             (set (deref type).subtypes = (deref subtypes-ref))))))
 
-                (:else (seqn
-                    // TODO: add error into error vec
-                    ())))
+                (:else
+                    (vec-push errors (type-error (deref ast).loc "could not parse type"))))
             (deref type)))
 
         (:else (seq
