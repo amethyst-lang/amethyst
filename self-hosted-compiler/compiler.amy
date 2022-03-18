@@ -1346,21 +1346,298 @@
 (defstruct Type
     (type u64)
     (signed-mutable u1)
-    (width u8)
     (subtypes (Vec Type))
     (boxed (* mut Type))
     (name (@ mut u8))
-    (type-var u64))
+    (type-var-width u64))
 
 (defun empty-type (A (* mut Allocator)) : Type
     (inst Type
         (type (TYPE_TYPE_UNKNOWN))
         (signed-mutable false)
-        (width 0)
         (subtypes (new-vec A))
         (boxed (null))
         (name "")
-        (type-var 0)))
+        (type-var-width 0)))
+
+(defstruct Signature
+    (arg-types (Vec Type))
+    (ret-type Type)
+    (index u64))
+
+(defstruct TypeError
+    (loc Location))
+
+(defun parse-int (str (@ mut u8)) (errors (* mut (Vec TypeError))) : u64 (seq
+    (let i = 0)
+    (let n = 0)
+    (while (< i str.len) (seqn
+        (let c = (get str i))
+        (cond
+            ((and (<= '0' c) (<= c '9')) (seqn
+                (set n = (+ (* n 10) (cast (- c '0'))))))
+            (:else (seqn
+                // TODO: add error to errors
+                (break 0))))
+        (set i = (+ i 1)))
+    :else n)))
+
+(defun parse-type (ast (* mut Ast)) (errors (* mut (Vec TypeError))) : Type (seq
+    (let type = (ref (empty-type (deref errors).A)))
+    (cond
+        ((and (== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref ast).value "f32")) (seq
+            (set (deref type).type = (TYPE_TYPE_F32))
+            (deref type)))
+        ((and (== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref ast).value "f64")) (seq
+            (set (deref type).type = (TYPE_TYPE_F64))
+            (deref type)))
+        ((and (== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (or (== (get (deref ast).value 0) 'i') (== (get (deref ast).value 0) 'u'))) (seq
+            (set (deref type).type = (TYPE_TYPE_INT))
+            (set (deref type).type-var-width = (parse-int (subslice (deref ast).value 1 (deref ast).value.len) errors))
+            (set (deref type).signed-mutable = (== (get (deref ast).value 0) 'i'))
+            (deref type)))
+        ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seq
+            (set (deref type).type = (TYPE_TYPE_STRUCT))
+            (set (deref type).name = (deref ast).value)
+            (deref type)))
+        ((== (deref ast).type (AST_NODE_TYPE_QUOTE)) (seq
+            (let child = (vec-get (ref (deref ast).children) 0))
+            (cond
+                ((== (deref child).type (AST_NODE_TYPE_SYMBOL)) (seqn
+                    (set (deref type).type = (TYPE_TYPE_GENERIC))
+                    (set (deref type).name = (deref child).value)))
+                ((== (deref child).type (AST_NODE_TYPE_SEXPR)) (seqn
+                    (set (deref type).type = (TYPE_TYPE_TUPLE))
+                    (let i = 0)
+                    (let v = (ref (deref type).subtypes))
+                    (while (< i (deref child).children.len) (seqn
+                        (vec-push v (parse-type (vec-get (ref (deref child).children) i) errors))
+                        (set i = (+ i 1))))
+                    (set (deref type).subtypes = (deref v))))
+                (:else (seqn
+                    // TODO: add error into error vec
+                    ()
+                    )))
+            (deref type)))
+
+        ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0)) (seq
+            (set (deref type).type = (TYPE_TYPE_TUPLE))
+            (deref type)))
+
+        ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
+            (let first = (vec-get (ref (deref ast).children) 0))
+            (cond
+                ((== (deref first).type (AST_NODE_TYPE_SYMBOL))
+                    (cond
+                        ((str-equals (deref first).value "*")
+                            (cond
+                                ((and (== (deref ast).children.len 3) (and (== (let v = (deref (vec-get (ref (deref ast).children) 1))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "mut"))) (seqn
+                                    (set (deref type).type = (TYPE_TYPE_POINTER))
+                                    (set (deref type).signed-mutable = true)
+                                    (set (deref type).boxed = (alloc (deref ast).children.A))
+                                    (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 2) errors))))
+
+                                ((== (deref ast).children.len 2) (seqn
+                                    (set (deref type).type = (TYPE_TYPE_POINTER))
+                                    (set (deref type).signed-mutable = false)
+                                    (set (deref type).boxed = (alloc (deref ast).children.A))
+                                    (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 2) errors))))
+
+                                (:else (seqn
+                                    // TODO: error handling
+                                    ()))))
+
+                        ((str-equals (deref first).value "@")
+                            (cond
+                                ((and (== (deref ast).children.len 3) (and (== (let v = (deref (vec-get (ref (deref ast).children) 1))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "mut"))) (seqn
+                                    (set (deref type).type = (TYPE_TYPE_SLICE))
+                                    (set (deref type).signed-mutable = true)
+                                    (set (deref type).boxed = (alloc (deref ast).children.A))
+                                    (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 2) errors))))
+
+                                ((== (deref ast).children.len 2) (seqn
+                                    (set (deref type).type = (TYPE_TYPE_SLICE))
+                                    (set (deref type).signed-mutable = false)
+                                    (set (deref type).boxed = (alloc (deref ast).children.A))
+                                    (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 2) errors))))
+
+                                (:else (seqn
+                                    // TODO: error handling
+                                    ()))))
+
+                        ((str-equals (deref first).value "fn") (seqn
+                            // TODO
+                            ()))
+
+                        (:else (seqn
+                            (set (deref type).type = (TYPE_TYPE_STRUCT))
+                            (set (deref type).name = (deref first).value)
+                            (let i = 1)
+                            (let subtypes-ref = (ref (deref type).subtypes))
+                            (while (< i (deref ast).children.len) (seqn
+                                (vec-push subtypes-ref (parse-type (vec-get (ref (deref ast).children) i) errors))
+                                (set i = (+ i 1))))
+                            (set (deref type).subtypes = (deref subtypes-ref))))))
+
+                (:else (seqn
+                    // TODO: add error into error vec
+                    ()
+                )))
+            (deref type)))
+
+        (:else (seq
+            // TODO: add error into error vec
+            (deref type))))))
+
+(defun extract-functions (ast (* mut Ast)) (result (* mut (Vec (Pair (@ mut u8) Signature)))) (errors (* mut (Vec TypeError))) (seqn
+    (let i = 0)
+    (print-ast ast)
+    (while (< i (deref ast).children.len) (seqn
+        (let ast = (vec-get (ref (deref ast).children) i))
+        (cond
+            ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (>= (deref ast).children.len 3)) (seqn
+                (let defun = (vec-get (ref (deref ast).children) 0))
+                (cond
+                    ((and (== (deref defun).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref defun).value "defun")) (seqn
+                        (let name = (vec-get (ref (deref ast).children) 1))
+                        (cond
+                            ((== (deref name).type (AST_NODE_TYPE_SYMBOL)) (seqn
+                                (let name = (deref name).value)
+                                (let colon? = (vec-get (ref (deref ast).children) (- (deref ast).children.len 3)))
+                                (let has-ret-type = (and (== (deref colon?).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref colon?).value ":")))
+
+                                (let ret-type = (cond
+                                    (has-ret-type (seq
+                                        (let type-ast = (vec-get (ref (deref ast).children) (- (deref ast).children.len 2)))
+                                        (parse-type type-ast errors)))
+                                    (:else (seq
+                                        (let type = (ref (empty-type (deref ast).children.A)))
+                                        (set (deref type).type = (TYPE_TYPE_TUPLE))
+                                        (deref type)))))
+
+                                (let j = 2)
+                                (let args = (ref (new-vec (deref ast).children.A)))
+                                (while (< j (- (deref ast).children.len 1)) (seqn
+                                    (let child = (vec-get (ref (deref ast).children) j))
+                                    (cond
+                                        ((and (== (deref child).type (AST_NODE_TYPE_SEXPR)) (== (deref child).children.len 2)) (seqn
+                                            (let type = (vec-get (ref (deref child).children) 1))
+                                            (vec-push args (parse-type type errors))))
+                                        (:else (seqn
+                                            // TODO: push error
+                                            ())))
+                                    (set j = (+ j 1))))
+                                (cond
+                                    ((: u64 (cast (vec-find result find-signature name))) (seqn
+                                        // TODO: push error
+                                        ()))
+                                    (:else
+                                        (vec-push result (inst Pair
+                                            (a name)
+                                            (b (inst Signature
+                                                (arg-types (deref args))
+                                                (ret-type ret-type)
+                                                (index i))))))))))))))))
+        (set i = (+ i 1))))))
+
+(defun find-signature (pair (* mut (Pair (@ mut u8) Signature))) (key (@ mut u8)) : u1
+    (str-equals (deref pair).a key))
+
+(defun print-type (type (* mut Type))
+    (cond
+        ((== (deref type).type (TYPE_TYPE_UNKNOWN))
+            (print "<unknown>"))
+        ((== (deref type).type (TYPE_TYPE_UNKNOWN_INT))
+            (print "<int>"))
+        ((== (deref type).type (TYPE_TYPE_UNKNOWN_FLOAT))
+            (print "<float>"))
+        ((== (deref type).type (TYPE_TYPE_INT)) (seqn
+            (cond
+                ((deref type).signed-mutable
+                    (print "i"))
+                (:else
+                    (print "u")))
+            (print-int (deref type).type-var-width)))
+        ((== (deref type).type (TYPE_TYPE_F32))
+            (print "f32"))
+        ((== (deref type).type (TYPE_TYPE_F64))
+            (print "f64"))
+        ((== (deref type).type (TYPE_TYPE_TUPLE)) (seqn
+            (print "'(")
+            (let i = 0)
+            (while (< i (deref type).subtypes.len) (seqn
+                (cond
+                    ((!= i 0)
+                        (print " ")))
+                (print-type (vec-get (ref (deref type).subtypes) i))
+                (set i = (+ i 1))))
+            (print ")")))
+        ((== (deref type).type (TYPE_TYPE_POINTER)) (seqn
+            (cond
+                ((deref type).signed-mutable
+                    (print "(*mut "))
+                (:else
+                    (print "(* ")))
+            (print-type (deref type).boxed)
+            (print ")")))
+        ((== (deref type).type (TYPE_TYPE_SLICE)) (seqn
+            (cond
+                ((deref type).signed-mutable
+                    (print "(@mut "))
+                (:else
+                    (print "(@ ")))
+            (print-type (deref type).boxed)
+            (print ")")))
+        ((== (deref type).type (TYPE_TYPE_STRUCT)) (seqn
+            (cond
+                ((deref type).subtypes.len
+                    (print "(")))
+            (print (deref type).name)
+            (let i = 0)
+            (while (< i (deref type).subtypes.len) (seqn
+                (print " ")
+                (print-type (vec-get (ref (deref type).subtypes) i))
+                (set i = (+ i 1))))
+            (cond
+                ((deref type).subtypes.len
+                    (print ")")))))
+        ((== (deref type).type (TYPE_TYPE_GENERIC)) (seqn
+            (print "'")
+            (print (deref type).name)))
+        ((== (deref type).type (TYPE_TYPE_FUNCTION)) (seqn
+            (print "fn (")
+            (let i = 0)
+            (while (< i (deref type).subtypes.len) (seqn
+                (cond
+                    ((!= i 0)
+                        (print " ")))
+                (print-type (vec-get (ref (deref type).subtypes) i))
+                (set i = (+ i 1))))
+            (print ") : ")
+            (print-type (deref type).boxed)))
+        ((== (deref type).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
+            (print "$")
+            (print-int (deref type).type-var-width)))
+        (:else
+            (print "UNKNOWN"))))
+
+(defun print-signatures (func-map (* mut (Vec (Pair (@ mut u8) Signature)))) (seqn
+    (let i = 0)
+    (while (< i (deref func-map).len) (seqn
+        (let func = (vec-get func-map i))
+        (print (deref func).a)
+        (print ": (")
+        (let j = 0)
+        (while (< j (deref func).b.arg-types.len) (seqn
+            (cond
+                ((!= j 0)
+                    (print " ")))
+            (print-type (vec-get (ref (deref func).b.arg-types) j))
+            (set j = (+ j 1))))
+        (print ") : ")
+        (print-type (ref (deref func).b.ret-type))
+        (print "\n")
+        (set i = (+ i 1))))))
 
 
 
@@ -1391,6 +1668,10 @@
             (let macros = (ref (new-vec A)))
             (extract-macros macros ast)
             (replace-macros macros ast)
+            (let func-map = (ref (new-vec A)))
+            (let errors = (ref (new-vec A)))
+            (extract-functions ast func-map errors)
+            (print-signatures func-map)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))

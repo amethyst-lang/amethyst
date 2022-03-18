@@ -6,5 +6,4 @@
  - Compile time reference counting
  - Mutability/immutability distinction
  - Less parenthetical syntax
- - """Dependent types""" for integer types
  - Multiple backends

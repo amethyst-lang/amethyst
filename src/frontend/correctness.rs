@@ -510,7 +510,7 @@ fn traverse_lvalue<'a>(
                             t = typ.clone();
                             t.replace_generics(type_var_counter, &mut map);
                         } else {
-                            todo!("error handling");
+                            todo!("error handling for {}", attr);
                         }
                     } else {
                         todo!("error handling");

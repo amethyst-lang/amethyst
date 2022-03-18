@@ -106,7 +106,7 @@ impl Generator {
                 );
                 builder.ins().return_(&ret_value);
                 builder.seal_all_blocks();
-                println!("{}", builder.func);
+                //println!("{}", builder.func);
                 builder.finalize();
                 self.ctx.func = func;
 
