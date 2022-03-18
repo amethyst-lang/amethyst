@@ -1416,8 +1416,7 @@
                     (set (deref type).subtypes = (deref v))))
                 (:else (seqn
                     // TODO: add error into error vec
-                    ()
-                    )))
+                    ())))
             (deref type)))
 
         ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0)) (seq
@@ -1465,9 +1464,38 @@
                                     // TODO: error handling
                                     ()))))
 
-                        ((str-equals (deref first).value "fn") (seqn
-                            // TODO
-                            ()))
+                        ((str-equals (deref first).value "fn")
+                            (cond
+                                ((>= (deref ast).children.len 2) (seqn
+                                    (let arg-types = (ref (new-vec (deref ast).children.A)))
+                                    (let args = (vec-get (ref (deref ast).children) 1))
+                                    (cond
+                                        ((== (deref args).type (AST_NODE_TYPE_SEXPR)) (seqn
+                                            (let i = 0)
+                                            (while (< i (deref args).children.len) (seqn
+                                                (vec-push arg-types (parse-type (vec-get (ref (deref args).children) i) errors))
+                                                (set i = (+ i 1))))))
+                                        (:else (seqn
+                                            // TODO: error handling
+                                            ())))
+
+                                    (let ret-type = (ref (empty-type (deref args).children.A)))
+                                    (cond
+                                        ((and (== (deref ast).children.len 4) (and (== (deref (let v = (vec-get (ref (deref ast).children) 2))).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref v).value ":"))) (seqn
+                                            (set (deref ret-type) = (parse-type (vec-get (ref (deref ast).children) 3) errors))))
+                                        ((== (deref ast).children.len 2) (seqn
+                                            (set (deref ret-type).type = (TYPE_TYPE_TUPLE))))
+                                        (:else (seqn
+                                            // TODO: error handling
+                                            ())))
+                                    (set (deref type).type = (TYPE_TYPE_FUNCTION))
+                                    (set (deref type).subtypes = (deref arg-types))
+                                    (set (deref type).boxed = (alloc (deref args).children.A))
+                                    (set (deref (deref type).boxed) = (deref ret-type))
+                                    ))
+                                (:else (seqn
+                                    // TODO: error handling
+                                    ()))))
 
                         (:else (seqn
                             (set (deref type).type = (TYPE_TYPE_STRUCT))
@@ -1481,8 +1509,7 @@
 
                 (:else (seqn
                     // TODO: add error into error vec
-                    ()
-                )))
+                    ())))
             (deref type)))
 
         (:else (seq
@@ -1605,7 +1632,7 @@
             (print "'")
             (print (deref type).name)))
         ((== (deref type).type (TYPE_TYPE_FUNCTION)) (seqn
-            (print "fn (")
+            (print "(fn (")
             (let i = 0)
             (while (< i (deref type).subtypes.len) (seqn
                 (cond
@@ -1614,7 +1641,8 @@
                 (print-type (vec-get (ref (deref type).subtypes) i))
                 (set i = (+ i 1))))
             (print ") : ")
-            (print-type (deref type).boxed)))
+            (print-type (deref type).boxed)
+            (print ")")))
         ((== (deref type).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
             (print "$")
             (print-int (deref type).type-var-width)))
