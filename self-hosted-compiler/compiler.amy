@@ -1718,6 +1718,25 @@
                 (b (COERCION_TYPE_INT))))
             (set (deref ast).typed = (deref type))))
 
+        ((== (deref ast).type (AST_NODE_TYPE_CHAR)) (seqn
+            (let type = (ref (empty-type (deref errors).A)))
+            (set (deref type).type = (TYPE_TYPE_INT))
+            (set (deref type).type-var-width = 8)
+            (set (deref type).signed-mutable = false)
+            (set (deref ast).typed = (deref type))))
+
+        ((== (deref ast).type (AST_NODE_TYPE_STRING)) (seqn
+            (let type = (ref (empty-type (deref errors).A)))
+            (set (deref type).type = (TYPE_TYPE_SLICE))
+            (set (deref type).signed-mutable = false)
+            (set (deref type).boxed = (alloc (deref errors).A))
+            (let subtype = (ref (empty-type (deref errors).A)))
+            (set (deref subtype).type = (TYPE_TYPE_INT))
+            (set (deref subtype).type-var-width = 8)
+            (set (deref subtype).signed-mutable = false)
+            (set (deref (deref type).boxed) = (deref subtype))
+            (set (deref ast).typed = (deref type))))
+
         (:else (seqn
             (eprint "todo: checking ast type ")
             (eprint-int (deref ast).type)
