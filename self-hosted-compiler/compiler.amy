@@ -1542,10 +1542,17 @@
 
                                 (let j = 2)
                                 (let args = (ref (new-vec (deref ast).children.A)))
-                                (while (< j (- (deref ast).children.len 1)) (seqn
+                                (let last = (- (deref ast).children.len (cond
+                                    (has-ret-type 3)
+                                    (:else 1))))
+                                (while (< j last) (seqn
                                     (let child = (vec-get (ref (deref ast).children) j))
                                     (cond
                                         ((and (== (deref child).type (AST_NODE_TYPE_SEXPR)) (== (deref child).children.len 2)) (seqn
+                                            (let arg = (vec-get (ref (deref child).children) 0))
+                                            (cond
+                                                ((!= (deref arg).type (AST_NODE_TYPE_SYMBOL))
+                                                    (vec-push errors (type-error (deref arg).loc "invalid function argument"))))
                                             (let type = (vec-get (ref (deref child).children) 1))
                                             (vec-push args (parse-type type errors))))
                                         (:else
@@ -1663,6 +1670,198 @@
 (defmacro COERCION_TYPE_INT    1)
 (defmacro COERCION_TYPE_FLOAT  2)
 
+(defun type-clone (type (* mut Type)) : Type (seq
+    (let new = (empty-type (deref type).subtypes.A))
+    (set new.type = (deref type).type)
+    (set new.signed-mutable = (deref type).signed-mutable)
+    (let i = 0)
+    (let subtypes = (ref new.subtypes))
+    (while (< i (deref type).subtypes.len) (seqn
+        (vec-push subtypes (type-clone (vec-get (ref (deref type).subtypes) i)))
+        (set i = (+ i 1))))
+    (set new.subtypes = (deref subtypes))
+    (cond
+        ((: u64 (cast (deref type).boxed)) (seqn
+            (set new.boxed = (alloc (deref type).subtypes.A))
+            (set (deref new.boxed) = (type-clone (deref type).boxed)))))
+    (set new.name = (deref type).name)
+    (set new.type-var-width = (deref type).type-var-width)
+    new))
+
+(defun type-equals (a Type) (b Type) : u1
+    (cond
+        ((== a.type b.type)
+            (cond
+                ((== a.type (TYPE_TYPE_INT))
+                    (and (== a.signed-mutable b.signed-mutable) (== a.type-var-width b.type-var-width)))
+                ((== a.type (TYPE_TYPE_TUPLE))
+                    (and (== a.subtypes.len b.subtypes.len) (seq
+                        (let i = 0)
+                        (while (< i a.subtypes.len) (seqn
+                            (let a = (vec-get (ref a.subtypes) i))
+                            (let b = (vec-get (ref b.subtypes) i))
+                            (cond
+                                ((not (type-equals (deref a) (deref b)))
+                                    (break false)))
+                            (set i = (+ i 1)))
+                        :else true))))
+                ((or (== a.type (TYPE_TYPE_POINTER)) (== a.type (TYPE_TYPE_SLICE)))
+                    (and (== a.signed-mutable b.signed-mutable) (type-equals (deref a.boxed) (deref b.boxed))))
+                ((== a.type (TYPE_TYPE_STRUCT))
+                    (and (and (str-equals a.name b.name) (== a.subtypes.len b.subtypes.len)) (seq
+                        (let i = 0)
+                        (while (< i a.subtypes.len) (seqn
+                            (let a = (vec-get (ref a.subtypes) i))
+                            (let b = (vec-get (ref b.subtypes) i))
+                            (cond
+                                ((not (type-equals (deref a) (deref b)))
+                                    (break false)))
+                            (set i = (+ i 1)))
+                        :else true))))
+                ((== a.type (TYPE_TYPE_GENERIC))
+                    (str-equals a.name b.name))
+                ((== a.type (TYPE_TYPE_FUNCTION))
+                    (and (and (type-equals (deref a.boxed) (deref b.boxed)) (== a.subtypes.len b.subtypes.len)) (seq
+                        (let i = 0)
+                        (while (< i a.subtypes.len) (seqn
+                            (let a = (vec-get (ref a.subtypes) i))
+                            (let b = (vec-get (ref b.subtypes) i))
+                            (cond
+                                ((not (type-equals (deref a) (deref b)))
+                                    (break false)))
+                            (set i = (+ i 1)))
+                        :else true))))
+                ((== a.type (TYPE_TYPE_TYPE_VARIABLE))
+                    (== a.type-var-width b.type-var-width))
+                (:else true)))
+        (:else false)))
+
+(defun get-type-leaf (type (* mut Type)) (substitutions (* mut (Vec (Pair Type u64)))) (seqn
+    (while (== (deref type).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
+        (let new = (deref (vec-get substitutions (deref type).type-var-width)).a)
+        (cond
+            ((and (== new.type (TYPE_TYPE_TYPE_VARIABLE)) (== new.type-var-width (deref type).type-var-width))
+                (break)))
+        (set (deref type) = new)
+        ))))
+
+(defun substitute (loc Location) (assignee (* mut Type)) (assigner (* mut Type)) (substitutions (* mut (Vec (Pair Type u64)))) (errors (* mut (Vec TypeError))) (seqn
+    (get-type-leaf assignee substitutions)
+    (get-type-leaf assigner substitutions)
+    (cond
+        ((type-equals (deref assignee) (deref assigner))
+            ())
+
+        ((== (deref assignee).type (TYPE_TYPE_UNKNOWN)) (seqn
+            (set (deref assignee) = (type-clone assigner))))
+
+        ((== (deref assignee).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
+            (let coercion = (deref (vec-get substitutions (deref assignee).type-var-width)).b)
+            (let assign = (cond
+                ((and (== coercion (COERCION_TYPE_INT)) (== (deref assigner).type (TYPE_TYPE_INT)))
+                    true)
+                ((and (== coercion (COERCION_TYPE_FLOAT)) (or (== (deref assigner).type (TYPE_TYPE_F32)) (== (deref assigner).type (TYPE_TYPE_F32))))
+                    true)
+                ((== coercion (COERCION_TYPE_NONE))
+                    true)
+                ((== (deref assigner).type (TYPE_TYPE_TYPE_VARIABLE)) (seq
+                    (let pair = (vec-get substitutions (deref assigner).type-var-width))
+                    (cond
+                        ((== (deref pair).b (COERCION_TYPE_NONE)) (seq
+                            (set (deref pair).b = coercion)
+                            true))
+                        ((== (deref pair).b coercion)
+                            true)
+                        (:else (seq
+                            (vec-push errors (type-error loc "type cannot be coerced"))
+                            false)))))
+                (:else (seq
+                    (vec-push errors (type-error loc "type cannot be coerced"))
+                    false))))
+            (cond
+                (assign (seqn
+                    (let v = (vec-get substitutions (deref assignee).type-var-width))
+                    (set (deref v).a = (type-clone assigner))
+                    (set (deref assignee) = (deref assigner)))))))
+
+        ((== (deref assigner).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
+            (let coercion = (deref (vec-get substitutions (deref assigner).type-var-width)).b)
+            (let assign = (cond
+                ((and (== coercion (COERCION_TYPE_INT)) (== (deref assignee).type (TYPE_TYPE_INT)))
+                    true)
+                ((and (== coercion (COERCION_TYPE_FLOAT)) (or (== (deref assignee).type (TYPE_TYPE_F32)) (== (deref assignee).type (TYPE_TYPE_F32))))
+                    true)
+                ((== coercion (COERCION_TYPE_NONE))
+                    true)
+                ((== (deref assignee).type (TYPE_TYPE_TYPE_VARIABLE)) (seq
+                    (let pair = (vec-get substitutions (deref assignee).type-var-width))
+                    (cond
+                        ((== (deref pair).b (COERCION_TYPE_NONE)) (seq
+                            (set (deref pair).b = coercion)
+                            true))
+                        ((== (deref pair).b coercion)
+                            true)
+                        (:else (seq
+                            (vec-push errors (type-error loc "type cannot be coerced"))
+                            false)))))
+                (:else (seq
+                    (vec-push errors (type-error loc "type cannot be coerced"))
+                    false))))
+            (cond
+                (assign (seqn
+                    (let v = (vec-get substitutions (deref assigner).type-var-width))
+                    (set (deref v).a = (type-clone assignee)))))))
+
+        ((type-equals (deref assignee) (deref assigner))
+            ())
+
+        ((== (deref assignee).type (deref assigner).type)
+            (cond
+                ((== (deref assignee).type (TYPE_TYPE_TUPLE))
+                    (cond
+                        ((!= (deref assignee).subtypes.len (deref assigner).subtypes.len)
+                            (vec-push errors (type-error loc "tuple types have incompatible lengths")))
+                        (:else (seqn
+                            (let i = 0)
+                            (while (< i (deref assignee).subtypes.len) (seqn
+                                (let assignee = (vec-get (ref (deref assignee).subtypes) i))
+                                (let assigner = (ref (deref (vec-get (ref (deref assigner).subtypes) i))))
+                                (substitute loc assignee assigner substitutions errors)
+                                (set i = (+ i 1))))))))
+
+                ((or (== (deref assignee).type (TYPE_TYPE_POINTER)) (== (deref assignee).type (TYPE_TYPE_SLICE)))
+                    (substitute loc (deref assignee).boxed (ref (deref (deref assigner).boxed)) substitutions errors))
+
+                ((== (deref assignee).type (TYPE_TYPE_STRUCT))
+                    (cond
+                        ((not (str-equals (deref assignee).name (deref assigner).name))
+                            (vec-push errors (type-error loc "incompatible struct types")))
+                        ((!= (deref assignee).subtypes.len (deref assigner).subtypes.len)
+                            (vec-push errors (type-error loc "struct types have incompatible lengths")))
+                        (:else (seqn
+                            (let i = 0)
+                            (while (< i (deref assignee).subtypes.len) (seqn
+                                (let assignee = (vec-get (ref (deref assignee).subtypes) i))
+                                (let assigner = (ref (deref (vec-get (ref (deref assigner).subtypes) i))))
+                                (substitute loc assignee assigner substitutions errors)
+                                (set i = (+ i 1))))))))
+
+                ((== (deref assignee).type (TYPE_TYPE_FUNCTION))
+                    (cond
+                        ((!= (deref assignee).subtypes.len (deref assigner).subtypes.len)
+                            (vec-push errors (type-error loc "function types have incompatible arg numbers")))
+                        (:else (seqn
+                            (let i = 0)
+                            (while (< i (deref assignee).subtypes.len) (seqn
+                                (let assignee = (vec-get (ref (deref assignee).subtypes) i))
+                                (let assigner = (ref (deref (vec-get (ref (deref assigner).subtypes) i))))
+                                (substitute loc assignee assigner substitutions errors)
+                                (set i = (+ i 1))))
+                            (substitute loc (deref assignee).boxed (ref (deref (deref assigner).boxed)) substitutions errors)))))))
+
+        (:else
+            (vec-push errors (type-error loc "the given types cannot be unified"))))))
+
 (defun check-ast
     (ast (* mut Ast))
     (errors (* mut (Vec TypeError)))
@@ -1681,6 +1880,17 @@
                 ((not (deref ast).children.len) (seqn
                     (set (deref ast).typed = (empty-type (deref errors).A))
                     (set (deref ast).typed.type = (TYPE_TYPE_TUPLE))))
+
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
+                    // function definition is guaranteed to be well formed at top level
+                    // TODO: verify function definitions at lower levels
+                    (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
+                    (let func = (vec-find func-map find-signature name))
+                    (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
+                    (check-ast body errors substitutions func-map monomorphisms)
+                    (let type = (ref (deref body).typed))
+                    (substitute (deref body).loc type (ref (deref func).b.ret-type) substitutions errors)
+                    (set (deref body).typed = (deref type))))
 
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "seqn"))
                     (cond
@@ -1706,7 +1916,7 @@
                             (vec-push errors (type-error (deref ast).loc "seq must have one or more arguments"))))))
 
                 (:else (seqn
-                    (eprint "unimplemented\n")
+                    (eprint "unimplemented S expression\n")
                     (exit 1)))))
 
         ((== (deref ast).type (AST_NODE_TYPE_INT)) (seqn
@@ -1816,7 +2026,9 @@
         (eprint ":")
         (eprint-int line-col.col-end)
         (eprint ")\n")
-        (set i = (+ i 1))))))
+        (set i = (+ i 1))))
+    (cond
+        (i (exit 1)))))
 
 
 
@@ -1854,9 +2066,10 @@
             (let func-map = (ref (new-vec A)))
             (let errors = (ref (new-vec A)))
             (extract-functions ast func-map errors)
-            (check ast errors func-map)
-            (print-ast ast)
             (print-type-errors contents-ref errors)
+            (check ast errors func-map)
+            (print-type-errors contents-ref errors)
+            (print-ast ast)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))
