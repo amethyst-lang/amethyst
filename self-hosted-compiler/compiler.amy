@@ -1692,7 +1692,7 @@
                             (set (deref ast).typed = (empty-type (deref errors).A))
                             (set (deref ast).typed.type = (TYPE_TYPE_TUPLE))))
                         (:else (seqn
-                            (vec-push errors (type-error (deref ast).loc "seqn must have two or more arguments"))))))
+                            (vec-push errors (type-error (deref ast).loc "seqn must have one or more arguments"))))))
 
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "seq"))
                     (cond
@@ -1703,7 +1703,7 @@
                                 (set i = (+ i 1))))
                             (set (deref ast).typed = (deref (vec-get (ref (deref ast).children) (- i 1))).typed)))
                         (:else (seqn
-                            (vec-push errors (type-error (deref ast).loc "seq must have two or more arguments"))))))
+                            (vec-push errors (type-error (deref ast).loc "seq must have one or more arguments"))))))
 
                 (:else (seqn
                     (eprint "unimplemented\n")
@@ -1800,6 +1800,24 @@
 
         false) ())))
 
+(defun print-type-errors (contents (@ mut u8)) (errors (* mut (Vec TypeError))) (seqn
+    (let i = 0)
+    (while (< i (deref errors).len) (seqn
+        (let error = (deref (vec-get errors i)))
+        (eprint "error: ")
+        (eprint error.message)
+        (let line-col = (loc-to-line-col contents error.loc))
+        (eprint " (")
+        (eprint-int line-col.line-start)
+        (eprint ":")
+        (eprint-int line-col.col-start)
+        (eprint "..")
+        (eprint-int line-col.line-end)
+        (eprint ":")
+        (eprint-int line-col.col-end)
+        (eprint ")\n")
+        (set i = (+ i 1))))))
+
 
 
 //
@@ -1834,6 +1852,7 @@
             (extract-functions ast func-map errors)
             (check ast errors func-map)
             (print-ast ast)
+            (print-type-errors contents-ref errors)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))
