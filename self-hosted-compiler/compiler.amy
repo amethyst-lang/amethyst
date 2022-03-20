@@ -383,7 +383,7 @@
 
 (defun get-argv (argv (* mut (* mut u8))) (i u64) : (@ mut u8) (seq
     (let j = 0)
-    (while (< j i) (seqn
+    (while (<= j i) (seqn
         (cond
             ((== (deref (ptr-add argv j)) (null))
                 (break (slice 0 (null)))))
@@ -1829,6 +1829,10 @@
 (defun main (argv (* mut (* mut u8))) (argc u64)
     (seqn
         (let filename = (get-argv argv 1))
+        (cond
+            ((== filename.ptr (null)) (seqn
+                (eprint "please provide a file to compile\n")
+                (exit 1))))
         (let file = (file-open filename (FILE_OPEN_FLAG_READ_ONLY)))
         (cond
             ((not (file-is-valid file)) (seqn
