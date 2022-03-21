@@ -1981,10 +1981,24 @@
                                         (cond
                                             ((and (== (deref condy).type (AST_NODE_TYPE_KEY)) (str-equals (deref condy).value ":else")) (seqn
                                                 (set has-else = true)))
-                                            (:else
-                                                (check-ast condy errors substitutions func-map monomorphisms scopes break-type)))
-
-                                        // TODO: check condy is of type integer
+                                            (:else (seqn
+                                                // TODO: check condy is of type integer
+                                                (check-ast condy errors substitutions func-map monomorphisms scopes break-type)
+                                                (cond
+                                                    ((== (deref condy).typed.type (TYPE_TYPE_INT))
+                                                        ())
+                                                    ((== (deref condy).typed.type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
+                                                        (let pair = (deref (vec-get substitutions (deref condy).typed.type-var-width)))
+                                                        (cond
+                                                            ((== pair.a.type (TYPE_TYPE_INT))
+                                                                ())
+                                                            ((== pair.b (COERCION_TYPE_INT))
+                                                                ())
+                                                            (:else
+                                                                (vec-push errors (type-error (deref condy).loc "condition must have integer type"))))))
+                                                    (:else
+                                                        (vec-push errors (type-error (deref condy).loc "condition must have an integer type"))))
+                                                )))
 
                                         (let then = (vec-get (ref (deref child).children) 1))
                                         (check-ast then errors substitutions func-map monomorphisms scopes break-type)
