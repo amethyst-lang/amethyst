@@ -1914,35 +1914,41 @@
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "seqn"))
                     (cond
                         ((> (deref ast).children.len 1) (seqn
+                            (vec-push scopes (new-vec (deref errors).A))
                             (let i = 1)
                             (while (< i (deref ast).children.len) (seqn
                                 (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes break-type)
                                 (set i = (+ i 1))))
                             (set (deref ast).typed = (empty-type (deref errors).A))
-                            (set (deref ast).typed.type = (TYPE_TYPE_TUPLE))))
+                            (set (deref ast).typed.type = (TYPE_TYPE_TUPLE))
+                            (vec-pop scopes)))
                         (:else (seqn
                             (vec-push errors (type-error (deref ast).loc "seqn must have one or more arguments"))))))
 
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "seq"))
                     (cond
                         ((> (deref ast).children.len 1) (seqn
+                            (vec-push scopes (new-vec (deref errors).A))
                             (let i = 1)
                             (while (< i (deref ast).children.len) (seqn
                                 (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes break-type)
                                 (set i = (+ i 1))))
-                            (set (deref ast).typed = (deref (vec-get (ref (deref ast).children) (- i 1))).typed)))
+                            (set (deref ast).typed = (deref (vec-get (ref (deref ast).children) (- i 1))).typed)
+                            (vec-pop scopes)))
                         (:else (seqn
                             (vec-push errors (type-error (deref ast).loc "seq must have one or more arguments"))))))
 
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "loop"))
                     (cond
                         ((== (deref ast).children.len 2) (seqn
+                            (vec-push scopes (new-vec (deref errors).A))
                             (let break-type = (ref (empty-type (deref errors).A)))
                             (check-ast (vec-get (ref (deref ast).children) 1) errors substitutions func-map monomorphisms scopes break-type)
                             (cond
                                 ((== (deref break-type).type (TYPE_TYPE_UNKNOWN)) (seqn
                                     (set (deref break-type).type = (TYPE_TYPE_TUPLE)))))
-                            (set (deref ast).typed = (deref break-type))))
+                            (set (deref ast).typed = (deref break-type))
+                            (vec-pop scopes)))
                         (:else
                             (vec-push errors (type-error (deref ast).loc "loop must have only one argument")))))
 
@@ -1977,6 +1983,7 @@
                                 (let child = (vec-get (ref (deref ast).children) i))
                                 (cond
                                     ((and (== (deref child).type (AST_NODE_TYPE_SEXPR)) (== (deref child).children.len 2)) (seqn
+                                        (vec-push scopes (new-vec (deref errors).A))
                                         (let condy = (vec-get (ref (deref child).children) 0))
                                         (cond
                                             ((and (== (deref condy).type (AST_NODE_TYPE_KEY)) (str-equals (deref condy).value ":else")) (seqn
@@ -1997,14 +2004,14 @@
                                                             (:else
                                                                 (vec-push errors (type-error (deref condy).loc "condition must have integer type"))))))
                                                     (:else
-                                                        (vec-push errors (type-error (deref condy).loc "condition must have an integer type"))))
-                                                )))
+                                                        (vec-push errors (type-error (deref condy).loc "condition must have an integer type")))))))
 
                                         (let then = (vec-get (ref (deref child).children) 1))
                                         (check-ast then errors substitutions func-map monomorphisms scopes break-type)
                                         (let t = (ref (deref ast).typed))
                                         (substitute (deref then).loc t (ref (deref then).typed) substitutions errors)
-                                        (set (deref ast).typed = (deref t))))
+                                        (set (deref ast).typed = (deref t))
+                                        (vec-pop scopes)))
                                     (:else
                                         (vec-push errors (type-error (deref child).loc "cond must have S expression as branch"))))
                                 (set i = (+ i 1))))
@@ -2031,6 +2038,36 @@
                             (set (deref v).typed = (deref t))))
                         (:else
                             (vec-push errors (type-error (deref ast).loc ": takes two arguments")))))
+
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "let"))
+                    (cond
+                        ((== (deref ast).children.len 4) (seqn
+                            (let var-name = (vec-get (ref (deref ast).children) 1))
+                            (let equals = (vec-get (ref (deref ast).children) 2))
+                            (let value = (vec-get (ref (deref ast).children) 3))
+                            (cond
+                                ((!= (deref var-name).type (AST_NODE_TYPE_SYMBOL))
+                                    (vec-push errors (type-error (deref var-name).loc "let expects a variable name after it")))
+                                ((or (!= (deref equals).type (AST_NODE_TYPE_SYMBOL)) (not (str-equals (deref equals).value "=")))
+                                    (vec-push errors (type-error (deref equals).loc "let expects an `=` after the variable name")))
+                                (:else (seqn
+                                    (check-ast value errors substitutions func-map monomorphisms scopes break-type)
+                                    (cond
+                                        ((== (deref scopes).len 0)
+                                            (vec-push errors (type-error (deref ast).loc "let must occur within a scope")))
+                                        (:else (seqn
+                                            (let scope = (vec-get scopes (- (deref scopes).len 1)))
+                                            (let v = (vec-find scope key-find (deref var-name).value))
+                                            (cond
+                                                ((: u64 (cast v)) (seqn
+                                                    (set (deref v).b = (deref value).typed)))
+                                                (:else
+                                                    (vec-push scope (inst Pair
+                                                        (a (deref var-name).value)
+                                                        (b (deref value).typed)))))
+                                        ))))))))
+                        (:else
+                            (vec-push errors (type-error (deref ast).loc "let expects 3 arguments")))))
 
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "sizeof"))
                     (cond
@@ -2106,7 +2143,7 @@
                 (let v = (vec-find scope key-find (deref ast).value))
                 (cond
                     ((: u64 (cast v))
-                        (break (deref v).b))))
+                        (break (type-clone (ref (deref v).b))))))
             :else (seq
                 (let v = (vec-find func-map key-find (deref ast).value))
                 (cond
