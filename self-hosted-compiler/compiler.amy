@@ -1782,7 +1782,7 @@
                 (assign (seqn
                     (let v = (vec-get substitutions (deref assignee).type-var-width))
                     (set (deref v).a = (type-clone assigner))
-                    (set (deref assignee) = (deref assigner)))))))
+                    (set (deref assignee) = (type-clone assigner)))))))
 
         ((== (deref assigner).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
             (let coercion = (deref (vec-get substitutions (deref assigner).type-var-width)).b)
@@ -1961,6 +1961,49 @@
                             (empty-type (deref errors).A)))))
                     (substitute (deref ast).loc break-type (ref type) substitutions errors)))
 
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "cond"))
+                    (cond
+                        ((> (deref ast).children.len 1) (seqn
+                            (let has-else = false)
+                            (let type = (ref (empty-type (deref errors).A)))
+                            (set (deref type).type = (TYPE_TYPE_TYPE_VARIABLE))
+                            (set (deref type).type-var-width = (deref substitutions).len)
+                            (vec-push substitutions (inst Pair
+                                (a (type-clone type))
+                                (b (COERCION_TYPE_NONE))))
+                            (set (deref ast).typed = (deref type))
+                            (let i = 1)
+                            (while (< i (deref ast).children.len) (seqn
+                                (let child = (vec-get (ref (deref ast).children) i))
+                                (cond
+                                    ((and (== (deref child).type (AST_NODE_TYPE_SEXPR)) (== (deref child).children.len 2)) (seqn
+                                        (let condy = (vec-get (ref (deref child).children) 0))
+                                        (cond
+                                            ((and (== (deref condy).type (AST_NODE_TYPE_KEY)) (str-equals (deref condy).value ":else")) (seqn
+                                                (set has-else = true)))
+                                            (:else
+                                                (check-ast condy errors substitutions func-map monomorphisms scopes break-type)))
+
+                                        // TODO: check condy is of type integer
+
+                                        (let then = (vec-get (ref (deref child).children) 1))
+                                        (check-ast then errors substitutions func-map monomorphisms scopes break-type)
+                                        (let t = (ref (deref ast).typed))
+                                        (substitute (deref then).loc t (ref (deref then).typed) substitutions errors)
+                                        (set (deref ast).typed = (deref t))))
+                                    (:else
+                                        (vec-push errors (type-error (deref child).loc "cond must have S expression as branch"))))
+                                (set i = (+ i 1))))
+                            (cond
+                                ((not has-else) (seqn
+                                    (let t = (ref (deref ast).typed))
+                                    (let nil-type = (ref (empty-type (deref errors).A)))
+                                    (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
+                                    (substitute (deref ast).loc t nil-type substitutions errors)
+                                    (set (deref ast).typed = (deref t)))))))
+                        (:else
+                            (vec-push errors (type-error (deref ast).loc "cond must have at least one argument")))))
+
                 (:else (seqn
                     (let i = 0)
                     (while (< i (deref ast).children.len) (seqn
@@ -2095,7 +2138,7 @@
             (let type = (deref pair).a)
             (let coercion = (deref pair).b)
             (cond
-                ((and (== coercion (COERCION_TYPE_INT)) (== type.type (TYPE_TYPE_TYPE_VARIABLE))) (seqn
+                ((and (== coercion (COERCION_TYPE_INT)) (and (== type.type (TYPE_TYPE_TYPE_VARIABLE)) (== type.type-var-width i))) (seqn
                     (set type = (empty-type (deref errors).A))
                     (set type.type = (TYPE_TYPE_INT))
                     (set type.type-var-width = 32)
@@ -2103,7 +2146,7 @@
                 ((and (== coercion (COERCION_TYPE_INT)) (== type.type (TYPE_TYPE_INT)))
                     ())
 
-                ((and (== coercion (COERCION_TYPE_FLOAT)) (== type.type (TYPE_TYPE_TYPE_VARIABLE))) (seqn
+                ((and (== coercion (COERCION_TYPE_FLOAT)) (and (== type.type (TYPE_TYPE_TYPE_VARIABLE)) (== type.type-var-width i))) (seqn
                     (set type = (empty-type (deref errors).A))
                     (set type.type = (TYPE_TYPE_F64))))
                 ((and (== coercion (COERCION_TYPE_FLOAT)) (or (== type.type (TYPE_TYPE_F32)) (== type.type (TYPE_TYPE_F64))))
