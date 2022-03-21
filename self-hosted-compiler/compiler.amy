@@ -1672,22 +1672,22 @@
 (defmacro COERCION_TYPE_FLOAT  2)
 
 (defun type-clone (type (* mut Type)) : Type (seq
-    (let new = (empty-type (deref type).subtypes.A))
-    (set new.type = (deref type).type)
-    (set new.signed-mutable = (deref type).signed-mutable)
+    (let new = (ref (empty-type (deref type).subtypes.A)))
+    (set (deref new).type = (deref type).type)
+    (set (deref new).signed-mutable = (deref type).signed-mutable)
     (let i = 0)
-    (let subtypes = (ref new.subtypes))
+    (let subtypes = (ref (deref new).subtypes))
     (while (< i (deref type).subtypes.len) (seqn
         (vec-push subtypes (type-clone (vec-get (ref (deref type).subtypes) i)))
         (set i = (+ i 1))))
-    (set new.subtypes = (deref subtypes))
+    (set (deref new).subtypes = (deref subtypes))
     (cond
         ((: u64 (cast (deref type).boxed)) (seqn
-            (set new.boxed = (alloc (deref type).subtypes.A))
-            (set (deref new.boxed) = (type-clone (deref type).boxed)))))
-    (set new.name = (deref type).name)
-    (set new.type-var-width = (deref type).type-var-width)
-    new))
+            (set (deref new).boxed = (alloc (deref type).subtypes.A))
+            (set (deref (deref new).boxed) = (type-clone (deref type).boxed)))))
+    (set (deref new).name = (deref type).name)
+    (set (deref new).type-var-width = (deref type).type-var-width)
+    (deref new)))
 
 (defun type-equals (a Type) (b Type) : u1
     (cond
@@ -1869,11 +1869,12 @@
     (func-map (* mut (Vec (Pair (@ mut u8) Signature))))
     (monomorphisms (* mut (Vec (Pair Type u64))))
     (scopes (* mut (Vec (Vec (Pair (@ mut u8) Type)))))
+    (break-type (* mut Type))
     (cond
         ((== (deref ast).type (AST_NODE_TYPE_ROOT)) (seqn
             (let i = 0)
             (while (< i (deref ast).children.len) (seqn
-                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes)
+                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes break-type)
                 (set i = (+ i 1))))))
 
         ((== (deref ast).type (AST_NODE_TYPE_SEXPR))
@@ -1881,6 +1882,9 @@
                 ((not (deref ast).children.len) (seqn
                     (set (deref ast).typed = (empty-type (deref errors).A))
                     (set (deref ast).typed.type = (TYPE_TYPE_TUPLE))))
+
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defmacro"))
+                    ())
 
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
                     // function definition is guaranteed to be well formed at top level
@@ -1901,7 +1905,7 @@
                         (set i = (+ i 1))))
                     (vec-push scopes (deref v))
 
-                    (check-ast body errors substitutions func-map monomorphisms scopes)
+                    (check-ast body errors substitutions func-map monomorphisms scopes break-type)
                     (vec-pop scopes)
                     (let type = (ref (deref body).typed))
                     (substitute (deref body).loc type (ref (deref func).b.ret-type) substitutions errors)
@@ -1912,7 +1916,7 @@
                         ((> (deref ast).children.len 1) (seqn
                             (let i = 1)
                             (while (< i (deref ast).children.len) (seqn
-                                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes)
+                                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes break-type)
                                 (set i = (+ i 1))))
                             (set (deref ast).typed = (empty-type (deref errors).A))
                             (set (deref ast).typed.type = (TYPE_TYPE_TUPLE))))
@@ -1924,17 +1928,44 @@
                         ((> (deref ast).children.len 1) (seqn
                             (let i = 1)
                             (while (< i (deref ast).children.len) (seqn
-                                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes)
+                                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes break-type)
                                 (set i = (+ i 1))))
                             (set (deref ast).typed = (deref (vec-get (ref (deref ast).children) (- i 1))).typed)))
                         (:else (seqn
                             (vec-push errors (type-error (deref ast).loc "seq must have one or more arguments"))))))
 
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "loop"))
+                    (cond
+                        ((== (deref ast).children.len 2) (seqn
+                            (let break-type = (ref (empty-type (deref errors).A)))
+                            (check-ast (vec-get (ref (deref ast).children) 1) errors substitutions func-map monomorphisms scopes break-type)
+                            (cond
+                                ((== (deref break-type).type (TYPE_TYPE_UNKNOWN)) (seqn
+                                    (set (deref break-type).type = (TYPE_TYPE_TUPLE)))))
+                            (set (deref ast).typed = (deref break-type))))
+                        (:else
+                            (vec-push errors (type-error (deref ast).loc "loop must have only one argument")))))
+
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "break")) (seqn
+                    (let type = (cond
+                        ((== (deref ast).children.len 2) (seq
+                            (let value = (vec-get (ref (deref ast).children) 1))
+                            (check-ast value errors substitutions func-map monomorphisms scopes break-type)
+                            (deref value).typed))
+                        ((== (deref ast).children.len 1) (seq
+                            (let t = (ref (empty-type (deref errors).A)))
+                            (set (deref t).type = (TYPE_TYPE_TUPLE))
+                            (deref t)))
+                        (:else (seq
+                            (vec-push errors (type-error (deref ast).loc "break type does not match previous break type"))
+                            (empty-type (deref errors).A)))))
+                    (substitute (deref ast).loc break-type (ref type) substitutions errors)))
+
                 (:else (seqn
                     (let i = 0)
                     (while (< i (deref ast).children.len) (seqn
                         (let v = (vec-get (ref (deref ast).children) i))
-                        (check-ast v errors substitutions func-map monomorphisms scopes)
+                        (check-ast v errors substitutions func-map monomorphisms scopes break-type)
                         (set i = (+ i 1))))
                     (let func = (vec-get (ref (deref ast).children) 0))
                     (cond
@@ -2011,6 +2042,15 @@
                         (vec-push errors (type-error (deref ast).loc "undefined symbol"))
                         (empty-type (deref errors).A)))))))))
 
+        ((== (deref ast).type (AST_NODE_TYPE_KEY))
+            (vec-push errors (type-error (deref ast).loc "invalid usage of key")))
+
+        ((== (deref ast).type (AST_NODE_TYPE_QUOTE))
+            (vec-push errors (type-error (deref ast).loc "invalid usage of quote")))
+
+        ((== (deref ast).type (AST_NODE_TYPE_ATTR))
+            (vec-push errors (type-error (deref ast).loc "attributes are not implemented yet")))
+
         (:else (seqn
             (eprint "todo: checking ast type ")
             (eprint-int (deref ast).type)
@@ -2046,7 +2086,7 @@
 
         (let substitutions = (ref (new-vec (deref errors).A)))
         (check-ast ast errors substitutions func-map // struct-map 
-        monomorphisms scopes // break-type
+        monomorphisms scopes (null)
         )
 
         (let i = 0)
