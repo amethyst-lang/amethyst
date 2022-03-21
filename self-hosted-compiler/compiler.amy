@@ -2018,6 +2018,20 @@
                         (:else
                             (vec-push errors (type-error (deref ast).loc ": takes two arguments")))))
 
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "sizeof"))
+                    (cond
+                        ((== (deref ast).children.len 2) (seqn
+                            (parse-type (vec-get (ref (deref ast).children) 1) errors)
+                            (let type = (ref (empty-type (deref errors).A)))
+                            (set (deref type).type = (TYPE_TYPE_TYPE_VARIABLE))
+                            (set (deref type).type-var-width = (deref substitutions).len)
+                            (vec-push substitutions (inst Pair
+                                (a (deref type))
+                                (b (COERCION_TYPE_INT))))
+                            (set (deref ast).typed = (deref type))))
+                        (:else
+                            (vec-push errors (type-error (deref ast).loc "sizeof takes one argument")))))
+
                 (:else (seqn
                     (let i = 0)
                     (while (< i (deref ast).children.len) (seqn
