@@ -334,6 +334,13 @@
     (set (get (deref vec).vals (deref vec).len) = v)
     (set (deref vec).len = (+ (deref vec).len 1))))
 
+// Pops a value from a vector
+// TODO: this leaks memory
+(defun vec-pop (vec (* mut (Vec 'a))) (seqn
+    (cond
+        ((> (deref vec).len 0) (seqn
+            (set (deref vec).len = (- (deref vec).len 1)))))))
+
 // Creates a slice from a vector.
 (defun vec-slice (vec (* mut (Vec 'a))) : (@ mut 'a)
     (subslice (deref vec).vals 0 (deref vec).len))
@@ -398,6 +405,9 @@
 (defstruct Pair
     (a 'a)
     (b 'b))
+
+(defun key-find (pair (* mut (Pair (@ mut u8) 'a))) (str (@ mut u8)) : u1
+    (str-equals (deref pair).a str))
 
 
 
@@ -1183,9 +1193,6 @@
         (print-ast-helper (ref macro.body) 2)
         (set i = (+ i 1))))))
 
-(defun macro-find (pair (* mut (Pair (@ mut u8) Macro))) (name (@ mut u8)) : u1
-    (str-equals (deref pair).a name))
-
 (defmacro CAPTURED_MACRO_ARG_NONE   0)
 (defmacro CAPTURED_MACRO_ARG_SINGLE 1)
 (defmacro CAPTURED_MACRO_ARG_REST   2)
@@ -1193,9 +1200,6 @@
 (defstruct CapturedMacroArg
     (type u64)
     (start u64))
-
-(defun macro-bindings-find (pair (* mut (Pair (@ mut u8) CapturedMacroArg))) (name (@ mut u8)) : u1
-    (str-equals (deref pair).a name))
 
 (defun macro-bind (args (@ mut Ast)) (macro (* mut Macro)) (arg-bindings (* mut (Vec (Pair (@ mut u8) CapturedMacroArg)))) : u1 (seq
     (let i = 0)
@@ -1220,13 +1224,13 @@
                 (cond
                     (last-key.len
                         (break false))
-                    ((: u64 (cast (vec-find arg-bindings macro-bindings-find (let key = (subslice arg.value 1 arg.value.len))))) (seqn
+                    ((: u64 (cast (vec-find arg-bindings key-find (let key = (subslice arg.value 1 arg.value.len))))) (seqn
                         (set last-key = key)))
                     (:else
                         (break false))))
             ((> last-key.len 0) (seqn
                 (let arg = (get args (- i 1)))
-                (let binding = (vec-find arg-bindings macro-bindings-find (let key = (subslice arg.value 1 arg.value.len))))
+                (let binding = (vec-find arg-bindings key-find (let key = (subslice arg.value 1 arg.value.len))))
                 (set (deref binding).b = (inst CapturedMacroArg
                     (type (CAPTURED_MACRO_ARG_SINGLE))
                     (start i)))
@@ -1235,7 +1239,7 @@
                 (let arg = (deref arg))
                 (cond
                     ((== arg.type (MACRO_ARG_TYPE_ORDERED)) (seqn
-                        (let binding = (vec-find arg-bindings macro-bindings-find arg.name))
+                        (let binding = (vec-find arg-bindings key-find arg.name))
                         (set (deref binding).b = (inst CapturedMacroArg
                             (type (CAPTURED_MACRO_ARG_SINGLE))
                             (start i)))))
@@ -1255,7 +1259,7 @@
                                 (set j = (+ j 1)))
                             :else false)
                                 (break false)))
-                        (let binding = (vec-find arg-bindings macro-bindings-find arg.name))
+                        (let binding = (vec-find arg-bindings key-find arg.name))
                         (set (deref binding).b = (inst CapturedMacroArg
                             (type (CAPTURED_MACRO_ARG_REST))
                             (start i))))))
@@ -1272,7 +1276,7 @@
 (defun bind-macro-args (ast (* mut Ast)) (arg-bindings (* mut (Vec (Pair (@ mut u8) CapturedMacroArg)))) (old (* mut Ast))
     (cond
         ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seqn
-            (let bound = (vec-find arg-bindings macro-bindings-find (deref ast).value))
+            (let bound = (vec-find arg-bindings key-find (deref ast).value))
             (cond
                 ((: u64 (cast bound)) (seqn
                     (let bound = (deref bound).b)
@@ -1305,7 +1309,7 @@
             (cond
                 ((and (: u64 (cast sym)) (== (deref sym).type (AST_NODE_TYPE_SYMBOL)))
                     (cond
-                        ((: u64 (cast (let macro = (vec-find map macro-find (deref sym).value)))) (seqn
+                        ((: u64 (cast (let macro = (vec-find map key-find (deref sym).value)))) (seqn
                             (let macro = (ref (deref macro).b))
                             (let arg-bindings = (ref (new-vec (deref map).A)))
 
@@ -1559,7 +1563,7 @@
                                             (vec-push errors (type-error (deref child).loc "invalid function argument"))))
                                     (set j = (+ j 1))))
                                 (cond
-                                    ((: u64 (cast (vec-find result find-signature name)))
+                                    ((: u64 (cast (vec-find result key-find name)))
                                         (vec-push errors (type-error (deref ast).loc "function defined twice")))
                                     (:else
                                         (vec-push result (inst Pair
@@ -1569,9 +1573,6 @@
                                                 (ret-type ret-type)
                                                 (index i))))))))))))))))
         (set i = (+ i 1))))))
-
-(defun find-signature (pair (* mut (Pair (@ mut u8) Signature))) (key (@ mut u8)) : u1
-    (str-equals (deref pair).a key))
 
 (defun print-type (type (* mut Type))
     (cond
@@ -1742,8 +1743,7 @@
         (cond
             ((and (== new.type (TYPE_TYPE_TYPE_VARIABLE)) (== new.type-var-width (deref type).type-var-width))
                 (break)))
-        (set (deref type) = new)
-        ))))
+        (set (deref type) = new)))))
 
 (defun substitute (loc Location) (assignee (* mut Type)) (assigner (* mut Type)) (substitutions (* mut (Vec (Pair Type u64)))) (errors (* mut (Vec TypeError))) (seqn
     (get-type-leaf assignee substitutions)
@@ -1868,11 +1868,12 @@
     (substitutions (* mut (Vec (Pair Type u64))))
     (func-map (* mut (Vec (Pair (@ mut u8) Signature))))
     (monomorphisms (* mut (Vec (Pair Type u64))))
+    (scopes (* mut (Vec (Vec (Pair (@ mut u8) Type)))))
     (cond
         ((== (deref ast).type (AST_NODE_TYPE_ROOT)) (seqn
             (let i = 0)
             (while (< i (deref ast).children.len) (seqn
-                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms)
+                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes)
                 (set i = (+ i 1))))))
 
         ((== (deref ast).type (AST_NODE_TYPE_SEXPR))
@@ -1885,9 +1886,23 @@
                     // function definition is guaranteed to be well formed at top level
                     // TODO: verify function definitions at lower levels
                     (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
-                    (let func = (vec-find func-map find-signature name))
+                    (let func = (vec-find func-map key-find name))
                     (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-                    (check-ast body errors substitutions func-map monomorphisms)
+                    (let v = (ref (new-vec (deref errors).A)))
+                    (let i = 0)
+                    (while (< i (deref func).b.arg-types.len) (seqn
+                        (let arg = (vec-get (ref (deref ast).children) (+ i 2)))
+                        (let arg = (vec-get (ref (deref arg).children) 0))
+                        (let arg = (deref arg).value)
+                        (let type = (vec-get (ref (deref func).b.arg-types) i))
+                        (vec-push v (inst Pair
+                            (a arg)
+                            (b (deref type))))
+                        (set i = (+ i 1))))
+                    (vec-push scopes (deref v))
+
+                    (check-ast body errors substitutions func-map monomorphisms scopes)
+                    (vec-pop scopes)
                     (let type = (ref (deref body).typed))
                     (substitute (deref body).loc type (ref (deref func).b.ret-type) substitutions errors)
                     (set (deref body).typed = (deref type))))
@@ -1897,7 +1912,7 @@
                         ((> (deref ast).children.len 1) (seqn
                             (let i = 1)
                             (while (< i (deref ast).children.len) (seqn
-                                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms)
+                                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes)
                                 (set i = (+ i 1))))
                             (set (deref ast).typed = (empty-type (deref errors).A))
                             (set (deref ast).typed.type = (TYPE_TYPE_TUPLE))))
@@ -1909,7 +1924,7 @@
                         ((> (deref ast).children.len 1) (seqn
                             (let i = 1)
                             (while (< i (deref ast).children.len) (seqn
-                                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms)
+                                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes)
                                 (set i = (+ i 1))))
                             (set (deref ast).typed = (deref (vec-get (ref (deref ast).children) (- i 1))).typed)))
                         (:else (seqn
@@ -1947,6 +1962,35 @@
             (set (deref (deref type).boxed) = (deref subtype))
             (set (deref ast).typed = (deref type))))
 
+        ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seqn
+            (let i = (deref scopes).len)
+            (set (deref ast).typed = (while (!= i 0) (seqn
+                (set i = (- i 1))
+                (let scope = (vec-get scopes i))
+                (let v = (vec-find scope key-find (deref ast).value))
+                (cond
+                    ((: u64 (cast v))
+                        (break (deref v).b))))
+            :else (seq
+                (let v = (vec-find func-map key-find (deref ast).value))
+                (cond
+                    ((: u64 (cast v)) (seq
+                        (let v = (deref v).b)
+                        (let type = (ref (empty-type (deref errors).A)))
+                        (set (deref type).type = (TYPE_TYPE_FUNCTION))
+                        (set (deref type).boxed = (alloc (deref errors).A))
+                        (set (deref (deref type).boxed) = v.ret-type)
+                        (let i = 0)
+                        (let subtypes = (ref (deref type).subtypes))
+                        (while (< i v.arg-types.len) (seqn
+                            (vec-push subtypes (deref (vec-get (ref v.arg-types) i)))
+                            (set i = (+ i 1))))
+                        (set (deref type).subtypes = (deref subtypes))
+                        (deref type)))
+                    (:else (seq
+                        (vec-push errors (type-error (deref ast).loc "undefined symbol"))
+                        (empty-type (deref errors).A)))))))))
+
         (:else (seqn
             (eprint "todo: checking ast type ")
             (eprint-int (deref ast).type)
@@ -1978,10 +2022,11 @@
     //(let done = (new-vec (deref errors).A))
     (while (seq
         (let monomorphisms = (ref (new-vec (deref errors).A)))
+        (let scopes = (ref (new-vec (deref errors).A)))
 
         (let substitutions = (ref (new-vec (deref errors).A)))
         (check-ast ast errors substitutions func-map // struct-map 
-        monomorphisms // scopes break-type
+        monomorphisms scopes // break-type
         )
 
         (let i = 0)
