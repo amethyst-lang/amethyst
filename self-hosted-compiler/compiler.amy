@@ -2004,6 +2004,20 @@
                         (:else
                             (vec-push errors (type-error (deref ast).loc "cond must have at least one argument")))))
 
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value ":"))
+                    (cond
+                        ((== (deref ast).children.len 3) (seqn
+                            (let type-ast = (vec-get (ref (deref ast).children) 1))
+                            (let asserted-type = (parse-type type-ast errors))
+                            (set (deref ast).typed = (type-clone (ref asserted-type)))
+                            (let v = (vec-get (ref (deref ast).children) 2))
+                            (check-ast v errors substitutions func-map monomorphisms scopes break-type)
+                            (let t = (ref (deref v).typed))
+                            (substitute (deref ast).loc t (ref asserted-type) substitutions errors)
+                            (set (deref v).typed = (deref t))))
+                        (:else
+                            (vec-push errors (type-error (deref ast).loc ": takes two arguments")))))
+
                 (:else (seqn
                     (let i = 0)
                     (while (< i (deref ast).children.len) (seqn
