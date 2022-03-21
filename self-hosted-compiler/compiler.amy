@@ -1931,8 +1931,28 @@
                             (vec-push errors (type-error (deref ast).loc "seq must have one or more arguments"))))))
 
                 (:else (seqn
-                    (eprint "unimplemented S expression\n")
-                    (exit 1)))))
+                    (let i = 0)
+                    (while (< i (deref ast).children.len) (seqn
+                        (let v = (vec-get (ref (deref ast).children) i))
+                        (check-ast v errors substitutions func-map monomorphisms scopes)
+                        (set i = (+ i 1))))
+                    (let func = (vec-get (ref (deref ast).children) 0))
+                    (cond
+                        ((== (deref func).typed.type (TYPE_TYPE_FUNCTION))
+                            (cond
+                                ((== (deref func).typed.subtypes.len (- i 1)) (seqn
+                                    (let i = 0)
+                                    (while (< i (deref func).typed.subtypes.len) (seqn
+                                        (let arg = (vec-get (ref (deref ast).children) (+ i 1)))
+                                        (let t = (ref (deref arg).typed))
+                                        (substitute (deref arg).loc t (vec-get (ref (deref func).typed.subtypes) i) substitutions errors)
+                                        (set (deref arg).typed = (deref t))
+                                        (set i = (+ i 1))))
+                                    (set (deref ast).typed = (type-clone (deref func).typed.boxed))))
+                                (:else
+                                    (vec-push errors (type-error (deref ast).loc "function argument count does not match provided argument count")))))
+                        (:else
+                            (vec-push errors (type-error (deref func).loc "value is not a function"))))))))
 
         ((== (deref ast).type (AST_NODE_TYPE_INT)) (seqn
             (let type = (ref (empty-type (deref errors).A)))
