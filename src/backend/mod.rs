@@ -24,6 +24,7 @@ impl Default for Generator {
 
         let mut b = settings::builder();
         b.set("opt_level", "speed_and_size").unwrap();
+        b.set("enable_probestack", "false").unwrap();
 
         let f = settings::Flags::new(b);
         let isa_data = isa::lookup(triple!("x86_64-elf")).unwrap().finish(f);

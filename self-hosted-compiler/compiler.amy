@@ -983,9 +983,6 @@
                 (value token.value)
                 (children (new-vec (deref lexer).tokens.A))))))
 
-        ((== token.type (TOKEN_TYPE_LPAREN))
-            (parse-sexpr lexer))
-
         (:else (parse-fail (inst ParseFailure
                 (loc token.loc)
                 (expected (ERROR_TYPE_VALUE))
@@ -2344,8 +2341,64 @@
     ((== (deref ast).type (AST_NODE_TYPE_QUOTE))
         (vec-push errors (type-error (deref ast).loc "invalid usage of quote")))
 
-    ((== (deref ast).type (AST_NODE_TYPE_ATTR))
-        (vec-push errors (type-error (deref ast).loc "attributes are not implemented yet")))
+    ((== (deref ast).type (AST_NODE_TYPE_ATTR)) (seqn
+        (let child = (vec-get (ref (deref ast).children) 0))
+        (check-ast child errors substitutions func-map struct-map monomorphisms scopes break-type)
+        (let i = 1)
+        (let type = (ref (type-clone (ref (deref child).typed))))
+        (while (< i (deref ast).children.len) (seqn
+            (while (== (deref type).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
+                (let t = (vec-get substitutions (deref type).type-var-width))
+                (cond
+                    ((and (== (deref t).a.type (TYPE_TYPE_TYPE_VARIABLE)) (== (deref t).a.type-var-width (deref type).type-var-width))
+                        (break)))
+                (set (deref type) = (type-clone (ref (deref t).a)))))
+
+            (let attr-ast = (vec-get (ref (deref ast).children) i))
+            (let attr = (deref attr-ast).value)
+            (cond
+                ((== (deref type).type (TYPE_TYPE_POINTER))
+                    (cond
+                        ((str-equals attr "*") (seqn
+                            (set (deref type) = (type-clone (deref type).boxed))))
+                        (:else (seqn
+                            (vec-push errors (type-error (deref attr-ast).loc "pointer can only be dereferenced"))
+                            (break)))))
+                ((== (deref type).type (TYPE_TYPE_SLICE))
+                    (cond
+                        ((str-equals attr "ptr") (seqn
+                            (set (deref type) = (type-clone (deref type).boxed))))
+                        ((or (str-equals attr "len") (str-equals attr "cap")) (seqn
+                            (set (deref type) = (empty-type (deref errors).A))
+                            (set (deref type).type = (TYPE_TYPE_INT))
+                            (set (deref type).type-var-width = 64)
+                            (set (deref type).signed-mutable = false)))
+                        (:else (seqn
+                            (vec-push errors (type-error (deref attr-ast).loc "invalid attribute of slice"))
+                            (break)))))
+                ((== (deref type).type (TYPE_TYPE_STRUCT)) (seqn
+                    (let struct = (vec-find struct-map matches-key (deref type).name))
+                    (let field = (vec-find (ref (deref struct).b.fields) matches-key attr))
+                    (cond
+                        ((: u64 (cast field)) (seqn
+                            (let t = (ref (type-clone (ref (deref field).b))))
+                            (let generics = (ref (new-vec (deref errors).A)))
+                            (let i = 0)
+                            (while (and (< i (deref struct).b.generics.len) (< i (deref type).subtypes.len)) (seqn
+                                (vec-push generics (inst Pair
+                                    (a (deref (vec-get (ref (deref struct).b.generics) i)))
+                                    (b (type-clone (vec-get (ref (deref type).subtypes) i)))))
+                                (set i = (+ i 1))))
+                            (replace-generics t generics substitutions)
+                            (set (deref type) = (deref t))
+                            ))
+                        (:else (seqn
+                            (vec-push errors (type-error (deref attr-ast).loc "struct does not have the given field"))
+                            (break))))
+                    ))
+                )
+            (set i = (+ i 1))))
+        (set (deref ast).typed = (deref type))))
 
     (:else (seqn
         (eprint "todo: checking ast type ")
