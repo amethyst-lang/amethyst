@@ -1369,6 +1369,10 @@
     (ret-type Type)
     (index u64))
 
+(defstruct Struct
+    (generics (Vec (@ mut u8)))
+    (fields (Vec (Pair (@ mut u8) Type))))
+
 (defstruct TypeError
     (loc Location)
     (message (@ mut u8)))
@@ -1519,6 +1523,71 @@
             (vec-push errors (type-error (deref ast).loc "could not parse type"))
             (deref type))))))
 
+(defun extract-structs (ast (* mut Ast)) (result (* mut (Vec (Pair (@ mut u8) Struct)))) (errors (* mut (Vec TypeError))) (seqn
+    (let i = 0)
+    (while (< i (deref ast).children.len) (seqn
+        (let ast = (vec-get (ref (deref ast).children) i))
+        (cond
+            ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (>= (deref ast).children.len 2)) (seqn
+                (let defstruct = (vec-get (ref (deref ast).children) 0))
+                (cond
+                    ((and (== (deref defstruct).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref defstruct).value "defstruct")) (seqn
+                        (let name = (vec-get (ref (deref ast).children) 1))
+                        (cond
+                            ((== (deref name).type (AST_NODE_TYPE_SYMBOL)) (seqn
+                                (let name = (deref name).value)
+                                (let generics = (ref (new-vec (deref ast).children.A)))
+                                (let fields = (ref (new-vec (deref ast).children.A)))
+                                (let i = 2)
+                                (while (< i (deref ast).children.len) (seqn
+                                    (let field = (vec-get (ref (deref ast).children) i))
+                                    (cond
+                                        ((and (== (deref field).type (AST_NODE_TYPE_SEXPR)) (== (deref field).children.len 2)) (seqn
+                                            (let name = (vec-get (ref (deref field).children) 0))
+                                            (let type = (vec-get (ref (deref field).children) 1))
+                                            (let type = (parse-type type errors))
+                                            (cond
+                                                ((== (deref name).type (AST_NODE_TYPE_SYMBOL)) (seqn
+                                                    (vec-push fields (inst Pair
+                                                        (a (deref name).value)
+                                                        (b type)))
+                                                    (find-generics (ref type) generics))))))
+                                        (:else
+                                            (vec-push errors (type-error (deref field).loc "invalid struct field"))))
+                                    (set i = (+ i 1))))
+                                (cond
+                                    ((: u64 (cast (vec-find result key-find name)))
+                                        (vec-push errors (type-error (deref ast).loc "structure defined twice")))
+                                    (:else
+                                        (vec-push result (inst Pair
+                                            (a name)
+                                            (b (inst Struct
+                                                (generics (deref generics))
+                                                (fields (deref fields)))))))))))))))))
+        (set i = (+ i 1))))))
+
+(defun print-structs (struct-map (* mut (Vec (Pair (@ mut u8) Struct)))) (seqn
+    (let i = 0)
+    (while (< i (deref struct-map).len) (seqn
+        (let struct = (vec-get struct-map i))
+        (print (deref struct).a)
+        (let j = 0)
+        (while (< j (deref struct).b.generics.len) (seqn
+            (print " '")
+            (print (deref (vec-get (ref (deref struct).b.generics) j)))
+            (set j = (+ j 1))))
+        (print ":\n")
+        (let j = 0)
+        (while (< j (deref struct).b.fields.len) (seqn
+            (let field = (vec-get (ref (deref struct).b.fields) j))
+            (print "    ")
+            (print (deref field).a)
+            (print ": ")
+            (print-type (ref (deref field).b))
+            (print "\n")
+            (set j = (+ j 1))))
+        (set i = (+ i 1))))))
+
 (defun extract-functions (ast (* mut Ast)) (result (* mut (Vec (Pair (@ mut u8) Signature)))) (errors (* mut (Vec TypeError))) (seqn
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
@@ -1594,10 +1663,15 @@
                     (set i = (+ i 1)))
                 :else false))))))
 
+(defun contains-generic (name (* mut (@ mut u8))) (generic (@ mut u8)) : u1
+    (str-equals (deref name) generic))
+
 (defun find-generics (type (* mut Type)) (generics (* mut (Vec (@ mut u8))))
     (cond
         ((== (deref type).type (TYPE_TYPE_GENERIC))
-            (vec-push generics (deref type).name))
+            (cond
+                ((not (: u64 (cast (vec-find generics contains-generic (deref type).name))))
+                    (vec-push generics (deref type).name))))
         (:else (seqn
             (cond
                 ((: u64 (cast (deref type).boxed))
@@ -1624,8 +1698,7 @@
                     (vec-push generics (inst Pair
                         (a (deref type).name)
                         (b (deref new))))
-                    (set (deref type) = (deref new)))))
-            ))
+                    (set (deref type) = (deref new)))))))
         (:else (seqn
             (cond
                 ((: u64 (cast (deref type).boxed))
@@ -2387,7 +2460,11 @@
             (extract-macros macros ast)
             (replace-macros macros ast)
             (let func-map = (ref (new-vec A)))
+            (let struct-map = (ref (new-vec A)))
             (let errors = (ref (new-vec A)))
+            (extract-structs ast struct-map errors)
+            (print-type-errors contents-ref errors)
+            (print-structs struct-map)
             (extract-functions ast func-map errors)
             (print-type-errors contents-ref errors)
             (check ast errors func-map)

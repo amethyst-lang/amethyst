@@ -7,3 +7,4 @@
  - Mutability/immutability distinction
  - Less parenthetical syntax
  - Multiple backends
+ - FFI (including racket)
