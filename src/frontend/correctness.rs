@@ -162,8 +162,8 @@ fn traverse_sexpr<'a>(
 
         SExpr::Symbol { meta, value } => {
             let mut var_type = None;
-            for scope in scopes.iter_mut().rev() {
-                if let Some(t) = scope.get_mut(value) {
+            for scope in scopes.iter().rev() {
+                if let Some(t) = scope.get(value) {
                     var_type = Some(t);
                     break;
                 }
