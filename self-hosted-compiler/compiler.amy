@@ -1562,6 +1562,12 @@
                                         (:else
                                             (vec-push errors (type-error (deref child).loc "invalid function argument"))))
                                     (set j = (+ j 1))))
+                                (let func-type = (ref (empty-type (deref errors).A)))
+                                (set (deref func-type).type = (TYPE_TYPE_FUNCTION))
+                                (set (deref func-type).subtypes = (deref args))
+                                (set (deref func-type).boxed = (alloc (deref errors).A))
+                                (set (deref (deref func-type).boxed) = ret-type)
+                                (set (deref ast).typed = (deref func-type))
                                 (cond
                                     ((: u64 (cast (vec-find result key-find name)))
                                         (vec-push errors (type-error (deref ast).loc "function defined twice")))
@@ -1573,6 +1579,61 @@
                                                 (ret-type ret-type)
                                                 (index i))))))))))))))))
         (set i = (+ i 1))))))
+
+(defun has-generic (type (* mut Type)) : u1
+    (cond
+        ((== (deref type).type (TYPE_TYPE_GENERIC))
+            true)
+        (:else
+            (or (and (: u64 (cast (deref type).boxed)) (has-generic (deref type).boxed)) (seq
+                (let i = 0)
+                (while (< i (deref type).subtypes.len) (seqn
+                    (cond
+                        ((has-generic (vec-get (ref (deref type).subtypes) i))
+                            (break true)))
+                    (set i = (+ i 1)))
+                :else false))))))
+
+(defun find-generics (type (* mut Type)) (generics (* mut (Vec (@ mut u8))))
+    (cond
+        ((== (deref type).type (TYPE_TYPE_GENERIC))
+            (vec-push generics (deref type).name))
+        (:else (seqn
+            (cond
+                ((: u64 (cast (deref type).boxed))
+                    (find-generics (deref type).boxed generics)))
+            (let i = 0)
+            (while (< i (deref type).subtypes.len) (seqn
+                (find-generics (vec-get (ref (deref type).subtypes) i) generics)
+                (set i = (+ i 1))))))))
+
+(defun replace-generics (type (* mut Type)) (generics (* mut (Vec (Pair (@ mut u8) Type)))) (substitutions (* mut (Vec (Pair Type u64))))
+    (cond
+        ((== (deref type).type (TYPE_TYPE_GENERIC)) (seqn
+            (let new = (vec-find generics key-find (deref type).name))
+            (cond
+                ((: u64 (cast new)) (seqn
+                    (set (deref type) = (type-clone (ref (deref new).b)))))
+                (:else (seqn
+                    (let new = (ref (empty-type (deref generics).A)))
+                    (set (deref new).type = (TYPE_TYPE_TYPE_VARIABLE))
+                    (set (deref new).type-var-width = (deref substitutions).len)
+                    (vec-push substitutions (inst Pair
+                        (a (deref new))
+                        (b (COERCION_TYPE_NONE))))
+                    (vec-push generics (inst Pair
+                        (a (deref type).name)
+                        (b (deref new))))
+                    (set (deref type) = (deref new)))))
+            ))
+        (:else (seqn
+            (cond
+                ((: u64 (cast (deref type).boxed))
+                    (replace-generics (deref type).boxed generics substitutions)))
+            (let i = 0)
+            (while (< i (deref type).subtypes.len) (seqn
+                (replace-generics (vec-get (ref (deref type).subtypes) i) generics substitutions)
+                (set i = (+ i 1))))))))
 
 (defun print-type (type (* mut Type))
     (cond
@@ -1871,45 +1932,11 @@
     (scopes (* mut (Vec (Vec (Pair (@ mut u8) Type)))))
     (break-type (* mut Type))
     (cond
-        ((== (deref ast).type (AST_NODE_TYPE_ROOT)) (seqn
-            (let i = 0)
-            (while (< i (deref ast).children.len) (seqn
-                (check-ast (vec-get (ref (deref ast).children) i) errors substitutions func-map monomorphisms scopes break-type)
-                (set i = (+ i 1))))))
-
         ((== (deref ast).type (AST_NODE_TYPE_SEXPR))
             (cond
                 ((not (deref ast).children.len) (seqn
                     (set (deref ast).typed = (empty-type (deref errors).A))
                     (set (deref ast).typed.type = (TYPE_TYPE_TUPLE))))
-
-                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defmacro"))
-                    ())
-
-                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
-                    // function definition is guaranteed to be well formed at top level
-                    // TODO: verify function definitions at lower levels
-                    (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
-                    (let func = (vec-find func-map key-find name))
-                    (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-                    (let v = (ref (new-vec (deref errors).A)))
-                    (let i = 0)
-                    (while (< i (deref func).b.arg-types.len) (seqn
-                        (let arg = (vec-get (ref (deref ast).children) (+ i 2)))
-                        (let arg = (vec-get (ref (deref arg).children) 0))
-                        (let arg = (deref arg).value)
-                        (let type = (vec-get (ref (deref func).b.arg-types) i))
-                        (vec-push v (inst Pair
-                            (a arg)
-                            (b (deref type))))
-                        (set i = (+ i 1))))
-                    (vec-push scopes (deref v))
-
-                    (check-ast body errors substitutions func-map monomorphisms scopes break-type)
-                    (vec-pop scopes)
-                    (let type = (ref (deref body).typed))
-                    (substitute (deref body).loc type (ref (deref func).b.ret-type) substitutions errors)
-                    (set (deref body).typed = (deref type))))
 
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "seqn"))
                     (cond
@@ -1989,7 +2016,6 @@
                                             ((and (== (deref condy).type (AST_NODE_TYPE_KEY)) (str-equals (deref condy).value ":else")) (seqn
                                                 (set has-else = true)))
                                             (:else (seqn
-                                                // TODO: check condy is of type integer
                                                 (check-ast condy errors substitutions func-map monomorphisms scopes break-type)
                                                 (cond
                                                     ((== (deref condy).typed.type (TYPE_TYPE_INT))
@@ -2064,8 +2090,7 @@
                                                 (:else
                                                     (vec-push scope (inst Pair
                                                         (a (deref var-name).value)
-                                                        (b (deref value).typed)))))
-                                        ))))))))
+                                                        (b (deref value).typed)))))))))))))
                         (:else
                             (vec-push errors (type-error (deref ast).loc "let expects 3 arguments")))))
 
@@ -2159,6 +2184,13 @@
                             (vec-push subtypes (deref (vec-get (ref v.arg-types) i)))
                             (set i = (+ i 1))))
                         (set (deref type).subtypes = (deref subtypes))
+                        (cond
+                            ((has-generic type) (seqn
+                                (let generics = (ref (new-vec (deref errors).A)))
+                                (replace-generics type generics substitutions)
+                                (vec-push monomorphisms (inst Pair
+                                    (a (deref type))
+                                    (b v.index))))))
                         (deref type)))
                     (:else (seq
                         (vec-push errors (type-error (deref ast).loc "undefined symbol"))
@@ -2188,7 +2220,15 @@
                     (vec-push errors (type-error loc "unassigned type variable")))
                 (:else (seqn
                     (set (deref type) = type2)
-                    (flatten-substitution type errors loc substitutions))))))))
+                    (flatten-substitution type errors loc substitutions))))))
+        (:else (seqn
+            (cond
+                ((: u64 (cast (deref type).boxed))
+                    (flatten-substitution (deref type).boxed errors loc substitutions)))
+            (let i = 0)
+            (while (< i (deref type).subtypes.len) (seqn
+                (flatten-substitution (vec-get (ref (deref type).subtypes) i) errors loc substitutions)
+                (set i = (+ i 1))))))))
 
 (defun apply-substitutions (ast (* mut Ast)) (errors (* mut (Vec TypeError))) (substitutions (* mut (Vec (Pair Type u64)))) (seqn
     (let type = (ref (deref ast).typed))
@@ -2201,15 +2241,51 @@
 
 (defun check (ast (* mut Ast)) (errors (* mut (Vec TypeError))) (func-map (* mut (Vec (Pair (@ mut u8) Signature)))) (seqn
     (let skip = 0)
-    //(let done = (new-vec (deref errors).A))
+    (let done = (ref (new-vec (deref errors).A)))
     (while (seq
         (let monomorphisms = (ref (new-vec (deref errors).A)))
         (let scopes = (ref (new-vec (deref errors).A)))
 
         (let substitutions = (ref (new-vec (deref errors).A)))
-        (check-ast ast errors substitutions func-map // struct-map 
-        monomorphisms scopes (null)
-        )
+        (let i = skip)
+        (while (< i (deref ast).children.len) (seqn
+            (let ast = (vec-get (ref (deref ast).children) i))
+            (cond
+                ((not (deref ast).children.len)
+                    (vec-push errors (type-error (deref ast).loc "invalid top level construct `()`")))
+
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun"))
+                    (cond
+                        ((not (has-generic (ref (deref ast).typed))) (seqn
+                            (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
+                            (let func-type = (deref ast).typed)
+                            (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
+                            (let v = (ref (new-vec (deref errors).A)))
+                            (let i = 0)
+                            (while (< i func-type.subtypes.len) (seqn
+                                (let arg = (vec-get (ref (deref ast).children) (+ i 2)))
+                                (let arg = (vec-get (ref (deref arg).children) 0))
+                                (let arg = (deref arg).value)
+                                (let type = (vec-get (ref func-type.subtypes) i))
+                                (vec-push v (inst Pair
+                                    (a arg)
+                                    (b (deref type))))
+                                (set i = (+ i 1))))
+                            (vec-push scopes (deref v))
+
+                            (check-ast body errors substitutions func-map // struct-map
+                                monomorphisms scopes (null))
+                            (vec-pop scopes)
+                            (let type = (ref (deref body).typed))
+                            (substitute (deref body).loc type func-type.boxed substitutions errors)
+                            (set (deref body).typed = (deref type))))))
+
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defstruct")) ())
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defmacro")) ())
+
+                (:else
+                    (vec-push errors (type-error (deref ast).loc "invalid top level construct"))))
+            (set i = (+ i 1))))
 
         (let i = 0)
         (while (< i (deref substitutions).len) (seqn
@@ -2235,7 +2311,25 @@
 
         (apply-substitutions ast errors substitutions)
 
-        false) ())))
+        (set skip = (deref ast).children.len)
+        (cond
+            ((deref monomorphisms).len (seqn
+                (let i = 0)
+                (let asts = (ref (deref ast).children))
+                (while (< i (deref monomorphisms).len) (seqn
+                    (let monomorphism = (vec-get monomorphisms i))
+                    (cond
+                        ((not (: u64 (cast (vec-find done type-find (deref monomorphism).a)))) (seqn
+                            (let ast = (ref (ast-clone (deref (vec-get asts (deref monomorphism).b)))))
+                            (set (deref ast).typed = (type-clone (ref (deref monomorphism).a)))
+                            (vec-push done (deref ast).typed)
+                            (vec-push asts (deref ast)))))
+                    (set i = (+ i 1))))
+                (set (deref ast).children = (deref asts)))))
+        (< skip (deref ast).children.len)) ())))
+
+(defun type-find (type (* mut Type)) (t2 Type) : u1
+    (type-equals (deref type) t2))
 
 (defun print-type-errors (contents (@ mut u8)) (errors (* mut (Vec TypeError))) (seqn
     (let i = 0)

@@ -294,7 +294,7 @@ fn traverse_sexpr<'a>(
 
             if let Type::Function(arg_types, ret_type) = &func.meta().type_ {
                 if arg_types.len() != values.len() {
-                    todo!("error handling");
+                    todo!("error handling {:?}", func);
                 }
 
                 for (arg, type_) in values.iter_mut().zip(arg_types) {
