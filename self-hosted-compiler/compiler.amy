@@ -2321,7 +2321,9 @@
                     (cond
                         ((not (: u64 (cast (vec-find done type-find (deref monomorphism).a)))) (seqn
                             (let ast = (ref (ast-clone (deref (vec-get asts (deref monomorphism).b)))))
-                            (set (deref ast).typed = (type-clone (ref (deref monomorphism).a)))
+                            (let typed = (ref (type-clone (ref (deref monomorphism).a))))
+                            (flatten-substitution typed errors (deref ast).loc substitutions)
+                            (set (deref ast).typed = (deref typed))
                             (vec-push done (deref ast).typed)
                             (vec-push asts (deref ast)))))
                     (set i = (+ i 1))))
