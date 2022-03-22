@@ -2328,7 +2328,7 @@
                             (vec-push asts (deref ast)))))
                     (set i = (+ i 1))))
                 (set (deref ast).children = (deref asts)))))
-        (< skip (deref ast).children.len)) ())))
+        (and (< skip (deref ast).children.len) (not (deref errors).len))) ())))
 
 (defun type-find (type (* mut Type)) (t2 Type) : u1
     (type-equals (deref type) t2))
