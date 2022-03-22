@@ -2212,7 +2212,9 @@
                                                             (cond
                                                                 ((: u64 (cast type)) (seqn
                                                                     (let t = (ref (deref value).typed))
-                                                                    (substitute (deref value).loc t (ref (deref type).b) substitutions errors)
+                                                                    (let assigner = (ref (type-clone (ref (deref type).b))))
+                                                                    (replace-generics assigner generics substitutions)
+                                                                    (substitute (deref value).loc t assigner substitutions errors)
                                                                     (set (deref value).typed = (deref t))))
                                                                 (:else
                                                                     (vec-push errors (type-error (deref name).loc "struct cannot be instantiated with the given field"))))))
