@@ -2516,12 +2516,15 @@
                     (let monomorphism = (vec-get monomorphisms i))
                     (cond
                         ((not (: u64 (cast (vec-find done type-find (deref monomorphism).a)))) (seqn
-                            (let ast = (ref (ast-clone (deref (vec-get asts (deref monomorphism).b)))))
-                            (let typed = (ref (type-clone (ref (deref monomorphism).a))))
-                            (flatten-substitution typed errors (deref ast).loc substitutions)
-                            (set (deref ast).typed = (deref typed))
-                            (vec-push done (deref ast).typed)
-                            (vec-push asts (deref ast)))))
+                            (let ast = (vec-get asts (deref monomorphism).b))
+                            (cond
+                                ((: u64 (cast ast)) (seqn
+                                    (let ast = (ref (ast-clone (deref ast))))
+                                    (let typed = (ref (type-clone (ref (deref monomorphism).a))))
+                                    (flatten-substitution typed errors (deref ast).loc substitutions)
+                                    (set (deref ast).typed = (deref typed))
+                                    (vec-push done (deref ast).typed)
+                                    (vec-push asts (deref ast))))))))
                     (set i = (+ i 1))))
                 (set (deref ast).children = (deref asts)))))
         (and (< skip (deref ast).children.len) (not (deref errors).len))) ())))
@@ -2548,6 +2551,540 @@
         (set i = (+ i 1))))
     (cond
         (i (exit 1)))))
+
+(defun create-default-signatures (A (* mut Allocator)) : (Vec (Pair (@ mut u8) Signature)) (seq
+    (let map = (ref (new-vec A)))
+    (vec-push map (inst Pair
+        (a "+")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "-")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "*")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "/")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "%")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "<<")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a ">>")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "&")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "|")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "^")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "<")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 1)
+                (set (deref t).signed-mutable = false)
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a ">")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 1)
+                (set (deref t).signed-mutable = false)
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "<=")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 1)
+                (set (deref t).signed-mutable = false)
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a ">=")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 1)
+                (set (deref t).signed-mutable = false)
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "==")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 1)
+                (set (deref t).signed-mutable = false)
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "!=")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 1)
+                (set (deref t).signed-mutable = false)
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "ptr-add")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let u = (ref (empty-type A)))
+                (set (deref u).type = (TYPE_TYPE_GENERIC))
+                (set (deref u).name = "a")
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_POINTER))
+                (set (deref t).boxed = (alloc A))
+                (set (deref (deref t).boxed) = (deref u))
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 64)
+                (set (deref t).signed-mutable = false)
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "cast")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "b")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "ptr-sub")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let u = (ref (empty-type A)))
+                (set (deref u).type = (TYPE_TYPE_GENERIC))
+                (set (deref u).name = "a")
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_POINTER))
+                (set (deref t).boxed = (alloc A))
+                (set (deref (deref t).boxed) = (deref u))
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 64)
+                (set (deref t).signed-mutable = false)
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "alloca")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 64)
+                (set (deref t).signed-mutable = false)
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let u = (ref (empty-type A)))
+                (set (deref u).type = (TYPE_TYPE_GENERIC))
+                (set (deref u).name = "a")
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_SLICE))
+                (set (deref t).boxed = (alloc A))
+                (set (deref (deref t).boxed) = (deref u))
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "ref")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let u = (ref (empty-type A)))
+                (set (deref u).type = (TYPE_TYPE_GENERIC))
+                (set (deref u).name = "a")
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_POINTER))
+                (set (deref t).boxed = (alloc A))
+                (set (deref (deref t).boxed) = (deref u))
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "deref")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let u = (ref (empty-type A)))
+                (set (deref u).type = (TYPE_TYPE_GENERIC))
+                (set (deref u).name = "a")
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_POINTER))
+                (set (deref t).boxed = (alloc A))
+                (set (deref (deref t).boxed) = (deref u))
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "get")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let u = (ref (empty-type A)))
+                (set (deref u).type = (TYPE_TYPE_GENERIC))
+                (set (deref u).name = "a")
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_SLICE))
+                (set (deref t).boxed = (alloc A))
+                (set (deref (deref t).boxed) = (deref u))
+                (vec-push v (deref t))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 64)
+                (set (deref t).signed-mutable = false)
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_GENERIC))
+                (set (deref t).name = "a")
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "slice")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 64)
+                (set (deref t).signed-mutable = false)
+                (vec-push v (deref t))
+                (let u = (ref (empty-type A)))
+                (set (deref u).type = (TYPE_TYPE_GENERIC))
+                (set (deref u).name = "a")
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_POINTER))
+                (set (deref t).boxed = (alloc A))
+                (set (deref (deref t).boxed) = (deref u))
+                (vec-push v (deref t))
+                (deref v)))
+            (ret-type (seq
+                (let u = (ref (empty-type A)))
+                (set (deref u).type = (TYPE_TYPE_GENERIC))
+                (set (deref u).name = "a")
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_SLICE))
+                (set (deref t).boxed = (alloc A))
+                (set (deref (deref t).boxed) = (deref u))
+                (deref t)))
+            (index (- 0 1))))))
+    (vec-push map (inst Pair
+        (a "syscall")
+        (b (inst Signature
+            (arg-types (seq
+                (let v = (ref (new-vec A)))
+                (let i = 0)
+                (while (< i 7) (seqn
+                    (let t = (ref (empty-type A)))
+                    (set (deref t).type = (TYPE_TYPE_INT))
+                    (set (deref t).type-var-width = 64)
+                    (set (deref t).signed-mutable = false)
+                    (vec-push v (deref t))
+                    (set i = (+ i 1))))
+                (deref v)
+                ))
+            (ret-type (seq
+                (let t = (ref (empty-type A)))
+                (set (deref t).type = (TYPE_TYPE_INT))
+                (set (deref t).type-var-width = 64)
+                (set (deref t).signed-mutable = false)
+                (deref t)
+                ))
+            (index (- 0 1))))))
+    (deref map)))
 
 
 
@@ -2582,7 +3119,7 @@
             (let macros = (ref (new-vec A)))
             (extract-macros macros ast)
             (replace-macros macros ast)
-            (let func-map = (ref (new-vec A)))
+            (let func-map = (ref (create-default-signatures A)))
             (let struct-map = (ref (new-vec A)))
             (let errors = (ref (new-vec A)))
             (extract-structs ast struct-map errors)
