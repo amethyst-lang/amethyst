@@ -3269,8 +3269,7 @@
                     (set (deref t).signed-mutable = false)
                     (vec-push v (deref t))
                     (set i = (+ i 1))))
-                (deref v)
-                ))
+                (deref v)))
             (ret-type (seq
                 (let t = (ref (empty-type A)))
                 (set (deref t).type = (TYPE_TYPE_INT))
@@ -3280,6 +3279,43 @@
                 ))
             (index (- 0 1))))))
     (deref map)))
+
+
+
+//
+// ==================================================================================================
+// LOWERING AST -> IR
+// ==================================================================================================
+//
+
+(defstruct SsaType
+    (width u64)
+    (alignment u16))
+
+(defstruct SsaValue
+    (index u64)
+    (type SsaType))
+
+(defstruct SsaInstruction
+    (returned (Vec SsaValue))
+    (opcode u64)
+    (metadata u64)
+    (arguments (Vec SsaValue)))
+
+(defstruct SsaBasicBlock
+    (parameters (Vec SsaValue))
+    (insts (Vec SsaInstruction))
+    (exit-inst SsaInstruction))
+
+(defstruct SsaFunction
+    (name (@ mut u8))
+    (blocks (Vec SsaBasicBlock)))
+
+(defstruct Ssa
+    (funcs (Vec SsaFunction))
+    (raw-data (Vec u8))
+    (current-func u64)
+    (current-block u64))
 
 
 
@@ -3323,7 +3359,6 @@
             (print-type-errors contents-ref errors)
             (check ast errors func-map struct-map)
             (print-type-errors contents-ref errors)
-            (print-ast ast)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))
