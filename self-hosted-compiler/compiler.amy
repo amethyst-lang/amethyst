@@ -2588,24 +2588,28 @@
     (:else
         (vec-push errors (type-error (deref lvalue).loc "invalid lvalue")))))
 
-(defun flatten-substitution (type (* mut Type)) (errors (* mut (Vec TypeError))) (loc Location) (substitutions (* mut (Vec (Pair Type u64))))
-    (cond
-        ((== (deref type).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
-            (let type2 = (deref (vec-get substitutions (deref type).type-var-width)).a)
-            (cond
-                ((and (== type2.type (TYPE_TYPE_TYPE_VARIABLE)) (== type2.type-var-width (deref type).type-var-width))
-                    (vec-push errors (type-error loc "unassigned type variable")))
-                (:else (seqn
-                    (set (deref type) = type2)
-                    (flatten-substitution type errors loc substitutions))))))
-        (:else (seqn
-            (cond
-                ((: u64 (cast (deref type).boxed))
-                    (flatten-substitution (deref type).boxed errors loc substitutions)))
-            (let i = 0)
-            (while (< i (deref type).subtypes.len) (seqn
-                (flatten-substitution (vec-get (ref (deref type).subtypes) i) errors loc substitutions)
-                (set i = (+ i 1))))))))
+(defun flatten-substitution
+    (type (* mut Type))
+    (errors (* mut (Vec TypeError)))
+    (loc Location)
+    (substitutions (* mut (Vec (Pair Type u64))))
+(cond
+    ((== (deref type).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
+        (let type2 = (deref (vec-get substitutions (deref type).type-var-width)).a)
+        (cond
+            ((and (== type2.type (TYPE_TYPE_TYPE_VARIABLE)) (== type2.type-var-width (deref type).type-var-width))
+                (vec-push errors (type-error loc "unassigned type variable")))
+            (:else (seqn
+                (set (deref type) = type2)
+                (flatten-substitution type errors loc substitutions))))))
+    (:else (seqn
+        (cond
+            ((: u64 (cast (deref type).boxed))
+                (flatten-substitution (deref type).boxed errors loc substitutions)))
+        (let i = 0)
+        (while (< i (deref type).subtypes.len) (seqn
+            (flatten-substitution (vec-get (ref (deref type).subtypes) i) errors loc substitutions)
+            (set i = (+ i 1))))))))
 
 (defun apply-substitutions (ast (* mut Ast)) (errors (* mut (Vec TypeError))) (substitutions (* mut (Vec (Pair Type u64)))) (seqn
     (let type = (ref (deref ast).typed))
@@ -3289,15 +3293,21 @@
 //
 
 (defstruct SsaType
-    (width u64)
-    (alignment u16))
+    // 63-60 - alignment (2^n where n is the number encoded)
+    // 59    - signed
+    // 58-43 - number of fields
+    // 42-0  - width
+    (data u64))
 
 (defstruct SsaValue
     (index u64)
     (type SsaType))
 
+(defmacro SSA_INSTRUCTION_OPCODE_INT        0)
+(defmacro SSA_INSTRUCTION_OPCODE_RETURN     1)
+
 (defstruct SsaInstruction
-    (returned (Vec SsaValue))
+    (returned SsaValue)
     (opcode u64)
     (metadata u64)
     (arguments (Vec SsaValue)))
@@ -3308,14 +3318,159 @@
     (exit-inst SsaInstruction))
 
 (defstruct SsaFunction
-    (name (@ mut u8))
+    (linkage u64)
+    (last-value u64)
     (blocks (Vec SsaBasicBlock)))
 
 (defstruct Ssa
-    (funcs (Vec SsaFunction))
+    (funcs (Vec (Pair (Vec u8) SsaFunction)))
     (raw-data (Vec u8))
     (current-func u64)
     (current-block u64))
+
+(defun mangle-func-name (A (* mut Allocator)) (name (@ mut u8)) (type (* mut Type)) : (Vec u8) (seq
+    (let new-name = (ref (new-vec A)))
+    (vec-push new-name '_')
+    (vec-push new-name '_')
+    (vec-push new-name 'a')
+    (vec-push new-name 'm')
+    (vec-push new-name 'y')
+    (vec-push new-name '_')
+    (let i = 0)
+    (while (< i name.len) (seqn
+        (vec-push new-name (get name i))
+        (set i = (+ i 1))))
+    (vec-push new-name '_')
+    (deref new-name)))
+
+// 63-60 - alignment (2^n where n is the number encoded)
+// 59    - signed
+// 58-43 - number of fields
+// 42-0  - width
+(defun transform-type (type (* mut Type)) : SsaType (seq
+    (cond
+        ((== (deref type).type (TYPE_TYPE_INT)) (seq
+            (let alignment = (cond
+                ((<= (deref type).signed-mutable 8) 0)
+                ((<= (deref type).signed-mutable 16) 2)
+                ((<= (deref type).signed-mutable 32) 4)
+                ((<= (deref type).signed-mutable 64) 8)
+                (:else // TODO: error handling
+                    0)))
+            (let signed = (cast (deref type).signed-mutable))
+            (let field-count = 1)
+            (let width = (deref type).type-var-width)
+            (inst SsaType
+                (data (| (<< alignment 60) (| (<< signed 59) (| (<< field-count 43) width)))))))
+        (:else (seq
+            (eprint "todo: unsupported type type ")
+            (eprint-int (deref type).type)
+            (eprint " for lowering\n")
+            (inst SsaType
+                (data 0)))))))
+
+(defun ssa-push-instruction
+    (ssa (* mut Ssa))
+    (ret-type (* mut Type))
+    (opcode u64)
+    (metadata u64)
+    (arguments (Vec SsaValue))
+    : SsaValue
+(seq
+    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
+    (let block = (vec-get (ref (deref func).b.blocks) (deref ssa).current-block))
+    (let insts = (ref (deref block).insts))
+    (let value = (inst SsaValue
+        (index (deref func).b.last-value)
+        (type (transform-type ret-type))))
+    (set (deref func).b.last-value = (+ (deref func).b.last-value 1))
+    (let instruction = (inst SsaInstruction
+        (returned value)
+        (opcode opcode)
+        (metadata metadata)
+        (arguments arguments)))
+    (vec-push insts instruction)
+    (set (deref block).insts = (deref insts))
+    value))
+
+(defun ssa-push-block
+    (ssa (* mut Ssa))
+    : u64
+(seq
+    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
+    (let blocks = (ref (deref func).b.blocks))
+    (vec-push blocks (inst SsaBasicBlock
+        (parameters (new-vec (deref ssa).funcs.A))
+        (insts (new-vec (deref ssa).funcs.A))
+        (exit-inst (inst SsaInstruction
+            (returned (inst SsaValue
+                (index 0)
+                (type (inst SsaType
+                    (data 0)))))
+            (opcode 0)
+            (metadata 0)
+            (arguments (new-vec (deref ssa).funcs.A))))))
+    (set (deref func).b.blocks = (deref blocks))
+    (deref blocks).len))
+
+(defun ast-to-ssa-helper (ast (* mut Ast)) (ssa (* mut Ssa)) : SsaValue
+    (cond
+        ((== (deref ast).type (AST_NODE_TYPE_INT)) (seq
+            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A))))
+        (:else (seq
+            (eprint "todo: unsupported ast node ")
+            (eprint-int (deref ast).type)
+            (eprint " for lowering to ssa\n")
+            (exit 1)
+            (inst SsaValue
+                (index 0)
+                (type (inst SsaType
+                    (data 0))))))))
+
+(defun ast-to-ssa (ast (* mut Ast)) (struct-map (* mut (Vec (Pair (@ mut u8) Struct)))) : Ssa (seq
+    (let ssa = (ref (inst Ssa
+        (funcs (new-vec (deref ast).children.A))
+        (raw-data (new-vec (deref ast).children.A))
+        (current-func 0)
+        (current-block 0))))
+    (let i = 0)
+    (while (< i (deref ast).children.len) (seqn
+        (let ast = (vec-get (ref (deref ast).children) i))
+        (cond
+            ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
+                (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
+                (let name = (ref (mangle-func-name (deref struct-map).A name (ref (deref ast).typed))))
+                (let name-slice = (vec-slice name))
+
+                (let i = 0)
+                (while (< i (deref ssa).funcs.len) (seqn
+                    (let found-name = (ref (deref (vec-get (ref (deref ssa).funcs) i)).a))
+                    (let found-name-slice = (vec-slice found-name))
+                    (cond
+                        ((str-equals found-name-slice name-slice)
+                            (break)))
+                    (set i = (+ i 1))))
+
+                (cond
+                    ((>= i (deref ssa).funcs.len) (seqn
+                        (let funcs = (ref (deref ssa).funcs))
+                        (vec-push funcs (inst Pair
+                            (a (deref name))
+                            (b (inst SsaFunction
+                                (linkage 0)
+                                (last-value 0)
+                                (blocks (new-vec (deref struct-map).A))))))
+                        (set (deref ssa).funcs = (deref funcs)))))
+                (set (deref ssa).current-func = i)
+                (ssa-push-block ssa)
+                (set (deref ssa).current-block = 0)
+
+                // TODO: arguments
+
+                (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
+                (ast-to-ssa-helper body ssa))))
+        (set i = (+ i 1))))
+    (deref ssa)))
 
 
 
@@ -3359,6 +3514,7 @@
             (print-type-errors contents-ref errors)
             (check ast errors func-map struct-map)
             (print-type-errors contents-ref errors)
+            (let ssa = (ref (ast-to-ssa ast struct-map)))
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))
