@@ -42,18 +42,17 @@
 
 // Helper function for printing out an integer
 (defun print-int-helper (i u64) (printer (fn ((@ mut u8))))
-    (seqn
-        (cond
-            ((== i 0) (printer "0"))
-            (:else (seqn
-                (let p = (alloca 20))
-                (let start = 19)
-                (while (!= i 0) (seqn
-                    (let c = (+ '0' (cast (% i 10))))
-                    (set start = (- start 1))
-                    (set (get p start) = c)
-                    (set i = (/ i 10))))
-                (printer (subslice p start (- p.len 1))))))))
+    (cond
+        ((== i 0) (printer "0"))
+        (:else (seqn
+            (let p = (alloca 20))
+            (let start = 19)
+            (while (!= i 0) (seqn
+                (let c = (+ '0' (cast (% i 10))))
+                (set start = (- start 1))
+                (set (get p start) = c)
+                (set i = (/ i 10))))
+            (printer (subslice p start (- p.len 1)))))))
 
 // Prints out a number onto stdout.
 (defun print-int (i u64)
@@ -84,7 +83,9 @@
 (defun file-is-valid (file File) : u1
     (> file.descriptor 0))
 
-(defmacro FILE_OPEN_FLAG_READ_ONLY 0)
+(defmacro FILE_OPEN_FLAG_READ_ONLY   0)
+(defmacro FILE_OPEN_FLAG_WRITE_ONLY  1)
+(defmacro FILE_OPEN_FLAG_CREATE     64)
 
 // Opens a file.
 (defun file-open (path (@ mut u8)) (flags u64) : File
@@ -98,7 +99,7 @@
         (set (get null-term i) = '\0')
         (inst File
             (descriptor
-                (cast (syscall 2 (cast null-term.ptr) flags 0 0 0 0))))))
+                (cast (syscall 2 (cast null-term.ptr) flags 438 0 0 0))))))
 
 // Reads a file into a vec of u8s.
 (defun file-read-all (file File) (A (* mut Allocator)) : (Vec u8) (seq
@@ -110,6 +111,23 @@
             (vec-push vec (get slice i))
             (set i = (+ i 1))))))
     (deref vec)))
+
+(defun file-write (file File) (str (@ mut u8)) (seqn
+    (syscall 1 (cast file.descriptor) (cast str.ptr) (cast str.len) 0 0 0)))
+
+(defun file-write-int (file File) (i u64)
+    (cond
+        ((== i 0) (file-write file "0"))
+        (:else (seqn
+            (let p = (alloca 20))
+            (let start = 19)
+            (while (!= i 0) (seqn
+                (let c = (+ '0' (cast (% i 10))))
+                (set start = (- start 1))
+                (set (get p start) = c)
+                (set i = (/ i 10))))
+            (file-write file (subslice p start (- p.len 1)))))))
+
 
 // Closes a previously opened file.
 (defun file-close (file File)
@@ -3326,17 +3344,24 @@
 
 (defun mangle-func-name (A (* mut Allocator)) (name (@ mut u8)) (type (* mut Type)) : (Vec u8) (seq
     (let new-name = (ref (new-vec A)))
-    (vec-push new-name '_')
-    (vec-push new-name '_')
-    (vec-push new-name 'a')
-    (vec-push new-name 'm')
-    (vec-push new-name 'y')
-    (vec-push new-name '_')
-    (let i = 0)
-    (while (< i name.len) (seqn
-        (vec-push new-name (get name i))
-        (set i = (+ i 1))))
-    (vec-push new-name '_')
+    (cond
+        ((str-equals name "main") (seqn
+            (vec-push new-name 'm')
+            (vec-push new-name 'a')
+            (vec-push new-name 'i')
+            (vec-push new-name 'n')))
+        (:else (seqn
+            (vec-push new-name '_')
+            (vec-push new-name '_')
+            (vec-push new-name 'a')
+            (vec-push new-name 'm')
+            (vec-push new-name 'y')
+            (vec-push new-name '_')
+            (let i = 0)
+            (while (< i name.len) (seqn
+                (vec-push new-name (get name i))
+                (set i = (+ i 1))))
+            (vec-push new-name '_'))))
     (deref new-name)))
 
 // 63-60 - alignment (2^n where n is the number encoded)
@@ -3535,6 +3560,52 @@
 
 //
 // ==================================================================================================
+// CODE GENERATION
+// ==================================================================================================
+//
+
+(defun emit-assembly-x64 (ssa (* mut Ssa)) (filename (@ mut u8)) (seqn
+    (let file = (file-open filename (| (FILE_OPEN_FLAG_WRITE_ONLY) (FILE_OPEN_FLAG_CREATE))))
+    (let i = 0)
+    (while (< i (deref ssa).funcs.len) (seqn
+        (let func = (vec-get (ref (deref ssa).funcs) i))
+        (file-write file "global ")
+        (file-write file (vec-slice (ref (deref func).a)))
+        (file-write file "\n")
+        (file-write file (vec-slice (ref (deref func).a)))
+        (file-write file ":\n    push rbp\n    mov rbp, rsp\n")
+
+        (let j = 0)
+        (while (< j (deref func).b.blocks.len) (seqn
+            (let block = (vec-get (ref (deref func).b.blocks) j))
+            (file-write file "\n.L")
+            (file-write-int file j)
+            (file-write file ":\n")
+
+            (let k = 0)
+            (while (< k (deref block).insts.len) (seqn
+                (let instruction = (vec-get (ref (deref block).insts) k))
+                (cond
+                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT)) (seqn
+                        (file-write file "    mov rax, ")
+                        (file-write-int file (deref instruction).metadata)
+                        (file-write file "\n")
+                        ))
+                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_RETURN))
+                        (file-write file "    mov rsp, rbp\n    pop rbp\n    ret\n"))
+                    (:else
+                        (file-write file "    ; unknown ssa instruction\n")))
+                (set k = (+ k 1))))
+
+            (set j = (+ j 1))))
+
+        (set i = (+ i 1))))
+    (file-close file)))
+
+
+
+//
+// ==================================================================================================
 // MAIN
 // ==================================================================================================
 //
@@ -3575,6 +3646,7 @@
             (print-type-errors contents-ref errors)
             (let ssa = (ref (ast-to-ssa ast struct-map)))
             (print-ssa ssa)
+            (emit-assembly-x64 ssa "a.s")
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))
