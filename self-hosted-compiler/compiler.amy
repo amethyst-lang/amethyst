@@ -1516,8 +1516,7 @@
                                     (set (deref type).type = (TYPE_TYPE_FUNCTION))
                                     (set (deref type).subtypes = (deref arg-types))
                                     (set (deref type).boxed = (alloc (deref args).children.A))
-                                    (set (deref (deref type).boxed) = (deref ret-type))
-                                    ))
+                                    (set (deref (deref type).boxed) = (deref ret-type))))
                                 (:else
                                     (vec-push errors (type-error (deref ast).loc "could not parse function type")))))
 
@@ -2245,8 +2244,7 @@
                                         (set (deref t).type = (TYPE_TYPE_STRUCT))
                                         (set (deref t).name = (deref name).value)
                                         (set (deref t).subtypes = (deref final-generics))
-                                        (set (deref ast).typed = (deref t))
-                                        ))
+                                        (set (deref ast).typed = (deref t))))
                                     (:else
                                         (vec-push errors (type-error (deref name).loc "undefined struct"))))))
                             (:else
@@ -3279,8 +3277,7 @@
                 (set (deref t).type = (TYPE_TYPE_INT))
                 (set (deref t).type-var-width = 64)
                 (set (deref t).signed-mutable = false)
-                (deref t)
-                ))
+                (deref t)))
             (index (- 0 1))))))
     (deref map)))
 
@@ -3532,8 +3529,7 @@
             (print "\n")
             (set j = (+ j 1))))
         (print "\n")
-        (set i = (+ i 1))))
-    ))
+        (set i = (+ i 1))))))
 
 
 
