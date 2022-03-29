@@ -1398,7 +1398,7 @@
         (loc loc)
         (message message)))
 
-(defun parse-int (loc Location) (str (@ mut u8)) (errors (* mut (Vec TypeError))) : u64 (seq
+(defun parse-type-int (loc Location) (str (@ mut u8)) (errors (* mut (Vec TypeError))) : u64 (seq
     (let i = 0)
     (let n = 0)
     (while (< i str.len) (seqn
@@ -1423,7 +1423,7 @@
             (deref type)))
         ((and (== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (or (== (get (deref ast).value 0) 'i') (== (get (deref ast).value 0) 'u'))) (seq
             (set (deref type).type = (TYPE_TYPE_INT))
-            (set (deref type).type-var-width = (parse-int (deref ast).loc (subslice (deref ast).value 1 (deref ast).value.len) errors))
+            (set (deref type).type-var-width = (parse-type-int (deref ast).loc (subslice (deref ast).value 1 (deref ast).value.len) errors))
             (set (deref type).signed-mutable = (== (get (deref ast).value 0) 'i'))
             (deref type)))
         ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seq
@@ -3314,8 +3314,7 @@
 
 (defstruct SsaBasicBlock
     (parameters (Vec SsaValue))
-    (insts (Vec SsaInstruction))
-    (exit-inst SsaInstruction))
+    (insts (Vec SsaInstruction)))
 
 (defstruct SsaFunction
     (linkage u64)
@@ -3362,6 +3361,9 @@
             (let width = (deref type).type-var-width)
             (inst SsaType
                 (data (| (<< alignment 60) (| (<< signed 59) (| (<< field-count 43) width)))))))
+        ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
+            (inst SsaType
+                (data 0)))
         (:else (seq
             (eprint "todo: unsupported type type ")
             (eprint-int (deref type).type)
@@ -3401,22 +3403,27 @@
     (let blocks = (ref (deref func).b.blocks))
     (vec-push blocks (inst SsaBasicBlock
         (parameters (new-vec (deref ssa).funcs.A))
-        (insts (new-vec (deref ssa).funcs.A))
-        (exit-inst (inst SsaInstruction
-            (returned (inst SsaValue
-                (index 0)
-                (type (inst SsaType
-                    (data 0)))))
-            (opcode 0)
-            (metadata 0)
-            (arguments (new-vec (deref ssa).funcs.A))))))
+        (insts (new-vec (deref ssa).funcs.A))))
     (set (deref func).b.blocks = (deref blocks))
     (deref blocks).len))
+
+(defun parse-ssa-int (str (@ mut u8)) : u64 (seq
+    (let i = 0)
+    (let n = 0)
+    (while (< i str.len) (seqn
+        (let c = (get str i))
+        (cond
+            ((and (<= '0' c) (<= c '9')) (seqn
+                (set n = (+ (* n 10) (cast (- c '0'))))))
+            (:else
+                (break 0)))
+        (set i = (+ i 1)))
+    :else n)))
 
 (defun ast-to-ssa-helper (ast (* mut Ast)) (ssa (* mut Ssa)) : SsaValue
     (cond
         ((== (deref ast).type (AST_NODE_TYPE_INT)) (seq
-            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A))))
+            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (parse-ssa-int (deref ast).value) (new-vec (deref ast).children.A))))
         (:else (seq
             (eprint "todo: unsupported ast node ")
             (eprint-int (deref ast).type)
@@ -3468,9 +3475,65 @@
                 // TODO: arguments
 
                 (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-                (ast-to-ssa-helper body ssa))))
+                (let ret-value = (ast-to-ssa-helper body ssa))
+                (let ret-args = (ref (new-vec (deref ssa).funcs.A)))
+                (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
+                (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
+                (vec-push ret-args ret-value)
+                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_RETURN) 0 (deref ret-args)))))
         (set i = (+ i 1))))
     (deref ssa)))
+
+(defun print-ssa-value (value (* mut SsaValue)) (seqn
+    (print "%")
+    (print-int (deref value).index)
+    // TODO: printing types
+    (print ":TYPE")))
+
+(defun print-ssa-instruction (instruction (* mut SsaInstruction)) (seqn
+    (print "    ")
+    (print-ssa-value (ref (deref instruction).returned))
+    (print " = ")
+    (cond
+        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT)) (seqn
+            (print "int ")
+            (print-int (deref instruction).metadata)))
+
+        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_RETURN))
+            (print "return"))
+        (:else (seqn
+            (print "UNKNOWN ")
+            (print-int (deref instruction).metadata))))
+    (let i = 0)
+    (while (< i (deref instruction).arguments.len) (seqn
+        (print " ")
+        (let value = (vec-get (ref (deref instruction).arguments) i))
+        (print-ssa-value value)
+        (set i = (+ i 1))))
+    (print "\n")))
+
+(defun print-ssa (ssa (* mut Ssa)) (seqn
+    (let i = 0)
+    (while (< i (deref ssa).funcs.len) (seqn
+        (let func = (vec-get (ref (deref ssa).funcs) i))
+        (print (vec-slice (ref (deref func).a)))
+        (print ":\n")
+        (let j = 0)
+        (while (< j (deref func).b.blocks.len) (seqn
+            (print "  ")
+            (print-int j)
+            (print ":\n") // TODO: arguments
+            (let block = (vec-get (ref (deref func).b.blocks) j))
+            (let k = 0)
+            (while (< k (deref block).insts.len) (seqn
+                (let instruction = (vec-get (ref (deref block).insts) k))
+                (print-ssa-instruction instruction)
+                (set k = (+ k 1))))
+            (print "\n")
+            (set j = (+ j 1))))
+        (print "\n")
+        (set i = (+ i 1))))
+    ))
 
 
 
@@ -3515,6 +3578,7 @@
             (check ast errors func-map struct-map)
             (print-type-errors contents-ref errors)
             (let ssa = (ref (ast-to-ssa ast struct-map)))
+            (print-ssa ssa)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))
