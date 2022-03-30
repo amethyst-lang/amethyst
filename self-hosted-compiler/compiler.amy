@@ -2028,7 +2028,9 @@
                                 (let assigner = (ref (deref (vec-get (ref (deref assigner).subtypes) i))))
                                 (substitute loc assignee assigner substitutions errors)
                                 (set i = (+ i 1))))
-                            (substitute loc (deref assignee).boxed (ref (deref (deref assigner).boxed)) substitutions errors)))))))
+                            (substitute loc (deref assignee).boxed (ref (deref (deref assigner).boxed)) substitutions errors)))))
+                (:else (seqn
+                    (vec-push errors (type-error loc "the given types cannot be unified"))))))
 
         (:else (seqn
             (vec-push errors (type-error loc "the given types cannot be unified")))))))
@@ -3314,6 +3316,26 @@
     // 42-0  - width
     (data u64))
 
+(defun ssa-type-alignment (type SsaType) : u64
+    // TODO: hex
+    // 0xf000000000000000
+    (>> (& type.data 17293822569102704640) 60))
+
+(defun ssa-type-signed (type SsaType) : u64
+    // TODO: hex
+    // 1 << 59
+    (>> (& type.data 576460752303423488) 59))
+
+(defun ssa-type-field-count (type SsaType) : u64
+    // TODO: hex
+    // 0xffff << 43
+    (>> (& type.data 576451956210401280) 43))
+
+(defun ssa-type-width (type SsaType) : u64
+    // TODO: hex
+    // (1 << 43) - 1
+    (& type.data 8796093022207))
+
 (defstruct SsaValue
     (index u64)
     (type SsaType))
@@ -3371,16 +3393,16 @@
 (defun transform-type (type (* mut Type)) : SsaType (seq
     (cond
         ((== (deref type).type (TYPE_TYPE_INT)) (seq
+            (let width = (deref type).type-var-width)
             (let alignment = (cond
-                ((<= (deref type).signed-mutable 8) 0)
-                ((<= (deref type).signed-mutable 16) 2)
-                ((<= (deref type).signed-mutable 32) 4)
-                ((<= (deref type).signed-mutable 64) 8)
+                ((<= width  8) 0)
+                ((<= width 16) 1)
+                ((<= width 32) 2)
+                ((<= width 64) 3)
                 (:else // TODO: error handling
                     0)))
             (let signed = (cast (deref type).signed-mutable))
             (let field-count = 1)
-            (let width = (deref type).type-var-width)
             (inst SsaType
                 (data (| (<< alignment 60) (| (<< signed 59) (| (<< field-count 43) width)))))))
         ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
@@ -3444,8 +3466,53 @@
 
 (defun ast-to-ssa-helper (ast (* mut Ast)) (ssa (* mut Ssa)) : SsaValue
     (cond
-        ((== (deref ast).type (AST_NODE_TYPE_INT)) (seq
-            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (parse-ssa-int (deref ast).value) (new-vec (deref ast).children.A))))
+        ((== (deref ast).type (AST_NODE_TYPE_INT))
+            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (parse-ssa-int (deref ast).value) (new-vec (deref ast).children.A)))
+        ((== (deref ast).type (AST_NODE_TYPE_CHAR)) (seq
+            (let char = (cond
+                ((str-equals (deref ast).value "'\\n'")
+                    '\n')
+                ((str-equals (deref ast).value "'\\r'")
+                    '\r')
+                ((str-equals (deref ast).value "'\\t'")
+                    '\t')
+                ((str-equals (deref ast).value "'\\''")
+                    '\'')
+                ((str-equals (deref ast).value "'\\\"'")
+                    '\"')
+                (:else
+                    (cast (get (deref ast).value 1)))))
+            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (cast char) (new-vec (deref ast).children.A))))
+        ((== (deref ast).type (AST_NODE_TYPE_BOOL))
+            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (cast (str-equals (deref ast).value "true")) (new-vec (deref ast).children.A)))
+        ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0))
+            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A)))
+        ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
+            (let func = (vec-get (ref (deref ast).children) 0))
+            (cond
+                ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "seq")) (seq
+                    (let last = (inst SsaValue
+                        (index 0)
+                        (type (inst SsaType
+                            (data 0)))))
+                    (let i = 1)
+                    (while (< i (deref ast).children.len) (seqn
+                        (set last = (ast-to-ssa-helper (vec-get (ref (deref ast).children) i) ssa))
+                        (set i = (+ i 1))))
+                    last))
+                ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "seqn")) (seq
+                    (let i = 1)
+                    (while (< i (deref ast).children.len) (seqn
+                        (ast-to-ssa-helper (vec-get (ref (deref ast).children) i) ssa)
+                        (set i = (+ i 1))))
+                    (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A))))
+                (:else (seq
+                    (eprint "todo: unsupported ast for lowering S expression to ssa\n")
+                    (exit 1)
+                    (inst SsaValue
+                        (index 0)
+                        (type (inst SsaType
+                            (data 0)))))))))
         (:else (seq
             (eprint "todo: unsupported ast node ")
             (eprint-int (deref ast).type)
@@ -3509,8 +3576,17 @@
 (defun print-ssa-value (value (* mut SsaValue)) (seqn
     (print "%")
     (print-int (deref value).index)
-    // TODO: printing types
-    (print ":TYPE")))
+    (print ":")
+    (cond
+        ((ssa-type-signed (deref value).type)
+            (print "i"))
+        (:else
+            (print "u")))
+    (print-int (ssa-type-width (deref value).type))
+    (print "x")
+    (print-int (ssa-type-field-count (deref value).type))
+    (print "@2^")
+    (print-int (ssa-type-alignment (deref value).type))))
 
 (defun print-ssa-instruction (instruction (* mut SsaInstruction)) (seqn
     (print "    ")
@@ -3574,14 +3650,12 @@
         (file-write file "\n")
         (file-write file (vec-slice (ref (deref func).a)))
         (file-write file ":\n    push rbp\n    mov rbp, rsp\n")
-
         (let j = 0)
         (while (< j (deref func).b.blocks.len) (seqn
             (let block = (vec-get (ref (deref func).b.blocks) j))
             (file-write file "\n.L")
             (file-write-int file j)
             (file-write file ":\n")
-
             (let k = 0)
             (while (< k (deref block).insts.len) (seqn
                 (let instruction = (vec-get (ref (deref block).insts) k))
@@ -3589,16 +3663,13 @@
                     ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT)) (seqn
                         (file-write file "    mov rax, ")
                         (file-write-int file (deref instruction).metadata)
-                        (file-write file "\n")
-                        ))
+                        (file-write file "\n")))
                     ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_RETURN))
                         (file-write file "    mov rsp, rbp\n    pop rbp\n    ret\n"))
                     (:else
                         (file-write file "    ; unknown ssa instruction\n")))
                 (set k = (+ k 1))))
-
             (set j = (+ j 1))))
-
         (set i = (+ i 1))))
     (file-close file)))
 
