@@ -2107,7 +2107,11 @@
                     (:else (seq
                         (vec-push errors (type-error (deref ast).loc "break type does not match previous break type"))
                         (empty-type (deref errors).A)))))
-                (substitute (deref ast).loc break-type (ref type) substitutions errors)))
+                (cond
+                    ((: u64 (cast break-type))
+                        (substitute (deref ast).loc break-type (ref type) substitutions errors))
+                    (:else
+                        (vec-push errors (type-error (deref ast).loc "break found outside of loop"))))))
 
             ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "cond"))
                 (cond
@@ -3489,135 +3493,151 @@
         (set i = (+ i 1)))
     :else n)))
 
-(defun ast-to-ssa-helper (ast (* mut Ast)) (ssa (* mut Ssa)) : SsaValue
-    (cond
-        ((== (deref ast).type (AST_NODE_TYPE_INT))
-            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (parse-ssa-int (deref ast).value) (new-vec (deref ast).children.A)))
-        ((== (deref ast).type (AST_NODE_TYPE_CHAR)) (seq
-            (let char = (cond
-                ((str-equals (deref ast).value "'\\n'")
-                    '\n')
-                ((str-equals (deref ast).value "'\\r'")
-                    '\r')
-                ((str-equals (deref ast).value "'\\t'")
-                    '\t')
-                ((str-equals (deref ast).value "'\\''")
-                    '\'')
-                ((str-equals (deref ast).value "'\\\"'")
-                    '\"')
-                (:else
-                    (get (deref ast).value 1))))
-            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (cast char) (new-vec (deref ast).children.A))))
-        ((== (deref ast).type (AST_NODE_TYPE_BOOL))
-            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (cast (str-equals (deref ast).value "true")) (new-vec (deref ast).children.A)))
-        ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0))
-            (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A)))
-        ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
-            (let func = (vec-get (ref (deref ast).children) 0))
-            (cond
-                ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "seq")) (seq
-                    (let last = (inst SsaValue
-                        (index 0)
-                        (type (inst SsaType
-                            (data 0)))))
-                    (let i = 1)
-                    (while (< i (deref ast).children.len) (seqn
-                        (set last = (ast-to-ssa-helper (vec-get (ref (deref ast).children) i) ssa))
-                        (set i = (+ i 1))))
-                    last))
-                ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "seqn")) (seq
-                    (let i = 1)
-                    (while (< i (deref ast).children.len) (seqn
-                        (ast-to-ssa-helper (vec-get (ref (deref ast).children) i) ssa)
-                        (set i = (+ i 1))))
-                    (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A))))
+(defun ast-to-ssa-helper
+    (ast (* mut Ast))
+    (ssa (* mut Ssa))
+    (break-block u64)
+    : SsaValue
+(cond
+    ((== (deref ast).type (AST_NODE_TYPE_INT))
+        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (parse-ssa-int (deref ast).value) (new-vec (deref ast).children.A)))
+    ((== (deref ast).type (AST_NODE_TYPE_CHAR)) (seq
+        (let char = (cond
+            ((str-equals (deref ast).value "'\\n'")
+                '\n')
+            ((str-equals (deref ast).value "'\\r'")
+                '\r')
+            ((str-equals (deref ast).value "'\\t'")
+                '\t')
+            ((str-equals (deref ast).value "'\\''")
+                '\'')
+            ((str-equals (deref ast).value "'\\\"'")
+                '\"')
+            (:else
+                (get (deref ast).value 1))))
+        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (cast char) (new-vec (deref ast).children.A))))
+    ((== (deref ast).type (AST_NODE_TYPE_BOOL))
+        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (cast (str-equals (deref ast).value "true")) (new-vec (deref ast).children.A)))
+    ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0))
+        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A)))
+    ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
+        (let func = (vec-get (ref (deref ast).children) 0))
+        (cond
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "seq")) (seq
+                (let last = (inst SsaValue
+                    (index 0)
+                    (type (inst SsaType
+                        (data 0)))))
+                (let i = 1)
+                (while (< i (deref ast).children.len) (seqn
+                    (set last = (ast-to-ssa-helper (vec-get (ref (deref ast).children) i) ssa break-block))
+                    (set i = (+ i 1))))
+                last))
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "seqn")) (seq
+                (let i = 1)
+                (while (< i (deref ast).children.len) (seqn
+                    (ast-to-ssa-helper (vec-get (ref (deref ast).children) i) ssa break-block)
+                    (set i = (+ i 1))))
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A))))
 
-                ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "cond")) (seq
-                    (let conds = (ref (new-vec (deref ssa).funcs.A)))
-                    (vec-push conds (ssa-push-block ssa))
-                    (let thens = (ref (new-vec (deref ssa).funcs.A)))
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "cond")) (seq
+                (let conds = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push conds (ssa-push-block ssa))
+                (let thens = (ref (new-vec (deref ssa).funcs.A)))
 
-                    (let i = 1)
-                    (while (< i (deref ast).children.len) (seqn
-                        (let pair = (vec-get (ref (deref ast).children) i))
-                        (let condy = (vec-get (ref (deref pair).children) 0))
-                        (let then = (vec-get (ref (deref pair).children) 1))
-                        (cond
-                            ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
-                                (vec-push conds (ssa-push-block ssa))
-                                (vec-push thens (ssa-push-block ssa)))))
-                        (set i = (+ i 1))))
+                (let i = 1)
+                (while (< i (deref ast).children.len) (seqn
+                    (let pair = (vec-get (ref (deref ast).children) i))
+                    (let condy = (vec-get (ref (deref pair).children) 0))
+                    (let then = (vec-get (ref (deref pair).children) 1))
+                    (cond
+                        ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
+                            (vec-push conds (ssa-push-block ssa))
+                            (vec-push thens (ssa-push-block ssa)))))
+                    (set i = (+ i 1))))
 
-                    (let last-block = (ssa-push-block ssa))
+                (let last-block = (ssa-push-block ssa))
 
-                    (let i = 1)
-                    (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
-                    (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
-                    (while (< i (deref ast).children.len) (seqn
-                        (let pair = (vec-get (ref (deref ast).children) i))
-                        (let condy = (vec-get (ref (deref pair).children) 0))
-                        (let then = (vec-get (ref (deref pair).children) 1))
+                (let i = 1)
+                (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
+                (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
+                (while (< i (deref ast).children.len) (seqn
+                    (let pair = (vec-get (ref (deref ast).children) i))
+                    (let condy = (vec-get (ref (deref pair).children) 0))
+                    (let then = (vec-get (ref (deref pair).children) 1))
 
-                        (cond
-                            ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
-                                (let condy = (ast-to-ssa-helper condy ssa))
-                                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                                (vec-push args condy)
-                                (let next-cond-block = (deref (vec-get conds i)))
-                                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE) next-cond-block (deref args))
-                                (let then-block = (deref (vec-get thens (- i 1))))
-                                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) then-block (new-vec (deref args).A))
+                    (cond
+                        ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
+                            (let condy = (ast-to-ssa-helper condy ssa break-block))
+                            (let args = (ref (new-vec (deref ssa).funcs.A)))
+                            (vec-push args condy)
+                            (let next-cond-block = (deref (vec-get conds i)))
+                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE) next-cond-block (deref args))
+                            (let then-block = (deref (vec-get thens (- i 1))))
+                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) then-block (new-vec (deref args).A))
 
-                                (set (deref ssa).current-block = then-block)
-                                (let then = (ast-to-ssa-helper then ssa))
-                                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                                (vec-push args then)
-                                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) last-block (deref args))
+                            (set (deref ssa).current-block = then-block)
+                            (let then = (ast-to-ssa-helper then ssa break-block))
+                            (let args = (ref (new-vec (deref ssa).funcs.A)))
+                            (vec-push args then)
+                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) last-block (deref args))
 
-                                (set (deref ssa).current-block = next-cond-block)))
-                            (:else (seqn
-                                (let else = (ast-to-ssa-helper then ssa))
-                                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                                (vec-push args else)
-                                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) last-block (deref args)))))
+                            (set (deref ssa).current-block = next-cond-block)))
+                        (:else (seqn
+                            (let else = (ast-to-ssa-helper then ssa break-block))
+                            (let args = (ref (new-vec (deref ssa).funcs.A)))
+                            (vec-push args else)
+                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) last-block (deref args)))))
 
-                        (set i = (+ i 1))))
+                    (set i = (+ i 1))))
 
-                    (set (deref ssa).current-block = last-block)
-                    (ssa-push-block-param ssa (ref (deref ast).typed))))
+                (set (deref ssa).current-block = last-block)
+                (ssa-push-block-param ssa (ref (deref ast).typed))))
 
-                ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "loop")) (seq
-                    (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
-                    (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "loop")) (seq
+                (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
+                (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
 
-                    (let loop-block = (ssa-push-block ssa))
-                    (let last-block = (ssa-push-block ssa))
+                (let loop-block = (ssa-push-block ssa))
+                (let last-block = (ssa-push-block ssa))
 
-                    (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) loop-block (new-vec (deref ssa).funcs.A))
-                    (set (deref ssa).current-block = loop-block)
+                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) loop-block (new-vec (deref ssa).funcs.A))
+                (set (deref ssa).current-block = loop-block)
 
-                    (ast-to-ssa-helper (vec-get (ref (deref ast).children) 1) ssa)
-                    (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) loop-block (new-vec (deref ssa).funcs.A))
+                (ast-to-ssa-helper (vec-get (ref (deref ast).children) 1) ssa last-block)
+                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) loop-block (new-vec (deref ssa).funcs.A))
 
-                    (set (deref ssa).current-block = last-block)
-                    (ssa-push-block-param ssa (ref (deref ast).typed))))
+                (set (deref ssa).current-block = last-block)
+                (ssa-push-block-param ssa (ref (deref ast).typed))))
 
-                (:else (seq
-                    (eprint "todo: unsupported ast for lowering S expression to ssa\n")
-                    (exit 1)
-                    (inst SsaValue
-                        (index 0)
-                        (type (inst SsaType
-                            (data 0)))))))))
-        (:else (seq
-            (eprint "todo: unsupported ast node ")
-            (eprint-int (deref ast).type)
-            (eprint " for lowering to ssa\n")
-            (exit 1)
-            (inst SsaValue
-                (index 0)
-                (type (inst SsaType
-                    (data 0))))))))
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "break")) (seq
+                (let v = (cond
+                    ((== (deref ast).children.len 1)
+                        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ssa).funcs.A)))
+                    (:else
+                        (ast-to-ssa-helper (vec-get (ref (deref ast).children) 1) ssa break-block))))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args v)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_JUMP) break-block (deref args))
+                (set (deref ssa).current-block = (ssa-push-block ssa))
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ssa).funcs.A))))
+
+            (:else (seq
+                (eprint "todo: unsupported ast for lowering S expression to ssa\n")
+                (exit 1)
+                (inst SsaValue
+                    (index 0)
+                    (type (inst SsaType
+                        (data 0)))))))))
+    (:else (seq
+        (eprint "todo: unsupported ast node ")
+        (eprint-int (deref ast).type)
+        (eprint " for lowering to ssa\n")
+        (exit 1)
+        (inst SsaValue
+            (index 0)
+            (type (inst SsaType
+                (data 0))))))))
 
 (defun ast-to-ssa (ast (* mut Ast)) (struct-map (* mut (Vec (Pair (@ mut u8) Struct)))) : Ssa (seq
     (let ssa = (ref (inst Ssa
@@ -3660,7 +3680,7 @@
                 // TODO: arguments
 
                 (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-                (let ret-value = (ast-to-ssa-helper body ssa))
+                (let ret-value = (ast-to-ssa-helper body ssa 0))
                 (let ret-args = (ref (new-vec (deref ssa).funcs.A)))
                 (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
                 (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
