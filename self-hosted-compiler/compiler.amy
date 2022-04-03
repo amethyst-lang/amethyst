@@ -3586,6 +3586,22 @@
                     (set (deref ssa).current-block = last-block)
                     (ssa-push-block-param ssa (ref (deref ast).typed))))
 
+                ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "loop")) (seq
+                    (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
+                    (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
+
+                    (let loop-block = (ssa-push-block ssa))
+                    (let last-block = (ssa-push-block ssa))
+
+                    (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) loop-block (new-vec (deref ssa).funcs.A))
+                    (set (deref ssa).current-block = loop-block)
+
+                    (ast-to-ssa-helper (vec-get (ref (deref ast).children) 1) ssa)
+                    (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) loop-block (new-vec (deref ssa).funcs.A))
+
+                    (set (deref ssa).current-block = last-block)
+                    (ssa-push-block-param ssa (ref (deref ast).typed))))
+
                 (:else (seq
                     (eprint "todo: unsupported ast for lowering S expression to ssa\n")
                     (exit 1)
