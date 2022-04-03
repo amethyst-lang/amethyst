@@ -3,6 +3,7 @@
  - Algebraic data types
  - Typeclasses
  - Standard library
+ - Steal stuff from APL
  - Compile time reference counting
  - Mutability/immutability distinction
  - Less parenthetical syntax
