@@ -3892,20 +3892,6 @@
         (set i = (+ i 1))))
     (print "}\n")))
 
-/*
-(defstruct RegAllocGraphNode
-    (ssa-index u64)
-    (usages u64)
-    (register i64)
-    (last-usage-index u64)
-    (temporary-usages u64)
-    (temporarily-removed u1))
-
-(defstruct RegAllocGraph
-    (nodes (Vec RegAllocGraphNode))
-    (edges (Vec (Pair u64 u64))))
-*/
-
 (defun reg-alloc
     (graph (* mut RegAllocGraph))
     (reg-count u64)
