@@ -3847,7 +3847,6 @@
                             (vec-push edges edge)))
                     (set l = (+ l 1))))
                 (set k = (+ k 1))))
-
             (set j = (+ j 1))))
         (set i = (+ i 1))))
     (inst RegAllocGraph
@@ -3972,7 +3971,26 @@
 // ==================================================================================================
 //
 
-(defun emit-assembly-x64 (ssa (* mut Ssa)) (filename (@ mut u8)) (seqn
+(defun register-x86
+    (reg-index u64)
+    : (@ mut u8)
+(cond
+    ((== reg-index 0)
+        "rax")
+    ((== reg-index 1)
+        "rbx")
+    ((== reg-index 2)
+        "rcx")
+    ((== reg-index 3)
+        "rdx")
+    (:else
+        "UNKNOWN")))
+
+(defun emit-assembly-x64
+    (ssa (* mut Ssa))
+    (filename (@ mut u8))
+    (graph (* mut RegAllocGraph))
+(seqn
     (let file = (file-open filename (| (FILE_OPEN_FLAG_WRITE_ONLY) (| (FILE_OPEN_FLAG_CREATE) (FILE_OPEN_FLAG_TRUNCATE)))))
     (let i = 0)
     (while (< i (deref ssa).funcs.len) (seqn
@@ -3993,11 +4011,20 @@
                 (let instruction = (vec-get (ref (deref block).insts) k))
                 (cond
                     ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT)) (seqn
-                        (file-write file "    mov rax, ")
+                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
+                        (let register = (deref node).register)
+                        (file-write file "    mov ")
+                        (file-write file (register-x86 register))
+                        (file-write file ", ")
                         (file-write-int file (deref instruction).metadata)
                         (file-write file "\n")))
-                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_RETURN))
-                        (file-write file "    mov rsp, rbp\n    pop rbp\n    ret\n"))
+                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_RETURN)) (seqn
+                        (file-write file "    mov rax, ")
+                        (let arg = (vec-get (ref (deref instruction).arguments) 0))
+                        (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
+                        (let register = (deref node).register)
+                        (file-write file (register-x86 register))
+                        (file-write file "\n    mov rsp, rbp\n    pop rbp\n    ret\n")))
                     ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE)) (seqn
                         (file-write file "    test rax, rax\n    jz .L")
                         (file-write-int file (deref instruction).metadata)
@@ -4006,6 +4033,22 @@
                         (file-write file "    jmp .L")
                         (file-write-int file (deref instruction).metadata)
                         (file-write file "\n")))
+                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_ADD)) (seqn
+                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
+                        (let register = (deref node).register)
+                        (file-write file "    lea ")
+                        (file-write file (register-x86 register))
+                        (file-write file ", [")
+                        (let arg = (vec-get (ref (deref instruction).arguments) 0))
+                        (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
+                        (let register = (deref node).register)
+                        (file-write file (register-x86 register))
+                        (file-write file "+")
+                        (let arg = (vec-get (ref (deref instruction).arguments) 1))
+                        (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
+                        (let register = (deref node).register)
+                        (file-write file (register-x86 register))
+                        (file-write file "]\n")))
                     (:else (seqn
                         (file-write file "    ; unknown ssa instruction ")
                         (file-write-int file (deref instruction).opcode)
@@ -4062,7 +4105,7 @@
             (let graph = (ref (reg-alloc-create-graph-from-ssa ssa)))
             (reg-alloc graph 4)
             (print-reg-alloc-graph graph)
-            (emit-assembly-x64 ssa "a.s")
+            (emit-assembly-x64 ssa "a.s" graph)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (print-parse-error contents-ref (ref result.fail))))
