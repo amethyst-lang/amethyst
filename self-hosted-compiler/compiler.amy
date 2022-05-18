@@ -3349,7 +3349,9 @@
 (defmacro SSA_INSTRUCTION_OPCODE_RETURN         1)
 (defmacro SSA_INSTRUCTION_OPCODE_JUMP           2)
 (defmacro SSA_INSTRUCTION_OPCODE_BRANCH_FALSE   3)
-(defmacro SSA_INSTRUCTION_OPCODE_ADD            4)
+(defmacro SSA_INSTRUCTION_OPCODE_OPERATION      4)
+
+(defmacro SSA_OPERATION_METADATA_ADD            0)
 
 (defstruct SsaInstruction
     (returned SsaValue)
@@ -3631,7 +3633,7 @@
                 (let args = (ref (new-vec (deref ssa).funcs.A)))
                 (vec-push args a)
                 (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_ADD) 0 (deref args))))
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_ADD) (deref args))))
 
             (:else (seq
                 (eprint "todo: unsupported ast for lowering S expression to ssa\n")
@@ -3735,7 +3737,7 @@
             (print "branch-false b")
             (print-int (deref instruction).metadata)))
 
-        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_ADD))
+        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION))
             (print "add"))
 
         (:else (seqn
@@ -3990,6 +3992,7 @@
     ((== reg-index 3)
         "rdx")
     (:else
+        // TODO: spilled registers
         "UNKNOWN")))
 
 (defun emit-assembly-x64
@@ -4062,7 +4065,7 @@
                         (file-write file "    jmp .L")
                         (file-write-int file (deref instruction).metadata)
                         (file-write file "\n")))
-                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_ADD)) (seqn
+                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_ADD))) (seqn
                         (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
                         (let register = (deref node).register)
                         (file-write file "    lea ")
@@ -4081,6 +4084,8 @@
                     (:else (seqn
                         (file-write file "    ; unknown ssa instruction ")
                         (file-write-int file (deref instruction).opcode)
+                        (file-write file ":")
+                        (file-write-int file (deref instruction).metadata)
                         (file-write file "\n"))))
                 (set k = (+ k 1))))
             (set j = (+ j 1))))
