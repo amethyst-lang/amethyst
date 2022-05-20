@@ -3345,13 +3345,29 @@
     (index u64)
     (type SsaType))
 
-(defmacro SSA_INSTRUCTION_OPCODE_INT            0)
-(defmacro SSA_INSTRUCTION_OPCODE_RETURN         1)
-(defmacro SSA_INSTRUCTION_OPCODE_JUMP           2)
-(defmacro SSA_INSTRUCTION_OPCODE_BRANCH_FALSE   3)
-(defmacro SSA_INSTRUCTION_OPCODE_OPERATION      4)
+(defmacro SSA_INSTRUCTION_OPCODE_INT                0)
+(defmacro SSA_INSTRUCTION_OPCODE_RETURN             1)
+(defmacro SSA_INSTRUCTION_OPCODE_JUMP               2)
+(defmacro SSA_INSTRUCTION_OPCODE_BRANCH_FALSE       3)
+(defmacro SSA_INSTRUCTION_OPCODE_INT_OPERATION      4)
+(defmacro SSA_INSTRUCTION_OPCODE_FLOAT_OPERATION    5)
 
-(defmacro SSA_OPERATION_METADATA_ADD            0)
+(defmacro SSA_OPERATION_METADATA_MUL                0)
+(defmacro SSA_OPERATION_METADATA_DIV                1)
+(defmacro SSA_OPERATION_METADATA_MOD                2)
+(defmacro SSA_OPERATION_METADATA_ADD                3)
+(defmacro SSA_OPERATION_METADATA_SUB                4)
+(defmacro SSA_OPERATION_METADATA_BSL                5)
+(defmacro SSA_OPERATION_METADATA_BSR                6)
+(defmacro SSA_OPERATION_METADATA_BAND               7)
+(defmacro SSA_OPERATION_METADATA_BOR                8)
+(defmacro SSA_OPERATION_METADATA_BXOR               9)
+(defmacro SSA_OPERATION_METADATA_GT                10)
+(defmacro SSA_OPERATION_METADATA_GTE               11)
+(defmacro SSA_OPERATION_METADATA_LT                12)
+(defmacro SSA_OPERATION_METADATA_LTE               13)
+(defmacro SSA_OPERATION_METADATA_EQ                14)
+(defmacro SSA_OPERATION_METADATA_NE                15)
 
 (defstruct SsaInstruction
     (returned SsaValue)
@@ -3784,6 +3800,36 @@
                 (set (deref ssa).current-block = (ssa-push-block ssa))
                 (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ssa).funcs.A))))
 
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "*")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_MUL) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "/")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_DIV) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "%")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_MOD) (deref args))))
+
             ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "+")) (seq
                 (let a = (vec-get (ref (deref ast).children) 1))
                 (let b = (vec-get (ref (deref ast).children) 2))
@@ -3793,6 +3839,126 @@
                 (vec-push args a)
                 (vec-push args b)
                 (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_ADD) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "-")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_SUB) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "<<")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_BSL) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value ">>")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_BSR) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "&")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_BAND) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "|")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_BOR) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "^")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_BXOR) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value ">")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_GT) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value ">=")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_GTE) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "<")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_LT) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "<=")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_LTE) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "==")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_EQ) (deref args))))
+
+            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "!=")) (seq
+                (let a = (vec-get (ref (deref ast).children) 1))
+                (let b = (vec-get (ref (deref ast).children) 2))
+                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map))
+                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map))
+                (let args = (ref (new-vec (deref ssa).funcs.A)))
+                (vec-push args a)
+                (vec-push args b)
+                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_OPERATION) (SSA_OPERATION_METADATA_NE) (deref args))))
 
             ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "let")) (seq
                 (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
@@ -3933,8 +4099,53 @@
             (print "branch-false b")
             (print-int (deref instruction).metadata)))
 
-        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION))
-            (print "add"))
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_MUL)))
+            (print "imul"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_DIV)))
+            (print "idiv"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_MOD)))
+            (print "mod"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_ADD)))
+            (print "iadd"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_SUB)))
+            (print "isub"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BSL)))
+            (print "bsl"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BSR)))
+            (print "bsr"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BAND)))
+            (print "band"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BOR)))
+            (print "bor"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BXOR)))
+            (print "bxor"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_GT)))
+            (print "igt"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_GTE)))
+            (print "igte"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_LT)))
+            (print "ilt"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_LTE)))
+            (print "ilte"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_EQ)))
+            (print "ieq"))
+
+        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_NE)))
+            (print "ineq"))
 
         (:else (seqn
             (print "UNKNOWN ")
@@ -4338,7 +4549,9 @@
             (emit-assembly-x64 ssa "a.s" graph)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
-        (:else (print-parse-error contents-ref (ref result.fail))))
+        (:else (seqn
+            (print-parse-error contents-ref (ref result.fail))
+            (exit 1))))
         (lexer-drop lexer)
         (vec-drop (ref contents) empty-dealloc)))
 
