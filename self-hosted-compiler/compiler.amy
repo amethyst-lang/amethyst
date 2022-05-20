@@ -3439,10 +3439,11 @@
 (defun ssa-push-block-param
     (ssa (* mut Ssa))
     (type (* mut Type))
+    (block u64)
     : SsaValue
 (seq
     (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
-    (let block = (vec-get (ref (deref func).b.blocks) (deref ssa).current-block))
+    (let block = (vec-get (ref (deref func).b.blocks) block))
     (let value = (ssa-push-value ssa type))
     (let block-params = (ref (deref block).parameters))
     (vec-push block-params value)
@@ -3496,6 +3497,74 @@
         (set i = (+ i 1)))
     :else n)))
 
+(defun push-var-map-to-basic-block
+    (ssa (* mut Ssa))
+    (block u64)
+    (var-map (* mut (Vec (Vec (Pair (@ mut u8) (Pair u64 SsaType))))))
+(seqn
+    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
+    (let blocks = (ref (deref func).b.blocks))
+    (let block = (vec-get blocks block))
+    (let parameters = (ref (deref block).parameters))
+
+    (let i = 0)
+    (while (< i (deref var-map).len) (seqn
+        (let scope = (vec-get var-map i))
+        (let j = 0)
+        (while (< j (deref scope).len) (seqn
+            (let var = (vec-get scope j))
+            (let type = (deref var).b.b)
+            (let value = (inst SsaValue
+                (index (deref func).b.last-value)
+                (type type)))
+            (set (deref func).b.last-value = (+ (deref func).b.last-value 1))
+            (vec-push parameters value)
+            (set j = (+ j 1))))
+        (set i = (+ i 1))))
+
+    (set (deref block).parameters = (deref parameters))))
+
+(defun push-var-map-to-instr-args
+    (arguments (* mut (Vec SsaValue)))
+    (var-map (* mut (Vec (Vec (Pair (@ mut u8) (Pair u64 SsaType))))))
+(seqn
+    (let i = 0)
+    (while (< i (deref var-map).len) (seqn
+        (let scope = (vec-get var-map i))
+        (let j = 0)
+        (while (< j (deref scope).len) (seqn
+            (let var = (vec-get scope j))
+            (let index = (deref var).b.a)
+            (let type = (deref var).b.b)
+            (let value = (inst SsaValue
+                (index index)
+                (type type)))
+            (vec-push arguments value)
+            (set j = (+ j 1))))
+        (set i = (+ i 1))))))
+
+(defun load-var-map-from-block-params
+    (ssa (* mut Ssa))
+    (offset u64)
+    (var-map (* mut (Vec (Vec (Pair (@ mut u8) (Pair u64 SsaType))))))
+(seqn
+    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
+    (let blocks = (ref (deref func).b.blocks))
+    (let block = (vec-get blocks (deref ssa).current-block))
+    (let parameters = (ref (deref block).parameters))
+    (let i = 0)
+    (while (< i (deref var-map).len) (seqn
+        (let scope = (vec-get var-map i))
+        (let j = 0)
+        (while (< j (deref scope).len) (seqn
+            (let var = (vec-get scope j))
+            (let param = (vec-get parameters offset))
+            (set (deref var).b.a = (deref param).index)
+            (set j = (+ j 1))
+            (set offset = (+ offset 1))))
+        (set i = (+ i 1))))
+    ))
+
 (defun ast-to-ssa-helper
     (ast (* mut Ast))
     (ssa (* mut Ssa))
@@ -3528,7 +3597,7 @@
     ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seq
         (let var = (deref ast).value)
         (let i = (deref var-map).len)
-        (while (< i 0) (seqn
+        (while (> i 0) (seqn
             (set i = (- i 1))
             (let scope = (vec-get var-map i))
             (cond
@@ -3591,14 +3660,19 @@
                 (while (< i (deref ast).children.len) (seqn
                     (let pair = (vec-get (ref (deref ast).children) i))
                     (let condy = (vec-get (ref (deref pair).children) 0))
-                    (let then = (vec-get (ref (deref pair).children) 1))
                     (cond
                         ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
-                            (vec-push conds (ssa-push-block ssa))
-                            (vec-push thens (ssa-push-block ssa)))))
+                            (let condy = (ssa-push-block ssa))
+                            (push-var-map-to-basic-block ssa condy var-map)
+                            (let then = (ssa-push-block ssa))
+                            (push-var-map-to-basic-block ssa then var-map)
+                            (vec-push conds condy)
+                            (vec-push thens then))))
                     (set i = (+ i 1))))
 
                 (let last-block = (ssa-push-block ssa))
+                (let cond-value = (ssa-push-block-param ssa (ref (deref ast).typed) last-block))
+                (push-var-map-to-basic-block ssa last-block var-map)
 
                 (let i = 1)
                 (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
@@ -3619,22 +3693,29 @@
                             (let condy = (ast-to-ssa-helper condy ssa break-block var-map))
                             (let args = (ref (new-vec (deref ssa).funcs.A)))
                             (vec-push args condy)
+                            (push-var-map-to-instr-args args var-map)
                             (let next-cond-block = (deref (vec-get conds i)))
                             (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE) next-cond-block (deref args))
                             (let then-block = (deref (vec-get thens (- i 1))))
-                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) then-block (new-vec (deref args).A))
+                            (let args = (ref (new-vec (deref args).A)))
+                            (push-var-map-to-instr-args args var-map)
+                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) then-block (deref args))
 
                             (set (deref ssa).current-block = then-block)
+                            (load-var-map-from-block-params ssa 0 var-map)
                             (let then = (ast-to-ssa-helper then ssa break-block var-map))
                             (let args = (ref (new-vec (deref ssa).funcs.A)))
                             (vec-push args then)
+                            (push-var-map-to-instr-args args var-map)
                             (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) last-block (deref args))
 
-                            (set (deref ssa).current-block = next-cond-block)))
+                            (set (deref ssa).current-block = next-cond-block)
+                            (load-var-map-from-block-params ssa 0 var-map)))
                         (:else (seqn
                             (let else = (ast-to-ssa-helper then ssa break-block var-map))
                             (let args = (ref (new-vec (deref ssa).funcs.A)))
                             (vec-push args else)
+                            (push-var-map-to-instr-args args var-map)
                             (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) last-block (deref args)))))
                     (cond
                         (must-pop (seqn
@@ -3643,7 +3724,8 @@
                     (set i = (+ i 1))))
 
                 (set (deref ssa).current-block = last-block)
-                (ssa-push-block-param ssa (ref (deref ast).typed))))
+                (load-var-map-from-block-params ssa 1 var-map)
+                cond-value))
 
             ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "loop")) (seq
                 (let must-pop = (cond
@@ -3670,7 +3752,7 @@
                     (must-pop (seqn
                         (vec-pop var-map))))
 
-                (ssa-push-block-param ssa (ref (deref ast).typed))))
+                (ssa-push-block-param ssa (ref (deref ast).typed) (deref ssa).current-block)))
 
             ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "break")) (seq
                 (let v = (cond
@@ -3717,13 +3799,12 @@
                 (let var = (deref (vec-get (ref (deref ast).children) 1)).value)
                 (let value = (ast-to-ssa-helper body ssa break-block var-map))
                 (let i = (deref var-map).len)
-                (while (< i 0) (seqn
+                (while (> i 0) (seqn
                     (set i = (- i 1))
                     (let scope = (vec-get var-map i))
                     (cond
                         ((: u64 (cast (let var = (vec-find scope matches-key var)))) (seqn
                             (set (deref var).b.a = value.index)
-                            (set (deref var).b.b = value.type)
                             (break))))))
                 value))
 
