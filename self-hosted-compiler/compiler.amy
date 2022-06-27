@@ -4167,18 +4167,19 @@
 
 (defstruct RegAllocGraphNode
     (ssa-index u64)
-    (usages u64)
+    (edge-count u64)
     (register u64)
     (on-stack u1)
-    (last-usage-index u64)
-    (temporary-usages u64)
+    (first-usage u64)
+    (last-usage u64)
+    (temporary-edge-count u64)
     (temporarily-removed u1))
 
 (defstruct RegAllocGraph
     (nodes (Vec RegAllocGraphNode))
     (edges (Vec (Pair u64 u64))))
 
-(defun reg-alloc-create-graph-from-ssa
+(defun create-reg-alloc-graph-from-ssa
     (ssa (* mut Ssa))
     : RegAllocGraph
 (seq
@@ -4189,51 +4190,65 @@
     (while (< i (deref func).last-value) (seqn
         (vec-push nodes (inst RegAllocGraphNode
             (ssa-index i)
-            (usages 0)
+            (edge-count 0)
             (register (- 0 1))
             (on-stack false)
-            (last-usage-index 0)
-            (temporary-usages 0)
+            (first-usage 0)
+            (last-usage 0)
+            (temporary-edge-count 0)
             (temporarily-removed false)))
         (set i = (+ i 1))))
+
     (let i = 0)
+    (let index = 0)
     (while (< i (deref func).blocks.len) (seqn
         (let block = (vec-get (ref (deref func).blocks) i))
         (let j = 0)
+
+        (while (< j (deref block).parameters.len) (seqn
+            (let param = (vec-get (ref (deref block).parameters) j))
+            (let node = (vec-get nodes (deref param).index))
+            (set (deref node).first-usage = index)
+            (cond
+                ((== (deref node).last-usage 0) (seqn
+                    (set (deref node).last-usage = index))))
+            (set j = (+ j 1))))
+
+        (set index = (+ index 1))
+        (let j = 0)
         (while (< j (deref block).insts.len) (seqn
-            (let instruction = (vec-get (ref (deref block).insts) j))
-            (let node = (vec-get nodes (deref instruction).returned.index))
-            (set (deref node).usages = (deref instruction).arguments.len)
-            (set (deref node).last-usage-index = (deref instruction).returned.index)
+            (let instr = (vec-get (ref (deref block).insts) j))
+            (let node = (vec-get nodes (deref instr).returned.index))
+            (set (deref node).first-usage = index)
+            (set (deref node).last-usage = index)
+
             (let k = 0)
-            (while (< k (deref instruction).arguments.len) (seqn
-                (let arg = (vec-get (ref (deref instruction).arguments) k))
-                (let index = (deref arg).index)
-                (let node = (vec-get nodes index))
-                (set (deref node).usages = (+ (deref node).usages 1))
-                (set (deref node).last-usage-index = (deref instruction).returned.index)
-                (vec-push edges (inst Pair
-                    (a index)
-                    (b (deref instruction).returned.index)))
+            (while (< k (deref instr).arguments.len) (seqn
+                (let arg = (vec-get (ref (deref instr).arguments) k))
+                (let node = (vec-get nodes (deref arg).index))
+                (set (deref node).last-usage = index)
                 (set k = (+ k 1))))
-            (let k = 0)
-            (while (< k (deref instruction).arguments.len) (seqn
-                (let arg = (vec-get (ref (deref instruction).arguments) k))
-                (let index-1 = (deref arg).index)
-                (let l = (+ k 1))
-                (while (< l (deref instruction).arguments.len) (seqn
-                    (let arg = (vec-get (ref (deref instruction).arguments) l))
-                    (let index-2 = (deref arg).index)
-                    (let edge = (inst Pair
-                        (a index-1)
-                        (b index-2)))
-                    (cond
-                        ((not (: u64 (cast (vec-find edges matches-edge edge))))
-                            (vec-push edges edge)))
-                    (set l = (+ l 1))))
-                (set k = (+ k 1))))
+
+            (set index = (+ index 1))
             (set j = (+ j 1))))
         (set i = (+ i 1))))
+
+    (let i = 0)
+    (while (< i (deref nodes).len) (seqn
+        (let n1 = (vec-get nodes i))
+        (let j = (+ i 1))
+        (while (< j (deref nodes).len) (seqn
+            (let n2 = (vec-get nodes j))
+            (cond
+                ((and (<= (deref n1).first-usage (deref n2).last-usage) (>= (deref n1).last-usage (deref n2).first-usage)) (seqn
+                    (set (deref n1).edge-count = (+ (deref n1).edge-count 1))
+                    (set (deref n2).edge-count = (+ (deref n2).edge-count 1))
+                    (vec-push edges (inst Pair
+                        (a (deref n1).ssa-index)
+                        (b (deref n2).ssa-index))))))
+            (set j = (+ j 1))))
+        (set i = (+ i 1))))
+
     (inst RegAllocGraph
         (edges (deref edges))
         (nodes (deref nodes)))))
@@ -4283,20 +4298,20 @@
     (let i = 0)
     (while (< i (deref graph).nodes.len) (seqn
         (let node = (vec-get (ref (deref graph).nodes) i))
-        (set (deref node).temporary-usages = (deref node).usages)
+        (set (deref node).temporary-edge-count = (deref node).edge-count)
         (set i = (+ i 1))))
     (let stack = (ref (new-vec (deref graph).nodes.A)))
     (let i = 0)
     (while (< i (deref graph).nodes.len) (seqn
         (let j = 0)
-        (let usages = (- 0 1))
+        (let edge-count = (- 0 1))
         (let index = (- 0 1))
         (while (< j (deref graph).nodes.len) (seqn
             (let node = (vec-get (ref (deref graph).nodes) j))
             (cond
-                ((and (not (deref node).temporarily-removed) (< (deref node).temporary-usages usages)) (seqn
+                ((and (not (deref node).temporarily-removed) (< (deref node).temporary-edge-count edge-count)) (seqn
                     (set index = j)
-                    (set usages = (deref node).temporary-usages))))
+                    (set edge-count = (deref node).temporary-edge-count))))
             (set j = (+ j 1))))
         (let node = (vec-get (ref (deref graph).nodes) index))
         (set (deref node).temporarily-removed = true)
@@ -4307,10 +4322,10 @@
             (cond
                 ((== (deref edge).a index) (seqn
                     (let node = (vec-get (ref (deref graph).nodes) (deref edge).b))
-                    (set (deref node).temporary-usages = (- (deref node).temporary-usages 1))))
+                    (set (deref node).temporary-edge-count = (- (deref node).temporary-edge-count 1))))
                 ((== (deref edge).b index) (seqn
                     (let node = (vec-get (ref (deref graph).nodes) (deref edge).a))
-                    (set (deref node).temporary-usages = (- (deref node).temporary-usages 1)))))
+                    (set (deref node).temporary-edge-count = (- (deref node).temporary-edge-count 1)))))
             (set j = (+ j 1))))
         (set i = (+ i 1))))
         (let temp-vec = (ref (new-vec (deref graph).nodes.A)))
@@ -4513,7 +4528,7 @@
             (print-type-errors contents-ref errors)
             (let ssa = (ref (ast-to-ssa ast struct-map)))
             (print-ssa ssa)
-            (let graph = (ref (reg-alloc-create-graph-from-ssa ssa)))
+            (let graph = (ref (create-reg-alloc-graph-from-ssa ssa)))
             (reg-alloc graph 4)
             (print-reg-alloc-graph graph)
             (emit-assembly-x64 ssa "a.s" graph)
