@@ -4503,6 +4503,8 @@
         (:else
             (file-write file "UNKNOWN"))))))
 
+(defmacro X86_TEMPORARY_REGISTER "rsi")
+
 (defun emit-assembly-x64
     (ssa (* mut Ssa))
     (filename (@ mut u8))
@@ -4561,6 +4563,42 @@
                         (file-write file "    jmp .L")
                         (file-write-int file (deref instruction).metadata)
                         (file-write file "\n")))
+                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_MUL))) (seqn
+                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
+                        (cond
+                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
+                                (let dest-reg = (deref node).register)
+                                (let dest-on-stack = (deref node).on-stack)
+                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
+                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
+                                (let source-reg-1 = (deref node).register)
+                                (let source-on-stack-1 = (deref node).on-stack)
+                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
+                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
+                                (let source-reg-2 = (deref node).register)
+                                (let source-on-stack-2 = (deref node).on-stack)
+
+                                (cond
+                                    ((== dest-reg source-reg-1) (seqn
+                                        (file-write file "    imul ")
+                                        (register-x86 file dest-on-stack dest-reg)
+                                        (file-write file ", ")
+                                        (register-x86 file source-on-stack-2 source-reg-2)))
+                                    ((== dest-reg source-reg-2) (seqn
+                                        (file-write file "    imul ")
+                                        (register-x86 file dest-on-stack dest-reg)
+                                        (file-write file ", ")
+                                        (register-x86 file source-on-stack-1 source-reg-1)))
+                                    (:else (seqn
+                                        (file-write file "    mov ")
+                                        (register-x86 file dest-on-stack dest-reg)
+                                        (file-write file ", ")
+                                        (register-x86 file source-on-stack-1 source-reg-1)
+                                        (file-write file "\n    imul ")
+                                        (register-x86 file dest-on-stack dest-reg)
+                                        (file-write file ", ")
+                                        (register-x86 file source-on-stack-2 source-reg-2))))
+                                (file-write file "\n"))))))
                     ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_ADD))) (seqn
                         (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
                         (cond
@@ -4593,6 +4631,50 @@
                                         (file-write file ", ")
                                         (register-x86 file source-on-stack-1 source-reg-1)
                                         (file-write file "\n    add ")
+                                        (register-x86 file dest-on-stack dest-reg)
+                                        (file-write file ", ")
+                                        (register-x86 file source-on-stack-2 source-reg-2))))
+                                (file-write file "\n"))))))
+                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_SUB))) (seqn
+                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
+                        (cond
+                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
+                                (let dest-reg = (deref node).register)
+                                (let dest-on-stack = (deref node).on-stack)
+                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
+                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
+                                (let source-reg-1 = (deref node).register)
+                                (let source-on-stack-1 = (deref node).on-stack)
+                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
+                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
+                                (let source-reg-2 = (deref node).register)
+                                (let source-on-stack-2 = (deref node).on-stack)
+
+                                (cond
+                                    ((== dest-reg source-reg-1) (seqn
+                                        (file-write file "    sub ")
+                                        (register-x86 file dest-on-stack dest-reg)
+                                        (file-write file ", ")
+                                        (register-x86 file source-on-stack-2 source-reg-2)))
+                                    ((== dest-reg source-reg-2) (seqn
+                                        (file-write file "    mov ")
+                                        (file-write file (X86_TEMPORARY_REGISTER))
+                                        (file-write file ", ")
+                                        (register-x86 file source-on-stack-1 source-reg-1)
+                                        (file-write file "\n    sub ")
+                                        (file-write file (X86_TEMPORARY_REGISTER))
+                                        (file-write file ", ")
+                                        (register-x86 file source-on-stack-2 source-reg-2)
+                                        (file-write file "\n    mov ")
+                                        (register-x86 file dest-on-stack dest-reg)
+                                        (file-write file ", ")
+                                        (file-write file (X86_TEMPORARY_REGISTER))))
+                                    (:else (seqn
+                                        (file-write file "    mov ")
+                                        (register-x86 file dest-on-stack dest-reg)
+                                        (file-write file ", ")
+                                        (register-x86 file source-on-stack-1 source-reg-1)
+                                        (file-write file "\n    sub ")
                                         (register-x86 file dest-on-stack dest-reg)
                                         (file-write file ", ")
                                         (register-x86 file source-on-stack-2 source-reg-2))))
