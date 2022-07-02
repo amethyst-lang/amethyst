@@ -4649,6 +4649,22 @@
                                                 (break))))
                                         (set j = (+ j 1)))
                                     :else (vec-push transforms pair))
+                                    (let j = 1)
+                                    (while (< j (deref transforms).len) (seqn
+                                        (let a = (deref (vec-get transforms (- j 1))))
+                                        (let b = (vec-get transforms j))
+                                        (cond
+                                            ((and (and (== a.a.a (deref b).b.a) (== a.a.b (deref b).b.b)) (and (== a.b.a (deref b).a.a) (== a.b.b (deref b).a.b))) (seqn
+                                                (let xchg = (vec-get should-xchg (- j 1)))
+                                                (set (deref xchg) = true)
+                                                (set (deref b) = (inst Pair
+                                                    (a (inst Pair
+                                                        (a false)
+                                                        (b 0)))
+                                                    (b (inst Pair
+                                                        (a false)
+                                                        (b 0))))))))
+                                        (set j = (+ j 1))))
                                     (set i = (+ i 1))))
                                 (let i = 0)
                                 (while (< i (deref transforms).len) (seqn
