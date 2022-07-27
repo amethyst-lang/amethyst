@@ -4386,6 +4386,23 @@
                         ())
                     ((or (== (deref instr).opcode (SSA_INSTRUCTION_OPCODE_JUMP)) (and (>= k 1) (== (deref instr).opcode (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE))))
                         (break)))
+
+                (cond
+                    ((and (== (deref instr).opcode (SSA_INSTRUCTION_OPCODE_CALL)) (< k arg-reg-count)) (seqn
+                        (let new-node = (inst RegAllocGraphNode
+                            (ssa-index (deref nodes).len)
+                            (edge-count 0)
+                            (register k)
+                            (on-stack false)
+                            (is-argument true)
+                            (first-usage index-counter)
+                            (last-usage (+ index-counter 1))
+                            (usage-count 1)
+                            (pinned true)
+                            (temporary-edge-count 0)
+                            (temporarily-removed false)))
+                        (vec-push nodes new-node))))
+
                 (let arg = (vec-get (ref (deref instr).arguments) k))
                 (let index = (deref arg).index)
                 (let node = (vec-get nodes index))
@@ -4697,6 +4714,26 @@
             (file-write file "r14"))
         (:else
             (file-write file "UNKNOWN"))))))
+
+(defun argument-x86
+    (file File)
+    (arg-number u64)
+(cond
+    ((== arg-number 0)
+        (file-write file "rdi"))
+    ((== arg-number 1)
+        (file-write file "rsi"))
+    ((== arg-number 2)
+        (file-write file "rdx"))
+    ((== arg-number 3)
+        (file-write file "rcx"))
+    ((== arg-number 4)
+        (file-write file "r8"))
+    ((== arg-number 5)
+        (file-write file "r9"))
+    (:else
+        (file-write file "UNKNOWN"))))
+
 
 (defmacro X86_TEMPORARY_REGISTER "r15")
 (defmacro X86_REGISTER_COUNT 13)
@@ -5358,6 +5395,25 @@
                                 (file-write file ", ")
                                 (file-write file (X86_TEMPORARY_REGISTER))
                                 (file-write file "\n"))))))
+
+                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_CALL)) (seqn
+                        (let i = 0)
+                        (while (< i (deref instruction).arguments.len) (seqn
+                            (let arg = (vec-get (ref (deref instruction).arguments) i))
+                            (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
+                            (file-write file "    mov ")
+                            (argument-x86 file i)
+                            (file-write file ", ")
+                            (register-x86 file (deref node).on-stack (deref node).register)
+                            (file-write file "\n")
+                            (set i = (+ i 1))))
+                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
+                        (file-write file "    call ")
+                        (file-write file (vec-slice (ref (deref (vec-get (ref (deref ssa).funcs) (deref instruction).metadata)).a)))
+                        (file-write file "\n")
+                        (file-write file "    mov ")
+                        (register-x86 file (deref node).on-stack (deref node).register)
+                        (file-write file ", rax\n")))
 
                     (:else (seqn
                         (file-write file "    TODO unknown ssa instruction ")
