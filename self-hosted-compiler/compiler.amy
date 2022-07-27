@@ -4288,9 +4288,11 @@
     (edge-count u64)
     (register u64)
     (on-stack u1)
+    (is-argument u1)
     (first-usage u64)
     (last-usage u64)
     (usage-count u64)
+    (pinned u1)
     (temporary-edge-count u64)
     (temporarily-removed u1))
 
@@ -4299,10 +4301,10 @@
     (edges (Vec (Pair u64 u64))))
 
 (defun create-reg-alloc-graph-from-ssa
-    (ssa (* mut Ssa))
+    (func (* mut SsaFunction))
+    (arg-reg-count u64)
     : RegAllocGraph
 (seq
-    (let func = (ref (deref (vec-get (ref (deref ssa).funcs) 0)).b)) // TODO: per function
     (let nodes = (ref (new-vec (deref func).blocks.A)))
     (let edges = (ref (new-vec (deref func).blocks.A)))
     (let i = 0)
@@ -4312,9 +4314,11 @@
             (edge-count 0)
             (register (- 0 1))
             (on-stack false)
+            (is-argument false)
             (first-usage 0)
             (last-usage 0)
             (usage-count 0)
+            (pinned false)
             (temporary-edge-count 0)
             (temporarily-removed false)))
         (set i = (+ i 1))))
@@ -4338,6 +4342,20 @@
         (let block = (vec-get (ref (deref func).blocks) i))
 
         (cond
+            ((== i 0) (seqn
+                (let j = 0)
+                (while (< j (deref block).parameters.len) (seqn
+                    (let param = (vec-get (ref (deref block).parameters) j))
+                    (let node = (vec-get nodes (deref param).index))
+                    (set (deref node).first-usage = index-counter)
+                    (set (deref node).register = j)
+                    (set (deref node).is-argument = true)
+                    (set (deref node).pinned = true)
+                    (set (deref node).on-stack = (>= j arg-reg-count))
+                    (cond
+                        ((== (deref node).last-usage 0) (seqn
+                            (set (deref node).last-usage = index-counter))))
+                    (set j = (+ j 1))))))
             ((> (deref block).parent-count 1) (seqn
                 (let j = 0)
                 (while (< j (deref block).parameters.len) (seqn
@@ -4511,12 +4529,16 @@
 
 (defun reg-alloc
     (graph (* mut RegAllocGraph))
+    (argument-registers-to-registers (* mut (Vec u64)))
     (reg-count u64)
 (seqn
     (let i = 0)
     (while (< i (deref graph).nodes.len) (seqn
         (let node = (vec-get (ref (deref graph).nodes) i))
         (set (deref node).temporary-edge-count = (deref node).edge-count)
+        (cond
+            ((and (deref node).is-argument (not (deref node).on-stack)) (seqn
+                (set (deref node).register = (deref (vec-get argument-registers-to-registers (deref node).register))))))
         (set i = (+ i 1))))
     (let stack = (ref (new-vec (deref graph).nodes.A)))
     (let i = 0)
@@ -4528,6 +4550,8 @@
             (let node = (vec-get (ref (deref graph).nodes) j))
             (let fewer-neighbours = (< (deref node).temporary-edge-count reg-count))
             (cond
+                ((deref node).pinned
+                    ())
                 ((and (not (deref node).temporarily-removed) (or fewer-neighbours (< (deref node).usage-count usage-count))) (seqn
                     (set index = j)
                     (set usage-count = (deref node).usage-count)
@@ -4535,21 +4559,25 @@
                         (fewer-neighbours
                             (break))))))
             (set j = (+ j 1))))
-        (let node = (vec-get (ref (deref graph).nodes) index))
-        (set (deref node).temporarily-removed = true)
-        (vec-push stack index)
-        (let j = 0)
-        (while (< j (deref graph).edges.len) (seqn
-            (let edge = (vec-get (ref (deref graph).edges) j))
-            (cond
-                ((== (deref edge).a index) (seqn
-                    (let node = (vec-get (ref (deref graph).nodes) (deref edge).b))
-                    (set (deref node).temporary-edge-count = (- (deref node).temporary-edge-count 1))))
-                ((== (deref edge).b index) (seqn
-                    (let node = (vec-get (ref (deref graph).nodes) (deref edge).a))
-                    (set (deref node).temporary-edge-count = (- (deref node).temporary-edge-count 1)))))
-            (set j = (+ j 1))))
+
+        (cond
+            ((!= index (- 0 1)) (seqn
+                (let node = (vec-get (ref (deref graph).nodes) index))
+                (set (deref node).temporarily-removed = true)
+                (vec-push stack index)
+                (let j = 0)
+                (while (< j (deref graph).edges.len) (seqn
+                    (let edge = (vec-get (ref (deref graph).edges) j))
+                    (cond
+                        ((== (deref edge).a index) (seqn
+                            (let node = (vec-get (ref (deref graph).nodes) (deref edge).b))
+                            (set (deref node).temporary-edge-count = (- (deref node).temporary-edge-count 1))))
+                        ((== (deref edge).b index) (seqn
+                            (let node = (vec-get (ref (deref graph).nodes) (deref edge).a))
+                            (set (deref node).temporary-edge-count = (- (deref node).temporary-edge-count 1)))))
+                    (set j = (+ j 1)))))))
         (set i = (+ i 1))))
+
         (let temp-vec = (ref (new-vec (deref graph).nodes.A)))
         (while (deref stack).len (seqn
             (let index = (deref (vec-get stack (- (deref stack).len 1))))
@@ -4592,13 +4620,13 @@
                             (let n = (vec-get (ref (deref graph).nodes) (deref edge).b))
                             (let register = (deref n).register)
                             (cond
-                                ((and (deref n).on-stack (not (: u64 (cast (vec-find temp-vec matches-register register)))))
+                                ((and (and (deref n).on-stack (not (deref n).is-argument)) (not (: u64 (cast (vec-find temp-vec matches-register register)))))
                                     (vec-push temp-vec register)))))
                         ((== (deref edge).b index) (seqn
                             (let n = (vec-get (ref (deref graph).nodes) (deref edge).a))
                             (let register = (deref n).register)
                             (cond
-                                ((and (deref n).on-stack (not (: u64 (cast (vec-find temp-vec matches-register register)))))
+                                ((and (and (deref n).on-stack (not (deref n).is-argument)) (not (: u64 (cast (vec-find temp-vec matches-register register)))))
                                     (vec-push temp-vec register))))))
                     (set i = (+ i 1))))
                 (let i = 1)
@@ -4649,19 +4677,40 @@
             (file-write file "rcx"))
         ((== reg-index 3)
             (file-write file "rdx"))
+        ((== reg-index 4)
+            (file-write file "rsi"))
+        ((== reg-index 5)
+            (file-write file "rdi"))
+        ((== reg-index 6)
+            (file-write file "r8"))
+        ((== reg-index 7)
+            (file-write file "r9"))
+        ((== reg-index 8)
+            (file-write file "r10"))
+        ((== reg-index 9)
+            (file-write file "r11"))
+        ((== reg-index 10)
+            (file-write file "r12"))
+        ((== reg-index 11)
+            (file-write file "r13"))
+        ((== reg-index 12)
+            (file-write file "r14"))
         (:else
             (file-write file "UNKNOWN"))))))
 
-(defmacro X86_TEMPORARY_REGISTER "rsi")
+(defmacro X86_TEMPORARY_REGISTER "r15")
+(defmacro X86_REGISTER_COUNT 13)
+(defmacro X86_ARGUMENT_REGISTER_COUNT 6)
 
 (defun emit-assembly-x64
     (ssa (* mut Ssa))
     (filename (@ mut u8))
-    (graph (* mut RegAllocGraph))
+    (graphs (* mut (Vec RegAllocGraph)))
 (seqn
     (let file = (file-open filename (| (FILE_OPEN_FLAG_WRITE_ONLY) (| (FILE_OPEN_FLAG_CREATE) (FILE_OPEN_FLAG_TRUNCATE)))))
     (let i = 0)
     (while (< i (deref ssa).funcs.len) (seqn
+        (let graph = (vec-get graphs i))
         (let func = (vec-get (ref (deref ssa).funcs) i))
         (file-write file "global ")
         (file-write file (vec-slice (ref (deref func).a)))
@@ -5365,10 +5414,23 @@
             (print-type-errors contents-ref errors)
             (let ssa = (ref (ast-to-ssa ast struct-map)))
             (print-ssa ssa)
-            (let graph = (ref (create-reg-alloc-graph-from-ssa ssa)))
-            (reg-alloc graph 4)
-            (print-reg-alloc-graph graph)
-            (emit-assembly-x64 ssa "a.s" graph)
+            (let graphs = (ref (new-vec (deref errors).A)))
+            (let i = 0)
+            (let arguments-to-registers = (ref (new-vec (deref errors).A)))
+            (vec-push arguments-to-registers 5)
+            (vec-push arguments-to-registers 4)
+            (vec-push arguments-to-registers 3)
+            (vec-push arguments-to-registers 2)
+            (vec-push arguments-to-registers 6)
+            (vec-push arguments-to-registers 7)
+            (while (< i (deref ssa).funcs.len) (seqn
+                (let func = (ref (deref (vec-get (ref (deref ssa).funcs) i)).b))
+                (let graph = (ref (create-reg-alloc-graph-from-ssa func (X86_ARGUMENT_REGISTER_COUNT))))
+                (reg-alloc graph arguments-to-registers (X86_REGISTER_COUNT))
+                (print-reg-alloc-graph graph)
+                (vec-push graphs (deref graph))
+                (set i = (+ i 1))))
+            (emit-assembly-x64 ssa "a.s" graphs)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (seqn
