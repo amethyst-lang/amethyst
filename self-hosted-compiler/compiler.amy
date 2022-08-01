@@ -4753,7 +4753,9 @@
         (file-write file (vec-slice (ref (deref func).a)))
         (file-write file "\n")
         (file-write file (vec-slice (ref (deref func).a)))
-        (file-write file ":\n    push rbp\n    mov rbp, rsp\n")
+        // TODO: detect which callee saved registers are actually used
+        (file-write file ":\n    push rbp\n    mov rbp, rsp\n    push rbx\n    push r12\n    push r13\n    push r14")
+
         (let j = 0)
         (while (< j (deref func).b.blocks.len) (seqn
             (let block = (vec-get (ref (deref func).b.blocks) j))
@@ -4781,7 +4783,7 @@
                         (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
                         (let register = (deref node).register)
                         (register-x86 file (deref node).on-stack register)
-                        (file-write file "\n    mov rsp, rbp\n    pop rbp\n    ret\n")))
+                        (file-write file "\n    pop r14\n    pop r13\n    pop r12\n    pop rbx\n    mov rsp, rbp\n    pop rbp\n    ret\n")))
                     ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE)) (seqn
                         // TODO: figure out if this needs to transfer args
                         (file-write file "    test ")
@@ -5412,7 +5414,7 @@
                                 ((!= node index) (seqn
                                     (let node = (vec-get (ref (deref graph).nodes) node))
                                     (cond
-                                        ((not (deref node).on-stack) (seqn
+                                        ((and (not (deref node).on-stack) (and (!= (deref node).register 1) (< (deref node).register 10))) (seqn
                                             (file-write file "    push ")
                                             (register-x86 file (deref node).on-stack (deref node).register)
                                             (file-write file "\n")))))))
@@ -5451,7 +5453,7 @@
                                 ((!= node index) (seqn
                                     (let node = (vec-get (ref (deref graph).nodes) node))
                                     (cond
-                                        ((not (deref node).on-stack) (seqn
+                                        ((and (not (deref node).on-stack) (and (!= (deref node).register 1) (< (deref node).register 10))) (seqn
                                             (file-write file "    pop ")
                                             (register-x86 file (deref node).on-stack (deref node).register)
                                             (file-write file "\n")))))))))))
