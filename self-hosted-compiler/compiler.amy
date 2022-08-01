@@ -5397,6 +5397,27 @@
                                 (file-write file "\n"))))))
 
                     ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_CALL)) (seqn
+                        (let index = (deref instruction).returned.index)
+                        (let i = 0)
+                        (while (< i (deref graph).edges.len) (seqn
+                            (let edge = (deref (vec-get (ref (deref graph).edges) i)))
+                            (let node = (cond
+                                ((== edge.a index)
+                                    edge.b)
+                                ((== edge.b index)
+                                    edge.a)
+                                (:else
+                                    index)))
+                            (cond
+                                ((!= node index) (seqn
+                                    (let node = (vec-get (ref (deref graph).nodes) node))
+                                    (cond
+                                        ((not (deref node).on-stack) (seqn
+                                            (file-write file "    push ")
+                                            (register-x86 file (deref node).on-stack (deref node).register)
+                                            (file-write file "\n")))))))
+                            (set i = (+ i 1))))
+
                         (let i = 0)
                         (while (< i (deref instruction).arguments.len) (seqn
                             (let arg = (vec-get (ref (deref instruction).arguments) i))
@@ -5413,7 +5434,27 @@
                         (file-write file "\n")
                         (file-write file "    mov ")
                         (register-x86 file (deref node).on-stack (deref node).register)
-                        (file-write file ", rax\n")))
+                        (file-write file ", rax\n")
+
+                        (let i = (deref graph).edges.len)
+                        (while (> i 0) (seqn
+                            (set i = (- i 1))
+                            (let edge = (deref (vec-get (ref (deref graph).edges) i)))
+                            (let node = (cond
+                                ((== edge.a index)
+                                    edge.b)
+                                ((== edge.b index)
+                                    edge.a)
+                                (:else
+                                    index)))
+                            (cond
+                                ((!= node index) (seqn
+                                    (let node = (vec-get (ref (deref graph).nodes) node))
+                                    (cond
+                                        ((not (deref node).on-stack) (seqn
+                                            (file-write file "    pop ")
+                                            (register-x86 file (deref node).on-stack (deref node).register)
+                                            (file-write file "\n")))))))))))
 
                     (:else (seqn
                         (file-write file "    TODO unknown ssa instruction ")
