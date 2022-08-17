@@ -3457,6 +3457,9 @@
             (let field-count = 1)
             (inst SsaType
                 (data (| (<< alignment 60) (| (<< signed 59) (| (<< field-count 43) width)))))))
+        ((== (deref type).type (TYPE_TYPE_FUNCTION))
+            (inst SsaType
+                (data (| (<< 3 60) (| (<< 0 59) (| (<< 1 43) 64))))))
         ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
             (inst SsaType
                 (data 0)))
@@ -3654,10 +3657,18 @@
                     (break (inst SsaValue
                         (index (deref var).b.a)
                         (type (deref var).b.b))))))
-        :else (inst SsaValue
-            (index 0)
-            (type (inst SsaType
-                (data 0)))))))
+        :else (seq
+            (let i = 0)
+            (while (< i (deref func-map).len) (seqn
+                (let func = (vec-get func-map i))
+                (cond
+                    ((str-equals var (deref func))
+                        (break (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_GET_FUNCTION) i (new-vec (deref ast).children.A)))))
+                (set i = (+ i 1)))
+            :else (inst SsaValue
+                (index 0)
+                (type (inst SsaType
+                    (data 0)))))))))
 
     ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
         (let func = (vec-get (ref (deref ast).children) 0))
@@ -4003,12 +4014,14 @@
                 :else false))
                 (cond
                     (is-var (seq
-                        (eprint "todo: calling functions that are in variables\n")
-                        (exit 1)
-                        (inst SsaValue
-                            (index 0)
-                            (type (inst SsaType
-                                (data 0))))))
+                        (let args = (ref (new-vec (deref ast).children.A)))
+                        (let i = 0)
+                        (while (< i (deref ast).children.len) (seqn
+                            (let arg = (vec-get (ref (deref ast).children) i))
+                            (let arg = (ast-to-ssa-helper arg ssa break-block break-scope-count var-map func-map))
+                            (vec-push args arg)
+                            (set i = (+ i 1))))
+                        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_CALL_INDIRECT) 0 (deref args))))
                     (:else (seq
                         (let id = 0)
                         (while (< id (deref func-map).len) (seqn
@@ -4018,8 +4031,8 @@
                                     (break)))
                             (set id = (+ id 1))))
 
-                        (let i = 1)
                         (let args = (ref (new-vec (deref ast).children.A)))
+                        (let i = 1)
                         (while (< i (deref ast).children.len) (seqn
                             (let arg = (vec-get (ref (deref ast).children) i))
                             (let arg = (ast-to-ssa-helper arg ssa break-block break-scope-count var-map func-map))
@@ -4393,7 +4406,7 @@
                             (ssa-index (deref nodes).len)
                             (edge-count 0)
                             (register k)
-                            (on-stack false)
+                            (on-stack (>= k arg-reg-count))
                             (is-argument true)
                             (first-usage index-counter)
                             (last-usage (+ index-counter 1))
@@ -4715,6 +4728,7 @@
         (:else
             (file-write file "UNKNOWN"))))))
 
+// TODO: support functions with more than 6 arguments
 (defun argument-x86
     (file File)
     (arg-number u64)
@@ -4733,7 +4747,6 @@
         (file-write file "r9"))
     (:else
         (file-write file "UNKNOWN"))))
-
 
 (defmacro X86_TEMPORARY_REGISTER "r15")
 (defmacro X86_REGISTER_COUNT 13)
@@ -5516,12 +5529,12 @@
             (let graphs = (ref (new-vec (deref errors).A)))
             (let i = 0)
             (let arguments-to-registers = (ref (new-vec (deref errors).A)))
+            (vec-push arguments-to-registers 6)
             (vec-push arguments-to-registers 5)
             (vec-push arguments-to-registers 4)
             (vec-push arguments-to-registers 3)
-            (vec-push arguments-to-registers 2)
-            (vec-push arguments-to-registers 6)
             (vec-push arguments-to-registers 7)
+            (vec-push arguments-to-registers 8)
             (while (< i (deref ssa).funcs.len) (seqn
                 (let func = (ref (deref (vec-get (ref (deref ssa).funcs) i)).b))
                 (let graph = (ref (create-reg-alloc-graph-from-ssa func (X86_ARGUMENT_REGISTER_COUNT))))
