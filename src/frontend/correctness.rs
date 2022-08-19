@@ -309,6 +309,8 @@ fn traverse_sexpr<'a>(
             }
         }
 
+        SExpr::FuncExtern { .. } => Ok(()),
+
         SExpr::StructDef { .. } => Ok(()),
 
         SExpr::StructSet { meta, name, values } => {
@@ -874,10 +876,18 @@ fn extract_generics<'a>(original: &Type<'a>, monomorphised: &Type<'a>, map: &mut
 }
 
 #[derive(Debug, Clone)]
+pub enum SignatureLinkage {
+    Builtin,
+    External,
+    Defined,
+}
+
+#[derive(Debug, Clone)]
 pub struct Signature<'a> {
     pub arg_types: Vec<Type<'a>>,
     pub ret_type: Type<'a>,
     pub index: Option<usize>,
+    pub linkage: SignatureLinkage,
 }
 
 pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
@@ -886,86 +896,103 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("-", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("*", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("/", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("%", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("<", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Int(false, 1),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert(">", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Int(false, 1),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("<=", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Int(false, 1),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert(">=", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Int(false, 1),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("<<", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert(">>", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("&", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("|", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("^", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Generic("a"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("==", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Int(false, 1),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("!=", Signature {
         arg_types: vec![Type::Generic("a"), Type::Generic("a")],
         ret_type: Type::Int(false, 1),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("cast", Signature {
         arg_types: vec![Type::Generic("a")],
         ret_type: Type::Generic("b"),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert(
         "alloca",
@@ -973,6 +1000,7 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
             arg_types: vec![Type::Int(false, 64)],
             ret_type: Type::Slice(true, Box::new(Type::Generic("a"))),
             index: None,
+            linkage: SignatureLinkage::Builtin,
         },
     );
     map.insert(
@@ -981,6 +1009,7 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
             arg_types: vec![Type::Generic("a")],
             ret_type: Type::Pointer(true, Box::new(Type::Generic("a"))),
             index: None,
+            linkage: SignatureLinkage::Builtin,
         },
     );
     map.insert(
@@ -989,6 +1018,7 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
             arg_types: vec![Type::Pointer(true, Box::new(Type::Generic("a")))],
             ret_type: Type::Generic("a"),
             index: None,
+            linkage: SignatureLinkage::Builtin,
         },
     );
     map.insert(
@@ -1000,17 +1030,20 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
             ],
             ret_type: Type::Generic("a"),
             index: None,
+            linkage: SignatureLinkage::Builtin,
         },
     );
     map.insert("ptr-add", Signature {
         arg_types: vec![Type::Pointer(true, Box::new(Type::Generic("a"))), Type::Int(false, 64)],
         ret_type: Type::Pointer(true, Box::new(Type::Generic("a"))),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert("ptr-sub", Signature {
         arg_types: vec![Type::Pointer(true, Box::new(Type::Generic("a"))), Type::Int(false, 64)],
         ret_type: Type::Pointer(true, Box::new(Type::Generic("a"))),
         index: None,
+        linkage: SignatureLinkage::Builtin,
     });
     map.insert(
         "slice",
@@ -1021,6 +1054,7 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
             ],
             ret_type: Type::Slice(true, Box::new(Type::Generic("a"))),
             index: None,
+            linkage: SignatureLinkage::Builtin,
         },
     );
     map.insert(
@@ -1037,6 +1071,7 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
             ],
             ret_type: Type::Int(false, 64),
             index: None,
+            linkage: SignatureLinkage::External,
         },
     );
 
@@ -1048,7 +1083,7 @@ pub fn extract_signatures<'a>(
     map: &mut HashMap<&'a str, Signature<'a>>,
 ) {
     for (i, sexpr) in sexprs.iter().enumerate() {
-        if let SExpr::FuncDef { meta, name, .. } = sexpr {
+        if let SExpr::FuncDef { meta, name, .. } | SExpr::FuncExtern { meta, name, .. } = sexpr {
             let (arg_types, ret_type) = match &meta.type_ {
                 Type::Function(a, r) => (a.clone(), (**r).clone()),
                 _ => unreachable!(),
@@ -1065,6 +1100,11 @@ pub fn extract_signatures<'a>(
                         arg_types,
                         ret_type,
                         index,
+                        linkage: if let SExpr::FuncExtern { .. } = sexpr {
+                            SignatureLinkage::External
+                        } else {
+                            SignatureLinkage::Defined
+                        }
                     });
                 }
             }

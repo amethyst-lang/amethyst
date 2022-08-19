@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use cranelift::prelude::{codegen::Context, isa::CallConv, *};
@@ -51,6 +51,42 @@ impl Generator {
 
     fn translate(&mut self, sexprs: &[SExpr<'_>], structs: &HashMap<&str, Struct>) {
         let mut var_index = 0;
+        let mut externals = HashSet::new();
+        for sexpr in sexprs {
+            if let SExpr::FuncExtern {
+                name,
+                ret_type,
+                args,
+                ..
+            } = sexpr
+            {
+                externals.insert(*name);
+                if args.iter().any(|(_, v)| v.has_generic()) || ret_type.has_generic() {
+                    continue;
+                }
+
+                for (_, typ) in args {
+                    for t in Self::convert_type_to_type(typ, structs) {
+                        self.ctx.func.signature.params.push(AbiParam::new(t));
+                    }
+                }
+
+                for t in Self::convert_type_to_type(ret_type, structs) {
+                    self.ctx.func.signature.returns.push(AbiParam::new(t));
+                }
+
+                self
+                    .module
+                    .declare_function(
+                        name,
+                        Linkage::Import,
+                        &self.ctx.func.signature,
+                    )
+                    .unwrap();
+                self.module.clear_context(&mut self.ctx);
+            }
+        }
+        println!("{:?}", externals);
         for sexpr in sexprs {
             if let SExpr::FuncDef {
                 name,
@@ -104,6 +140,7 @@ impl Generator {
                     &mut self.ctx,
                     &mut self.data_ctx,
                     structs,
+                    &externals
                 );
                 builder.ins().return_(&ret_value);
                 builder.seal_all_blocks();
@@ -137,6 +174,7 @@ impl Generator {
         ctx: &mut Context,
         data_ctx: &mut DataContext,
         structs: &HashMap<&str, Struct<'a>>,
+        externals: &HashSet<&str>,
     ) -> Vec<Value> {
         #[allow(unused)]
         match sexpr {
@@ -222,6 +260,7 @@ impl Generator {
                         ctx,
                         data_ctx,
                         structs,
+                        externals,
                     );
                 }
 
@@ -235,6 +274,7 @@ impl Generator {
                     ctx,
                     data_ctx,
                     structs,
+                    externals,
                 );
                 var_map.pop();
                 v
@@ -266,6 +306,7 @@ impl Generator {
                         ctx,
                         data_ctx,
                         structs,
+                        externals,
                     )[0];
                     builder.ins().brz(cond, conds[i + 1], &[]);
                     builder.ins().jump(thens[i], &[]);
@@ -280,6 +321,7 @@ impl Generator {
                         ctx,
                         data_ctx,
                         structs,
+                        externals,
                     );
                     var_map.pop();
                     builder.ins().jump(last, &then);
@@ -298,6 +340,7 @@ impl Generator {
                         ctx,
                         data_ctx,
                         structs,
+                        externals,
                     );
                     var_map.pop();
                     v
@@ -331,6 +374,7 @@ impl Generator {
                     ctx,
                     data_ctx,
                     structs,
+                    externals,
                 );
                 var_map.pop();
                 builder.ins().jump(loop_block, &[]);
@@ -350,6 +394,7 @@ impl Generator {
                         ctx,
                         data_ctx,
                         structs,
+                        externals,
                     )
                 } else {
                     vec![]
@@ -373,6 +418,7 @@ impl Generator {
                 ctx,
                 data_ctx,
                 structs,
+                externals,
             ),
 
             SExpr::FuncCall { meta, func, values } => {
@@ -390,6 +436,7 @@ impl Generator {
                             ctx,
                             data_ctx,
                             structs,
+                            externals,
                         )
                     })
                     .collect();
@@ -669,8 +716,7 @@ impl Generator {
                         if let SExprType::Function(a, r) = &meta.type_ {
                             sig.params.extend(
                                 a.iter()
-                                    .map(|v| Self::convert_type_to_type(v, structs))
-                                    .flatten()
+                                    .flat_map(|v| Self::convert_type_to_type(v, structs))
                                     .map(AbiParam::new),
                             );
                             sig.returns
@@ -691,12 +737,21 @@ impl Generator {
                         }
 
                         if let SExprType::Function(a, r) = &meta.type_ {
-                            let func = module
-                                .declare_function(
-                                    &Self::mangle_func(value, a.iter(), &**r),
-                                    Linkage::Import,
-                                    &sig,
-                                )
+                            let func = if !externals.contains(value) {
+                                module
+                                    .declare_function(
+                                        &Self::mangle_func(value, a.iter(), &**r),
+                                        Linkage::Import,
+                                        &sig,
+                                    )
+                            } else {
+                                module
+                                    .declare_function(
+                                        value,
+                                        Linkage::Import,
+                                        &sig,
+                                    )
+                            }
                                 .unwrap();
                             let func = module.declare_func_in_func(func, builder.func);
 
@@ -734,6 +789,7 @@ impl Generator {
                             ctx,
                             data_ctx,
                             structs,
+                            externals,
                         );
                         result[*fields.get(field).unwrap()] = value;
                     }
@@ -760,6 +816,7 @@ impl Generator {
                     ctx,
                     data_ctx,
                     structs,
+                    externals,
                 );
                 let mut vars = vec![];
                 let mut result = vec![];
@@ -797,6 +854,7 @@ impl Generator {
                             ctx,
                             data_ctx,
                             structs,
+                            externals,
                         );
                         for (&var, val) in vars.iter().zip(val) {
                             builder.def_var(var, val);
@@ -815,7 +873,7 @@ impl Generator {
                 ..
             } if matches!(**var, LValue::Symbol(_)) => {
                 if let LValue::Symbol(var) = &**var {
-                    let value = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+                    let value = Self::translate_expr(&**value, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs, externals);
 
                     for scope in var_map.iter().rev() {
                         if let Some((val, t)) = scope.get(var) {
@@ -889,6 +947,7 @@ impl Generator {
                     ctx,
                     data_ctx,
                     structs,
+                    externals,
                 );
                 let lvalues = Self::get_pointer(
                     lvalue,
@@ -900,6 +959,7 @@ impl Generator {
                     ctx,
                     data_ctx,
                     structs,
+                    externals,
                 ).0;
                 let offsets = Self::offsets_and_sizes_of(&value.meta().type_, structs);
                 let lvalue = lvalues[0];
@@ -920,6 +980,7 @@ impl Generator {
                     ctx,
                     data_ctx,
                     structs,
+                    externals,
                 );
                 match &top.meta().type_ {
                     /*
@@ -1024,6 +1085,7 @@ impl Generator {
         ctx: &mut Context,
         data_ctx: &mut DataContext,
         structs: &HashMap<&str, Struct<'a>>,
+        externals: &HashSet<&str>,
     ) -> (Vec<Value>, SExprType<'a>) {
         match lvalue {
             LValue::Symbol(v) => {
@@ -1037,7 +1099,7 @@ impl Generator {
             }
 
             LValue::Attribute(v, attrs) => {
-                let (val, mut t) = Self::get_pointer(&**v, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs);
+                let (val, mut t) = Self::get_pointer(&**v, builder, var_map, var_index, break_block, module, ctx, data_ctx, structs, externals);
                 let mut offset = 0;
                 for attr in attrs.iter() {
                     if let SExprType::Struct(name, generics) = t {
@@ -1090,6 +1152,7 @@ impl Generator {
                     ctx,
                     data_ctx,
                     structs,
+                    externals,
                 );
 
                 let type_ = if let SExprType::Pointer(_, t) = typ {
@@ -1125,6 +1188,7 @@ impl Generator {
                     ctx,
                     data_ctx,
                     structs,
+                    externals,
                 )[0];
 
                 // TODO: is this okay?
@@ -1138,6 +1202,7 @@ impl Generator {
                     ctx,
                     data_ctx,
                     structs,
+                    externals,
                 );
                 let ptr = if let LValue::Symbol(_) = &**v {
                     ptr[1]
@@ -1228,7 +1293,7 @@ impl Generator {
         let mut size = 0isize;
 
         for v in v {
-            if v == types::I8 || v == types::I8 {
+            if v == types::I8 {
                 size += 1;
             } else if v == types::I16 {
                 size += (2 - size).rem_euclid(2) + 2;
@@ -1250,7 +1315,7 @@ impl Generator {
         let mut offset = 0i32;
 
         for v in v {
-            if v == types::I8 || v == types::I8 {
+            if v == types::I8 {
                 result.push((offset, 1));
                 offset += 1;
             } else if v == types::I16 {

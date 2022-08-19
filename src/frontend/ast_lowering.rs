@@ -253,6 +253,13 @@ pub enum SExpr<'a> {
         values: Vec<SExpr<'a>>,
     },
 
+    FuncExtern {
+        meta: Metadata<'a>,
+        name: &'a str,
+        ret_type: Type<'a>,
+        args: Vec<(&'a str, Type<'a>)>,
+    },
+
     StructDef {
         meta: Metadata<'a>,
         name: &'a str,
@@ -310,6 +317,7 @@ impl<'a> SExpr<'a> {
             | SExpr::Type { meta, .. }
             | SExpr::FuncDef { meta, .. }
             | SExpr::FuncCall { meta, .. }
+            | SExpr::FuncExtern { meta, .. }
             | SExpr::StructDef { meta, .. }
             | SExpr::StructSet { meta, .. }
             | SExpr::Declare { meta, .. }
@@ -338,6 +346,7 @@ impl<'a> SExpr<'a> {
             | SExpr::Type { meta, .. }
             | SExpr::FuncDef { meta, .. }
             | SExpr::FuncCall { meta, .. }
+            | SExpr::FuncExtern { meta, .. }
             | SExpr::StructDef { meta, .. }
             | SExpr::StructSet { meta, .. }
             | SExpr::Declare { meta, .. }
@@ -749,6 +758,53 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             ret_type,
                             args,
                             expr: Box::new(expr),
+                        }
+                    }
+
+                    Ast::Symbol(_, "defext") => {
+                        if sexpr.len() < 2 {
+                            return Err(LoweringError::InvalidDefun);
+                        }
+
+                        let name = match sexpr[1] {
+                            Ast::Symbol(_, name) => name,
+                            _ => return Err(LoweringError::InvalidDefun),
+                        };
+
+                        let ret_type = if let Ast::Symbol(_, ":") = sexpr[sexpr.len() - 2] {
+                            sexpr.remove(sexpr.len() - 2);
+                            parse_type(sexpr.remove(sexpr.len() - 1))?
+                        } else {
+                            Type::Tuple(vec![])
+                        };
+
+                        let mut args = vec![];
+
+                        for arg in sexpr.into_iter().skip(2) {
+                            match arg {
+                                Ast::SExpr(_, mut arg) if arg.len() == 2 => {
+                                    if let Ast::Symbol(_, name) = arg[0] {
+                                        args.push((name, parse_type(arg.remove(1))?));
+                                    } else {
+                                        return Err(LoweringError::InvalidDefun);
+                                    }
+                                }
+
+                                _ => return Err(LoweringError::InvalidDefun),
+                            }
+                        }
+
+                        SExpr::FuncExtern {
+                            meta: Metadata {
+                                range,
+                                type_: Type::Function(
+                                    args.iter().map(|(_, v)| v.clone()).collect(),
+                                    Box::new(ret_type.clone()),
+                                ),
+                            },
+                            name,
+                            ret_type,
+                            args,
                         }
                     }
 
