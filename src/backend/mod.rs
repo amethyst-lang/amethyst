@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use cranelift::prelude::{codegen::Context, isa::CallConv, *};
 use cranelift_module::{DataContext, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use target_lexicon::triple;
+use target_lexicon::Triple;
 
 use crate::frontend::{
     ast_lowering::{LValue, SExpr, Type as SExprType},
@@ -20,14 +20,12 @@ pub struct Generator {
 
 impl Default for Generator {
     fn default() -> Self {
-        use std::str::FromStr;
-
         let mut b = settings::builder();
         b.set("opt_level", "speed_and_size").unwrap();
         b.set("enable_probestack", "false").unwrap();
 
         let f = settings::Flags::new(b);
-        let isa_data = isa::lookup(triple!("x86_64-elf")).unwrap().finish(f);
+        let isa_data = isa::lookup(Triple::host()).unwrap().finish(f);
         let builder = ObjectBuilder::new(
             isa_data,
             "x86_64",
@@ -51,16 +49,17 @@ impl Generator {
 
     fn translate(&mut self, sexprs: &[SExpr<'_>], structs: &HashMap<&str, Struct>) {
         let mut var_index = 0;
-        let mut externals = HashSet::new();
+        let mut externals = HashMap::new();
         for sexpr in sexprs {
             if let SExpr::FuncExtern {
                 name,
                 ret_type,
                 args,
+                linked_to,
                 ..
             } = sexpr
             {
-                externals.insert(*name);
+                externals.insert(*name, linked_to);
                 if args.iter().any(|(_, v)| v.has_generic()) || ret_type.has_generic() {
                     continue;
                 }
@@ -78,7 +77,7 @@ impl Generator {
                 self
                     .module
                     .declare_function(
-                        name,
+                        linked_to,
                         Linkage::Import,
                         &self.ctx.func.signature,
                     )
@@ -86,7 +85,6 @@ impl Generator {
                 self.module.clear_context(&mut self.ctx);
             }
         }
-        println!("{:?}", externals);
         for sexpr in sexprs {
             if let SExpr::FuncDef {
                 name,
@@ -174,7 +172,7 @@ impl Generator {
         ctx: &mut Context,
         data_ctx: &mut DataContext,
         structs: &HashMap<&str, Struct<'a>>,
-        externals: &HashSet<&str>,
+        externals: &HashMap<&str, &String>,
     ) -> Vec<Value> {
         #[allow(unused)]
         match sexpr {
@@ -196,8 +194,7 @@ impl Generator {
                 if let SExprType::Function(a, r) = &meta.type_ {
                     sig.params.extend(
                         a.iter()
-                            .map(|v| Self::convert_type_to_type(v, structs))
-                            .flatten()
+                            .flat_map(|v| Self::convert_type_to_type(v, structs))
                             .map(AbiParam::new),
                     );
                     sig.returns
@@ -737,17 +734,17 @@ impl Generator {
                         }
 
                         if let SExprType::Function(a, r) = &meta.type_ {
-                            let func = if !externals.contains(value) {
+                            let func = if let Some(linked_to) = externals.get(value) {
                                 module
                                     .declare_function(
-                                        &Self::mangle_func(value, a.iter(), &**r),
+                                        linked_to,
                                         Linkage::Import,
                                         &sig,
                                     )
                             } else {
                                 module
                                     .declare_function(
-                                        value,
+                                        &Self::mangle_func(value, a.iter(), &**r),
                                         Linkage::Import,
                                         &sig,
                                     )
@@ -1085,7 +1082,7 @@ impl Generator {
         ctx: &mut Context,
         data_ctx: &mut DataContext,
         structs: &HashMap<&str, Struct<'a>>,
-        externals: &HashSet<&str>,
+        externals: &HashMap<&str, &String>,
     ) -> (Vec<Value>, SExprType<'a>) {
         match lvalue {
             LValue::Symbol(v) => {

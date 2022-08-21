@@ -36,12 +36,12 @@
         (:else 1)))
 
 // Prints out a string onto stdout.
-(defun print (str (@ mut u8))
+(defun print (str (@ u8))
     (seqn
         (syscall 1 1 (cast str.ptr) str.len 0 0 0)))
 
 // Helper function for printing out an integer
-(defun print-int-helper (i u64) (printer (fn ((@ mut u8))))
+(defun print-int-helper (i u64) (printer (fn ((@ u8))))
     (cond
         ((== i 0) (printer "0"))
         (:else (seqn
@@ -63,7 +63,7 @@
     (print-int-helper i eprint))
 
 // Prints out a string onto stderr.
-(defun eprint (str (@ mut u8))
+(defun eprint (str (@ u8))
     (seqn
         (syscall 1 2 (cast str.ptr) str.len 0 0 0)))
 
@@ -73,7 +73,7 @@
         (syscall 60 (cast code) 0 0 0 0 0)))
 
 // Creates a subslice from a given slice and range.
-(defun subslice (s (@ mut 'a)) (start u64) (end u64) : (@ mut 'a)
+(defun subslice (s (@ 'a)) (start u64) (end u64) : (@ 'a)
     (slice (- end start) (ptr-add s.ptr start)))
 
 // Defines a file (wrapper around a file descriptor).
@@ -89,7 +89,7 @@
 (defmacro FILE_OPEN_FLAG_TRUNCATE  512)
 
 // Opens a file.
-(defun file-open (path (@ mut u8)) (flags u64) : File
+(defun file-open (path (@ u8)) (flags u64) : File
     (seq
         (let null-term = (alloca (+ path.len 1)))
         (let i = 0)
@@ -103,7 +103,7 @@
                 (cast (syscall 2 (cast null-term.ptr) flags 438 0 0 0))))))
 
 // Reads a file into a vec of u8s.
-(defun file-read-all (file File) (A (* mut Allocator)) : (Vec u8) (seq
+(defun file-read-all (file File) (A (* Allocator)) : (Vec u8) (seq
     (let vec = (ref (new-vec A)))
     (let slice = (alloca 64))
     (while (let len = (syscall 0 (cast file.descriptor) (cast slice.ptr) slice.len 0 0 0)) (seqn
@@ -113,7 +113,7 @@
             (set i = (+ i 1))))))
     (deref vec)))
 
-(defun file-write (file File) (str (@ mut u8)) (seqn
+(defun file-write (file File) (str (@ u8)) (seqn
     (syscall 1 (cast file.descriptor) (cast str.ptr) (cast str.len) 0 0 0)))
 
 (defun file-write-int (file File) (i u64)
@@ -136,40 +136,40 @@
         (syscall 3 (cast file.descriptor) 0 0 0 0 0)))
 
 // Maps memory for the program.
-(defun mmap (len u64) : (* mut 'a)
+(defun mmap (len u64) : (* 'a)
     (cast (syscall 9 0 len 3 34 (- 0 1) 0)))
 
 // Unmaps memory previously mapped by mmap.
-(defun munmap (addr (* mut 'a)) (len u64)
+(defun munmap (addr (* 'a)) (len u64)
     (seqn
         (syscall 11 (cast addr) len 0 0 0 0)))
 
 // Creates a null constant.
-(defun null : (* mut 'a)
+(defun null : (* 'a)
     (cast (: u64 0)))
 
 // Defines a free bucket linked list node for the memory allocator.
 (defstruct FreeBucket
-    (next (* mut FreeBucket)))
+    (next (* FreeBucket)))
 
 // Defines an allocator.
 (defstruct Allocator
-    (free16    (* mut FreeBucket))
-    (free64    (* mut FreeBucket))
-    (free256   (* mut FreeBucket))
-    (free1024  (* mut FreeBucket))
-    (free4096  (* mut FreeBucket))
-    (free16384 (* mut FreeBucket))
-    (free65536 (* mut FreeBucket)))
+    (free16    (* FreeBucket))
+    (free64    (* FreeBucket))
+    (free256   (* FreeBucket))
+    (free1024  (* FreeBucket))
+    (free4096  (* FreeBucket))
+    (free16384 (* FreeBucket))
+    (free65536 (* FreeBucket)))
 
 // Helper function for allocation to create size buckets.
-(defun create-buckets (bucket-size u64) : (* mut FreeBucket)
+(defun create-buckets (bucket-size u64) : (* FreeBucket)
     (seq
-        (let p = (: (* mut u8) (mmap 65536)))
+        (let p = (: (* u8) (mmap 65536)))
         (let i = (- bucket-size (sizeof FreeBucket)))
         (let q = (cast (ptr-add p i)))
         (while (< i 65536) (seqn
-            (let q = (: (* mut FreeBucket) (cast (ptr-add p i))))
+            (let q = (: (* FreeBucket) (cast (ptr-add p i))))
             (set i = (+ i bucket-size))
             (cond
                 ((< i 65536) (seqn
@@ -179,7 +179,7 @@
         q))
 
 // Helper function for allocation.
-(defun alloc-helper (A (* mut Allocator)) (size u64) : (* mut 'a)
+(defun alloc-helper (A (* Allocator)) (size u64) : (* 'a)
     (cond
         ((== size 0) (null))
         ((<= size 8) (seq
@@ -242,48 +242,48 @@
             (mmap size))))
 
 // Helper function for deallocation.
-(defun dealloc-helper (A (* mut Allocator)) (ptr (* mut 'a)) (size u64)
+(defun dealloc-helper (A (* Allocator)) (ptr (* 'a)) (size u64)
     (cond
         ((or (== size 0) (== ptr (null))) ())
         ((<= size 8) (seqn
-            (let p = (ptr-add (: (* mut u8) (cast ptr)) 8))
-            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (let p = (ptr-add (: (* u8) (cast ptr)) 8))
+            (let bucket = (: (* FreeBucket) (cast p)))
             (set (deref bucket).next = (deref A).free16)
             (set (deref A).free16 = bucket)))
 
         ((<= size 56) (seqn
-            (let p = (ptr-add (: (* mut u8) (cast ptr)) 56))
-            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (let p = (ptr-add (: (* u8) (cast ptr)) 56))
+            (let bucket = (: (* FreeBucket) (cast p)))
             (set (deref bucket).next = (deref A).free64)
             (set (deref A).free64 = bucket)))
 
         ((<= size 248) (seqn
-            (let p = (ptr-add (: (* mut u8) (cast ptr)) 248))
-            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (let p = (ptr-add (: (* u8) (cast ptr)) 248))
+            (let bucket = (: (* FreeBucket) (cast p)))
             (set (deref bucket).next = (deref A).free256)
             (set (deref A).free256 = bucket)))
 
         ((<= size 1016) (seqn
-            (let p = (ptr-add (: (* mut u8) (cast ptr)) 1016))
-            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (let p = (ptr-add (: (* u8) (cast ptr)) 1016))
+            (let bucket = (: (* FreeBucket) (cast p)))
             (set (deref bucket).next = (deref A).free1024)
             (set (deref A).free1024 = bucket)))
 
         ((<= size 4088) (seqn
-            (let p = (ptr-add (: (* mut u8) (cast ptr)) 4088))
-            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (let p = (ptr-add (: (* u8) (cast ptr)) 4088))
+            (let bucket = (: (* FreeBucket) (cast p)))
             (set (deref bucket).next = (deref A).free4096)
             (set (deref A).free4096 = bucket)))
 
         ((<= size 16376) (seqn
-            (let p = (ptr-add (: (* mut u8) (cast ptr)) 16376))
-            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (let p = (ptr-add (: (* u8) (cast ptr)) 16376))
+            (let bucket = (: (* FreeBucket) (cast p)))
             (set (deref bucket).next = (deref A).free16384)
             (set (deref A).free16384 = bucket)))
 
         ((<= size 65528) (seqn
-            (let p = (ptr-add (: (* mut u8) (cast ptr)) 65528))
-            (let bucket = (: (* mut FreeBucket) (cast p)))
+            (let p = (ptr-add (: (* u8) (cast ptr)) 65528))
+            (let bucket = (: (* FreeBucket) (cast p)))
             (set (deref bucket).next = (deref A).free65536)
             (set (deref A).free65536 = bucket)))
 
@@ -291,19 +291,19 @@
             (munmap ptr size))))
 
 // Allocates a pointer to some data.
-(defun alloc (A (* mut Allocator)) : (* mut 'a)
+(defun alloc (A (* Allocator)) : (* 'a)
     (alloc-helper A (sizeof 'a)))
 
 // Deallocates a pointer.
-(defun dealloc (A (* mut Allocator)) (ptr (* mut 'a))
+(defun dealloc (A (* Allocator)) (ptr (* 'a))
     (dealloc-helper A ptr (sizeof 'a)))
 
 // Allocates an array of data.
-(defun alloc-array (A (* mut Allocator)) (len u64) : (@ mut 'a)
+(defun alloc-array (A (* Allocator)) (len u64) : (@ 'a)
     (slice len (alloc-helper A (* len (sizeof 'a)))))
 
 // Deallocates an array of data.
-(defun dealloc-array (A (* mut Allocator)) (s (@ mut 'a)) 
+(defun dealloc-array (A (* Allocator)) (s (@ 'a)) 
     (dealloc-helper A s.ptr (* s.len (sizeof 'a))))
 
 // Creates a new empty allocator.
@@ -319,25 +319,25 @@
 
 // Defines a vector (ie a list).
 (defstruct Vec
-    (vals (@ mut 'a))
+    (vals (@ 'a))
     (len u64)
-    (A (* mut Allocator)))
+    (A (* Allocator)))
 
 // Creates a new empty vector.
-(defun new-vec (A (* mut Allocator)) : (Vec 'a)
+(defun new-vec (A (* Allocator)) : (Vec 'a)
     (inst Vec
         (vals (slice 0 (null)))
         (len 0)
         (A A)))
 
 // Gets the ith element of a vector.
-(defun vec-get (v (* mut (Vec 'a))) (i u64) : (* mut 'a)
+(defun vec-get (v (* (Vec 'a))) (i u64) : (* 'a)
     (cond
         ((< i (deref v).len) (ptr-add (deref v).vals.ptr i))
         (:else (null))))
 
 // Pushes a value onto a vector.
-(defun vec-push (vec (* mut (Vec 'a))) (v 'a) (seqn
+(defun vec-push (vec (* (Vec 'a))) (v 'a) (seqn
     (cond
         ((<= (deref vec).vals.cap (deref vec).len) (seqn
             (let new-cap = (cond
@@ -354,7 +354,7 @@
     (set (deref vec).len = (+ (deref vec).len 1))))
 
 // Inserts a value onto a vector at the given index.
-(defun vec-insert (vec (* mut (Vec 'a))) (v 'a) (i u64) (seqn
+(defun vec-insert (vec (* (Vec 'a))) (v 'a) (i u64) (seqn
     (cond
         ((<= (deref vec).vals.cap (deref vec).len) (seqn
             (let new-cap = (cond
@@ -378,16 +378,16 @@
 
 // Pops a value from a vector
 // TODO: this leaks memory
-(defun vec-pop (vec (* mut (Vec 'a))) (seqn
+(defun vec-pop (vec (* (Vec 'a))) (seqn
     (cond
         ((> (deref vec).len 0) (seqn
             (set (deref vec).len = (- (deref vec).len 1)))))))
 
 // Creates a slice from a vector.
-(defun vec-slice (vec (* mut (Vec 'a))) : (@ mut 'a)
+(defun vec-slice (vec (* (Vec 'a))) : (@ 'a)
     (subslice (deref vec).vals 0 (deref vec).len))
 
-(defun vec-find (vec (* mut (Vec 'a))) (pred (fn ((* mut 'a) 'b) : u1)) (data 'b) : (* mut 'a) (seq
+(defun vec-find (vec (* (Vec 'a))) (pred (fn ((* 'a) 'b) : u1)) (data 'b) : (* 'a) (seq
     (let i = 0)
     (while (< i (deref vec).len) (seqn
         (let item = (vec-get vec i))
@@ -398,10 +398,10 @@
     :else (null))))
 
 // Empty deallocator
-(defun empty-dealloc (v (* mut 'a)) ())
+(defun empty-dealloc (v (* 'a)) ())
 
 // Drops a vector
-(defun vec-drop (vec (* mut (Vec 'a))) (callback (fn ((* mut 'a)))) (seqn
+(defun vec-drop (vec (* (Vec 'a))) (callback (fn ((* 'a)))) (seqn
     (let i = 0)
     (while (< i (deref vec).len) (seqn
         (callback (ptr-add (deref vec).vals.ptr i))
@@ -409,7 +409,7 @@
     (dealloc-array (deref vec).A (deref vec).vals)))
 
 // Checks if a string slice contains a character.
-(defun str-contains (str (@ mut u8)) (c u8) : u1 (seq
+(defun str-contains (str (@ u8)) (c u8) : u1 (seq
     (let i = 0)
     (while (< i str.len) (seqn
         (cond
@@ -418,7 +418,7 @@
         (set i = (+ i 1)))
     :else false)))
 
-(defun str-equals (a (@ mut u8)) (b (@ mut u8)) : u1
+(defun str-equals (a (@ u8)) (b (@ u8)) : u1
     (cond
         ((!= a.len b.len) false)
         (:else (seq
@@ -430,7 +430,7 @@
                 (set i = (+ i 1)))
             :else true)))))
 
-(defun get-argv (argv (* mut (* mut u8))) (i u64) : (@ mut u8) (seq
+(defun get-argv (argv (* (* u8))) (i u64) : (@ u8) (seq
     (let j = 0)
     (while (<= j i) (seqn
         (cond
@@ -448,7 +448,7 @@
     (a 'a)
     (b 'b))
 
-(defun matches-key (pair (* mut (Pair (@ mut u8) 'a))) (str (@ mut u8)) : u1
+(defun matches-key (pair (* (Pair (@ u8) 'a))) (str (@ u8)) : u1
     (str-equals (deref pair).a str))
 
 
@@ -468,7 +468,7 @@
 (defstruct Token
     (loc Location)
     (type u64)
-    (value (@ mut u8)))
+    (value (@ u8)))
 
 (defmacro TOKEN_TYPE_EOF     0)
 (defmacro TOKEN_TYPE_INVALID 1)
@@ -485,13 +485,13 @@
 
 // Defines a lexer.
 (defstruct Lexer
-    (str (@ mut u8))
+    (str (@ u8))
     (pos u64)
     (tokens (Vec Token))
     (token-pos u64))
 
 // Creates a new lexer.
-(defun new-lexer (A (* mut Allocator)) (str (@ mut u8)) : Lexer
+(defun new-lexer (A (* Allocator)) (str (@ u8)) : Lexer
     (inst Lexer
         (str str)
         (pos 0)
@@ -499,7 +499,7 @@
         (token-pos 0)))
 
 // Lexes a string.
-(defun lex-next (lexer (* mut Lexer)) : Token
+(defun lex-next (lexer (* Lexer)) : Token
     (cond
         ((< (deref lexer).token-pos (deref lexer).tokens.len) (seq
             (let v = (vec-get (ref (deref lexer).tokens) (deref lexer).token-pos))
@@ -675,13 +675,13 @@
             token))))
 
 // Peeks into the lexer and returns the next token without consuming it.
-(defun lex-peek (lexer (* mut Lexer)) : Token (seq
+(defun lex-peek (lexer (* Lexer)) : Token (seq
     (let token = (lex-next lexer))
     (set (deref lexer).token-pos = (- (deref lexer).token-pos 1))
     token))
 
 // Drops a lexer.
-(defun lexer-drop (lexer (* mut Lexer))
+(defun lexer-drop (lexer (* Lexer))
     (vec-drop (ref (deref lexer).tokens) empty-dealloc))
 
 // Prints out a token.
@@ -691,7 +691,7 @@
     (success u1))
 
 // Expects a type of token and fails if the token is not next.
-(defun lexer-expect (lexer (* mut Lexer)) (type u64) : LexerResult
+(defun lexer-expect (lexer (* Lexer)) (type u64) : LexerResult
     (cond
         ((== type (lex-peek lexer).type)
             (inst LexerResult
@@ -743,7 +743,7 @@
     (type u64)
     (loc Location)
     (typed Type)
-    (value (@ mut u8))
+    (value (@ u8))
     (children (Vec Ast)))
 
 (defun ast-clone (ast Ast) : Ast
@@ -760,11 +760,11 @@
             (value ast.value)
             (children (deref children)))))
 
-(defun ast-drop (ast (* mut Ast))
+(defun ast-drop (ast (* Ast))
     // TODO: dropping types
     (vec-drop (ref (deref ast).children) ast-drop))
 
-(defun print-ast-helper (ast (* mut Ast)) (level u64) (seqn
+(defun print-ast-helper (ast (* Ast)) (level u64) (seqn
     (let i = 0)
     (while (< i level) (seqn
         (print "    ")
@@ -808,7 +808,7 @@
         (print-ast-helper child (+ level 1))
         (set i = (+ i 1))))))
 
-(defun print-ast (ast (* mut Ast))
+(defun print-ast (ast (* Ast))
     (print-ast-helper ast 0))
 
 (defstruct LineColumn
@@ -817,7 +817,7 @@
     (line-end u64)
     (col-end u64))
 
-(defun loc-to-line-col (contents (@ mut u8)) (loc Location) : LineColumn (seq
+(defun loc-to-line-col (contents (@ u8)) (loc Location) : LineColumn (seq
     (let i = 0)
     (let line-start = 1)
     (let col-start = 0)
@@ -876,7 +876,7 @@
         (:else
             (eprint "UNKNOWN"))))
 
-(defun print-parse-error (contents (@ mut u8)) (fail (* mut ParseFailure)) (seqn
+(defun print-parse-error (contents (@ u8)) (fail (* ParseFailure)) (seqn
     (eprint "error: expected ")
     (print-parse-error-helper (deref fail).expected)
     (eprint ", got ")
@@ -954,7 +954,7 @@
                 else
                 (parse-fail var.fail))))))
 
-(defun parse-value (lexer (* mut Lexer)) : ParseResult
+(defun parse-value (lexer (* Lexer)) : ParseResult
     (seq
         (let token = (lex-peek lexer))
         (cond
@@ -1032,7 +1032,7 @@
                 (expected (ERROR_TYPE_VALUE))
                 (received token.type)))))))
 
-(defun parse-attr-item (lexer (* mut Lexer)) : ParseResult (seq
+(defun parse-attr-item (lexer (* Lexer)) : ParseResult (seq
     (let token = (lex-peek lexer))
     (cond
         ((== token.type (TOKEN_TYPE_SYMBOL)) (seq
@@ -1049,7 +1049,7 @@
                 (expected (ERROR_TYPE_VALUE))
                 (received token.type)))))))
 
-(defun parse-attribute (lexer (* mut Lexer)) : ParseResult
+(defun parse-attribute (lexer (* Lexer)) : ParseResult
     (pguard top = (parse-value lexer)
         (seq
             (let attrs = (ref (new-vec (deref lexer).tokens.A)))
@@ -1078,7 +1078,7 @@
                     (vec-drop attrs empty-dealloc)
                     (parse-success top))))))))
 
-(defun parse-sexpr (lexer (* mut Lexer)) : ParseResult
+(defun parse-sexpr (lexer (* Lexer)) : ParseResult
     (lguard left = (lexer-expect lexer (TOKEN_TYPE_LPAREN)) (seq
         (let v = (ref (new-vec (deref lexer).tokens.A)))
         (while (let var = (parse-attribute lexer)).success (seqn
@@ -1094,7 +1094,7 @@
                 (children (deref v))))
         :else (vec-drop v ast-drop)))))
 
-(defun parse (lexer (* mut Lexer)) : ParseResult (seq
+(defun parse (lexer (* Lexer)) : ParseResult (seq
     (let asts = (ref (new-vec (deref lexer).tokens.A)))
     (let end = 0)
     (while (!= (lex-peek lexer).type (TOKEN_TYPE_EOF)) (seqn
@@ -1129,7 +1129,7 @@
 (defmacro MACRO_ARG_TYPE_REST     3)
 
 (defstruct MacroArg
-    (name (@ mut u8))
+    (name (@ u8))
     (type u64)
     (value Ast))
 
@@ -1137,7 +1137,7 @@
     (args (Vec MacroArg))
     (body Ast))
 
-(defun extract-macros (map (* mut (Vec (Pair (@ mut u8) Macro)))) (root (* mut Ast)) (seqn
+(defun extract-macros (map (* (Vec (Pair (@ u8) Macro)))) (root (* Ast)) (seqn
     (let i = 0)
     (while (< i (deref root).children.len) (seqn
         (let ast = (vec-get (ref (deref root).children) i))
@@ -1219,7 +1219,7 @@
                                             (body ast))))))))))))))
         (set i = (+ i 1))))))
 
-(defun print-macros (map (* mut (Vec (Pair (@ mut u8) Macro)))) (seqn
+(defun print-macros (map (* (Vec (Pair (@ u8) Macro)))) (seqn
     (let i = 0)
     (while (< i (deref map).len) (seqn
         (let macro = (deref (vec-get map i)))
@@ -1259,7 +1259,7 @@
     (type u64)
     (start u64))
 
-(defun macro-bind (args (@ mut Ast)) (macro (* mut Macro)) (arg-bindings (* mut (Vec (Pair (@ mut u8) CapturedMacroArg)))) : u1 (seq
+(defun macro-bind (args (@ Ast)) (macro (* Macro)) (arg-bindings (* (Vec (Pair (@ u8) CapturedMacroArg)))) : u1 (seq
     (let i = 0)
     (while (< i (deref macro).args.len) (seqn
         (let arg = (deref (vec-get (ref (deref macro).args) i)))
@@ -1331,7 +1331,7 @@
         (set i = (+ i 1)))
     :else (not (and (: u64 (cast (let arg = (vec-get (ref (deref macro).args) ordered-arg)))) (== (deref arg).type (MACRO_ARG_TYPE_ORDERED)))))))
 
-(defun bind-macro-args (ast (* mut Ast)) (arg-bindings (* mut (Vec (Pair (@ mut u8) CapturedMacroArg)))) (old (* mut Ast))
+(defun bind-macro-args (ast (* Ast)) (arg-bindings (* (Vec (Pair (@ u8) CapturedMacroArg)))) (old (* Ast))
     (cond
         ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seqn
             (let bound = (vec-find arg-bindings matches-key (deref ast).value))
@@ -1360,7 +1360,7 @@
                 (bind-macro-args (vec-get (ref (deref ast).children) i) arg-bindings old)
                 (set i = (+ i 1))))))))
 
-(defun replace-macros (map (* mut (Vec (Pair (@ mut u8) Macro)))) (ast (* mut Ast)) (seqn
+(defun replace-macros (map (* (Vec (Pair (@ u8) Macro)))) (ast (* Ast)) (seqn
     (cond
         ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seqn
             (let sym = (vec-get (ref (deref ast).children) 0))
@@ -1409,11 +1409,11 @@
     (type u64)
     (signed-mutable u1)
     (subtypes (Vec Type))
-    (boxed (* mut Type))
-    (name (@ mut u8))
+    (boxed (* Type))
+    (name (@ u8))
     (type-var-width u64))
 
-(defun empty-type (A (* mut Allocator)) : Type
+(defun empty-type (A (* Allocator)) : Type
     (inst Type
         (type (TYPE_TYPE_UNKNOWN))
         (signed-mutable false)
@@ -1428,19 +1428,19 @@
     (index u64))
 
 (defstruct Struct
-    (generics (Vec (@ mut u8)))
-    (fields (Vec (Pair (@ mut u8) Type))))
+    (generics (Vec (@ u8)))
+    (fields (Vec (Pair (@ u8) Type))))
 
 (defstruct TypeError
     (loc Location)
-    (message (@ mut u8)))
+    (message (@ u8)))
 
-(defun type-error (loc Location) (message (@ mut u8)) : TypeError
+(defun type-error (loc Location) (message (@ u8)) : TypeError
     (inst TypeError
         (loc loc)
         (message message)))
 
-(defun parse-type-int (loc Location) (str (@ mut u8)) (errors (* mut (Vec TypeError))) : u64 (seq
+(defun parse-type-int (loc Location) (str (@ u8)) (errors (* (Vec TypeError))) : u64 (seq
     (let i = 0)
     (let n = 0)
     (while (< i str.len) (seqn
@@ -1454,7 +1454,7 @@
         (set i = (+ i 1)))
     :else n)))
 
-(defun parse-type (ast (* mut Ast)) (errors (* mut (Vec TypeError))) : Type (seq
+(defun parse-type (ast (* Ast)) (errors (* (Vec TypeError))) : Type (seq
     (let type = (ref (empty-type (deref errors).A)))
     (cond
         ((and (== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref ast).value "f32")) (seq
@@ -1580,7 +1580,7 @@
             (vec-push errors (type-error (deref ast).loc "could not parse type"))
             (deref type))))))
 
-(defun extract-structs (ast (* mut Ast)) (result (* mut (Vec (Pair (@ mut u8) Struct)))) (errors (* mut (Vec TypeError))) (seqn
+(defun extract-structs (ast (* Ast)) (result (* (Vec (Pair (@ u8) Struct)))) (errors (* (Vec TypeError))) (seqn
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
         (let ast = (vec-get (ref (deref ast).children) i))
@@ -1623,7 +1623,7 @@
                                                 (fields (deref fields)))))))))))))))))
         (set i = (+ i 1))))))
 
-(defun print-structs (struct-map (* mut (Vec (Pair (@ mut u8) Struct)))) (seqn
+(defun print-structs (struct-map (* (Vec (Pair (@ u8) Struct)))) (seqn
     (let i = 0)
     (while (< i (deref struct-map).len) (seqn
         (let struct = (vec-get struct-map i))
@@ -1646,9 +1646,9 @@
         (set i = (+ i 1))))))
 
 (defun extract-functions
-    (ast (* mut Ast))
-    (result (* mut (Vec (Pair (@ mut u8) Signature))))
-    (errors (* mut (Vec TypeError)))
+    (ast (* Ast))
+    (result (* (Vec (Pair (@ u8) Signature))))
+    (errors (* (Vec TypeError)))
 (seqn
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
@@ -1710,7 +1710,7 @@
                                                 (index i))))))))))))))))
         (set i = (+ i 1))))))
 
-(defun has-generic (type (* mut Type)) : u1
+(defun has-generic (type (* Type)) : u1
     (cond
         ((== (deref type).type (TYPE_TYPE_GENERIC))
             true)
@@ -1724,10 +1724,10 @@
                     (set i = (+ i 1)))
                 :else false))))))
 
-(defun contains-generic (name (* mut (@ mut u8))) (generic (@ mut u8)) : u1
+(defun contains-generic (name (* (@ u8))) (generic (@ u8)) : u1
     (str-equals (deref name) generic))
 
-(defun find-generics (type (* mut Type)) (generics (* mut (Vec (@ mut u8))))
+(defun find-generics (type (* Type)) (generics (* (Vec (@ u8))))
     (cond
         ((== (deref type).type (TYPE_TYPE_GENERIC))
             (cond
@@ -1742,7 +1742,7 @@
                 (find-generics (vec-get (ref (deref type).subtypes) i) generics)
                 (set i = (+ i 1))))))))
 
-(defun replace-generics (type (* mut Type)) (generics (* mut (Vec (Pair (@ mut u8) Type)))) (substitutions (* mut (Vec (Pair Type u64))))
+(defun replace-generics (type (* Type)) (generics (* (Vec (Pair (@ u8) Type)))) (substitutions (* (Vec (Pair Type u64))))
     (cond
         ((== (deref type).type (TYPE_TYPE_GENERIC)) (seqn
             (let new = (vec-find generics matches-key (deref type).name))
@@ -1769,7 +1769,7 @@
                 (replace-generics (vec-get (ref (deref type).subtypes) i) generics substitutions)
                 (set i = (+ i 1))))))))
 
-(defun print-type (type (* mut Type))
+(defun print-type (type (* Type))
     (cond
         ((== (deref type).type (TYPE_TYPE_UNKNOWN))
             (print "<unknown>"))
@@ -1844,7 +1844,7 @@
         (:else
             (print "UNKNOWN"))))
 
-(defun print-signatures (func-map (* mut (Vec (Pair (@ mut u8) Signature)))) (seqn
+(defun print-signatures (func-map (* (Vec (Pair (@ u8) Signature)))) (seqn
     (let i = 0)
     (while (< i (deref func-map).len) (seqn
         (let func = (vec-get func-map i))
@@ -1866,7 +1866,7 @@
 (defmacro COERCION_TYPE_INT    1)
 (defmacro COERCION_TYPE_FLOAT  2)
 
-(defun type-clone (type (* mut Type)) : Type (seq
+(defun type-clone (type (* Type)) : Type (seq
     (let new = (ref (empty-type (deref type).subtypes.A)))
     (set (deref new).type = (deref type).type)
     (set (deref new).signed-mutable = (deref type).signed-mutable)
@@ -1932,7 +1932,7 @@
                 (:else true)))
         (:else false)))
 
-(defun get-type-leaf (type (* mut Type)) (substitutions (* mut (Vec (Pair Type u64)))) (seqn
+(defun get-type-leaf (type (* Type)) (substitutions (* (Vec (Pair Type u64)))) (seqn
     (while (== (deref type).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
         (let new = (deref (vec-get substitutions (deref type).type-var-width)).a)
         (cond
@@ -1940,7 +1940,7 @@
                 (break)))
         (set (deref type) = new)))))
 
-(defun substitute (loc Location) (assignee (* mut Type)) (assigner (* mut Type)) (substitutions (* mut (Vec (Pair Type u64)))) (errors (* mut (Vec TypeError))) (seqn
+(defun substitute (loc Location) (assignee (* Type)) (assigner (* Type)) (substitutions (* (Vec (Pair Type u64)))) (errors (* (Vec TypeError))) (seqn
     (get-type-leaf assignee substitutions)
     (get-type-leaf assigner substitutions)
     (cond
@@ -2060,14 +2060,14 @@
             (vec-push errors (type-error loc "the given types cannot be unified")))))))
 
 (defun check-ast
-    (ast (* mut Ast))
-    (errors (* mut (Vec TypeError)))
-    (substitutions (* mut (Vec (Pair Type u64))))
-    (func-map (* mut (Vec (Pair (@ mut u8) Signature))))
-    (struct-map (* mut (Vec (Pair (@ mut u8) Struct))))
-    (monomorphisms (* mut (Vec (Pair Type u64))))
-    (scopes (* mut (Vec (Vec (Pair (@ mut u8) Type)))))
-    (break-type (* mut Type))
+    (ast (* Ast))
+    (errors (* (Vec TypeError)))
+    (substitutions (* (Vec (Pair Type u64))))
+    (func-map (* (Vec (Pair (@ u8) Signature))))
+    (struct-map (* (Vec (Pair (@ u8) Struct))))
+    (monomorphisms (* (Vec (Pair Type u64))))
+    (scopes (* (Vec (Vec (Pair (@ u8) Type)))))
+    (break-type (* Type))
 (cond
     ((== (deref ast).type (AST_NODE_TYPE_SEXPR))
         (cond
@@ -2496,14 +2496,14 @@
         (exit 1)))))
 
 (defun check-lvalue
-    (lvalue (* mut Ast))
-    (errors (* mut (Vec TypeError)))
-    (substitutions (* mut (Vec (Pair Type u64))))
-    (func-map (* mut (Vec (Pair (@ mut u8) Signature))))
-    (struct-map (* mut (Vec (Pair (@ mut u8) Struct))))
-    (monomorphisms (* mut (Vec (Pair Type u64))))
-    (scopes (* mut (Vec (Vec (Pair (@ mut u8) Type)))))
-    (break-type (* mut Type))
+    (lvalue (* Ast))
+    (errors (* (Vec TypeError)))
+    (substitutions (* (Vec (Pair Type u64))))
+    (func-map (* (Vec (Pair (@ u8) Signature))))
+    (struct-map (* (Vec (Pair (@ u8) Struct))))
+    (monomorphisms (* (Vec (Pair Type u64))))
+    (scopes (* (Vec (Vec (Pair (@ u8) Type)))))
+    (break-type (* Type))
 (cond
     ((== (deref lvalue).type (AST_NODE_TYPE_SYMBOL)) (seqn
         (let i = (deref scopes).len)
@@ -2635,10 +2635,10 @@
         (vec-push errors (type-error (deref lvalue).loc "invalid lvalue")))))
 
 (defun flatten-substitution
-    (type (* mut Type))
-    (errors (* mut (Vec TypeError)))
+    (type (* Type))
+    (errors (* (Vec TypeError)))
     (loc Location)
-    (substitutions (* mut (Vec (Pair Type u64))))
+    (substitutions (* (Vec (Pair Type u64))))
 (cond
     ((== (deref type).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
         (let type2 = (deref (vec-get substitutions (deref type).type-var-width)).a)
@@ -2657,7 +2657,7 @@
             (flatten-substitution (vec-get (ref (deref type).subtypes) i) errors loc substitutions)
             (set i = (+ i 1))))))))
 
-(defun apply-substitutions (ast (* mut Ast)) (errors (* mut (Vec TypeError))) (substitutions (* mut (Vec (Pair Type u64)))) (seqn
+(defun apply-substitutions (ast (* Ast)) (errors (* (Vec TypeError))) (substitutions (* (Vec (Pair Type u64)))) (seqn
     (let type = (ref (deref ast).typed))
     (flatten-substitution type errors (deref ast).loc substitutions)
     (set (deref ast).typed = (deref type))
@@ -2667,10 +2667,10 @@
         (set i = (+ i 1))))))
 
 (defun check
-    (ast (* mut Ast))
-    (errors (* mut (Vec TypeError)))
-    (func-map (* mut (Vec (Pair (@ mut u8) Signature))))
-    (struct-map (* mut (Vec (Pair (@ mut u8) Struct))))
+    (ast (* Ast))
+    (errors (* (Vec TypeError)))
+    (func-map (* (Vec (Pair (@ u8) Signature))))
+    (struct-map (* (Vec (Pair (@ u8) Struct))))
 (seqn
     (let skip = 0)
     (let done = (ref (new-vec (deref errors).A)))
@@ -2764,10 +2764,10 @@
                 (set (deref ast).children = (deref asts)))))
         (and (< skip (deref ast).children.len) (not (deref errors).len))) ())))
 
-(defun type-find (type (* mut Type)) (t2 Type) : u1
+(defun type-find (type (* Type)) (t2 Type) : u1
     (type-equals (deref type) t2))
 
-(defun print-type-errors (contents (@ mut u8)) (errors (* mut (Vec TypeError))) (seqn
+(defun print-type-errors (contents (@ u8)) (errors (* (Vec TypeError))) (seqn
     (let i = 0)
     (while (< i (deref errors).len) (seqn
         (let error = (deref (vec-get errors i)))
@@ -2787,7 +2787,7 @@
     (cond
         (i (exit 1)))))
 
-(defun create-default-signatures (A (* mut Allocator)) : (Vec (Pair (@ mut u8) Signature)) (seq
+(defun create-default-signatures (A (* Allocator)) : (Vec (Pair (@ u8) Signature)) (seq
     (let map = (ref (new-vec A)))
     (vec-push map (inst Pair
         (a "+")
@@ -3333,1353 +3333,183 @@
 
 //
 // ==================================================================================================
-// LOWERING AST -> IR
+// LIBGCCJIT EXTERNS
 // ==================================================================================================
 //
 
-(defstruct SsaType
-    // 63-60 - alignment (2^n where n is the number encoded)
-    // 59    - signed
-    // 58-43 - number of fields
-    // 42-0  - width
-    (data u64))
+(defstruct GccJitContext)
 
-(defun ssa-type-alignment (type SsaType) : u64
-    // TODO: hex
-    // 0xf000000000000000
-    (>> (& type.data 17293822569102704640) 60))
+(defext gcc-jit-context-acquire
+    : (* GccJitContext)
+    "gcc_jit_context_acquire")
 
-(defun ssa-type-signed (type SsaType) : u64
-    // TODO: hex
-    // 1 << 59
-    (>> (& type.data 576460752303423488) 59))
+(defext gcc-jit-context-release
+    (context (* GccJitContext))
+    "gcc_jit_context_release")
 
-(defun ssa-type-field-count (type SsaType) : u64
-    // TODO: hex
-    // 0xffff << 43
-    (>> (& type.data 576451956210401280) 43))
 
-(defun ssa-type-width (type SsaType) : u64
-    // TODO: hex
-    // (1 << 43) - 1
-    (& type.data 8796093022207))
+(defstruct GccJitType)
 
-(defstruct SsaValue
-    (index u64)
-    (type SsaType))
+(defmacro GCC_JIT_TYPE_INT 8)
 
-(defmacro SSA_INSTRUCTION_OPCODE_INT                0)
-(defmacro SSA_INSTRUCTION_OPCODE_RETURN             1)
-(defmacro SSA_INSTRUCTION_OPCODE_JUMP               2)
-(defmacro SSA_INSTRUCTION_OPCODE_BRANCH_FALSE       3)
-(defmacro SSA_INSTRUCTION_OPCODE_INT_OPERATION      4)
-(defmacro SSA_INSTRUCTION_OPCODE_FLOAT_OPERATION    5)
-(defmacro SSA_INSTRUCTION_OPCODE_CALL               6)
-(defmacro SSA_INSTRUCTION_OPCODE_GET_FUNCTION       7)
-(defmacro SSA_INSTRUCTION_OPCODE_CALL_INDIRECT      8)
+(defext gcc-jit-context-get-type
+    (context (* GccJitContext))
+    (type u32)
+    : (* GccJitType)
+    "gcc_jit_context_get_type")
 
-(defmacro SSA_OPERATION_METADATA_MUL                0)
-(defmacro SSA_OPERATION_METADATA_DIV                1)
-(defmacro SSA_OPERATION_METADATA_MOD                2)
-(defmacro SSA_OPERATION_METADATA_ADD                3)
-(defmacro SSA_OPERATION_METADATA_SUB                4)
-(defmacro SSA_OPERATION_METADATA_BSL                5)
-(defmacro SSA_OPERATION_METADATA_BSR                6)
-(defmacro SSA_OPERATION_METADATA_BAND               7)
-(defmacro SSA_OPERATION_METADATA_BOR                8)
-(defmacro SSA_OPERATION_METADATA_BXOR               9)
-(defmacro SSA_OPERATION_METADATA_GT                10)
-(defmacro SSA_OPERATION_METADATA_GTE               11)
-(defmacro SSA_OPERATION_METADATA_LT                12)
-(defmacro SSA_OPERATION_METADATA_LTE               13)
-(defmacro SSA_OPERATION_METADATA_EQ                14)
-(defmacro SSA_OPERATION_METADATA_NE                15)
+(defstruct GccJitObject)
 
-(defstruct SsaInstruction
-    (returned SsaValue)
-    (opcode u64)
-    (metadata u64)
-    (arguments (Vec SsaValue)))
+(defext gcc-jit-type-as-object
+    (type (* GccJitType))
+    : (* GccJitObject)
+    "gcc_jit_type_as_object")
 
-(defstruct SsaBasicBlock
-    (parent-count u64)
-    (parameters (Vec SsaValue))
-    (insts (Vec SsaInstruction)))
+(defext gcc-jit-param-as-rvalue
+    (type (* GccJitParam))
+    : (* GccJitRValue)
+    "gcc_jit_param_as_rvalue")
 
-(defstruct SsaFunction
-    (linkage u64)
-    (last-value u64)
-    (blocks (Vec SsaBasicBlock)))
+(defext gcc-jit-function-as-object
+    (type (* GccJitFunction))
+    : (* GccJitObject)
+    "gcc_jit_function_as_object")
 
-(defstruct Ssa
-    (funcs (Vec (Pair (Vec u8) SsaFunction)))
-    (raw-data (Vec u8))
-    (current-func u64)
-    (current-block u64))
-
-(defun mangle-func-name (A (* mut Allocator)) (name (@ mut u8)) (type (* mut Type)) : (Vec u8) (seq
-    (let new-name = (ref (new-vec A)))
-    (cond
-        ((str-equals name "main") (seqn
-            (vec-push new-name 'm')
-            (vec-push new-name 'a')
-            (vec-push new-name 'i')
-            (vec-push new-name 'n')))
-        (:else (seqn
-            (vec-push new-name '_')
-            (vec-push new-name '_')
-            (vec-push new-name 'a')
-            (vec-push new-name 'm')
-            (vec-push new-name 'y')
-            (vec-push new-name '_')
-            (let i = 0)
-            (while (< i name.len) (seqn
-                (vec-push new-name (get name i))
-                (set i = (+ i 1))))
-            (vec-push new-name '_'))))
-    (deref new-name)))
-
-// 63-60 - alignment (2^n where n is the number encoded)
-// 59    - signed
-// 58-43 - number of fields
-// 42-0  - width
-(defun transform-type (type (* mut Type)) : SsaType (seq
-    (cond
-        ((== (deref type).type (TYPE_TYPE_INT)) (seq
-            (let width = (deref type).type-var-width)
-            (let alignment = (cond
-                ((<= width  8) 0)
-                ((<= width 16) 1)
-                ((<= width 32) 2)
-                ((<= width 64) 3)
-                (:else 0))) // TODO: error handling
-            (let signed = (cast (deref type).signed-mutable))
-            (let field-count = 1)
-            (inst SsaType
-                (data (| (<< alignment 60) (| (<< signed 59) (| (<< field-count 43) width)))))))
-        ((== (deref type).type (TYPE_TYPE_FUNCTION))
-            (inst SsaType
-                (data (| (<< 3 60) (| (<< 0 59) (| (<< 1 43) 64))))))
-        ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
-            (inst SsaType
-                (data 0)))
-        (:else (seq
-            (eprint "todo: unsupported type type ")
-            (eprint-int (deref type).type)
-            (eprint " for lowering\n")
-            (inst SsaType
-                (data 0)))))))
-
-(defun ssa-push-value
-    (ssa (* mut Ssa))
-    (type (* mut Type))
-    : SsaValue
+(defext gcc-jit-object-get-debug-string-raw
+    (object (* GccJitObject))
+    : (* u8)
+    "gcc_jit_object_get_debug_string")
+(defun gcc-jit-object-get-debug-string
+    (object (* GccJitObject))
+    : (@ u8)
 (seq
-    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
-    (let value = (inst SsaValue
-        (index (deref func).b.last-value)
-        (type (transform-type type))))
-    (set (deref func).b.last-value = (+ (deref func).b.last-value 1))
-    value))
+    (let raw = (gcc-jit-object-get-debug-string-raw object))
+    (let len = 0)
+    (while (deref (ptr-add raw len)) (seqn
+        (set len = (+ len 1))))
+    (slice len raw)))
 
-(defun ssa-push-block-param
-    (ssa (* mut Ssa))
-    (type (* mut Type))
-    (block u64)
-    : SsaValue
+(struct GccJitParam)
+
+(defext gcc-jit-context-new-param-raw
+    (context (* GccJitContext))
+    (location (* u8)) // TODO: gcc_jit_location implementation
+    (type (* GccJitType))
+    (name (* u8))
+    : (* GccJitParam)
+    "gcc_jit_context_new_param")
+(defun gcc-jit-context-new-param
+    (context (* GccJitContext))
+    (location (* u8))
+    (type (* GccJitType))
+    (name (@ u8))
+    : (* GccJitParam)
 (seq
-    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
-    (let block = (vec-get (ref (deref func).b.blocks) block))
-    (let value = (ssa-push-value ssa type))
-    (let block-params = (ref (deref block).parameters))
-    (vec-push block-params value)
-    (set (deref block).parameters = (deref block-params))
-    value))
+    (let null-term = (alloca (+ name.len 1)))
+    (let i = 0)
+    (while (< i name.len)
+        (seqn
+            (set (get null-term i) = (get name i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (gcc-jit-context-new-param-raw context location type null-term.ptr)))
 
-(defun ssa-push-instruction
-    (ssa (* mut Ssa))
-    (ret-type (* mut Type))
-    (opcode u64)
-    (metadata u64)
-    (arguments (Vec SsaValue))
-    : SsaValue
+(defstruct GccJitFunction)
+
+(defmacro GCC_JIT_FUNCTION_EXPORTED 0)
+(defmacro GCC_JIT_FUNCTION_INTERNAL 1)
+(defmacro GCC_JIT_FUNCTION_IMPORTED 2)
+(defmacro GCC_JIT_FUNCTION_ALWAYS_INLINE 3)
+(defext gcc-jit-context-new-function-raw
+    (context (* GccJitContext))
+    (location (* u8)) // TODO: gcc_jit_location implementation
+    (linkage u32)
+    (return-type (* GccJitType))
+    (name (* u8))
+    (param-count u32)
+    (param-list (* (* GccJitParam)))
+    (is-variadic u1)
+    : (* GccJitFunction)
+    "gcc_jit_context_new_function")
+(defun gcc-jit-context-new-function
+    (context (* GccJitContext))
+    (location (* u8)) // TODO: gcc_jit_location implementation
+    (linkage u32)
+    (return-type (* GccJitType))
+    (name (@ u8))
+    (params (@ (* GccJitParam)))
+    (is-variadic u1)
+    : (* GccJitFunction)
 (seq
-    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
-    (let block = (vec-get (ref (deref func).b.blocks) (deref ssa).current-block))
-    (let insts = (ref (deref block).insts))
-    (let value = (ssa-push-value ssa ret-type))
-    (let instruction = (inst SsaInstruction
-        (returned value)
-        (opcode opcode)
-        (metadata metadata)
-        (arguments arguments)))
-    (vec-push insts instruction)
-    (set (deref block).insts = (deref insts))
-    value))
+    (let null-term = (alloca (+ name.len 1)))
+    (let i = 0)
+    (while (< i name.len)
+        (seqn
+            (set (get null-term i) = (get name i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (gcc-jit-context-new-function-raw context location linkage return-type null-term.ptr (cast params.len) params.ptr is-variadic)))
 
-(defun ssa-push-block
-    (ssa (* mut Ssa))
-    : u64
+(defstruct GccJitBlock)
+
+(defext gcc-jit-function-new-block
+    (function (* GccJitFunction))
+    (location (* u8)) // TODO: gcc_jit_location implementation
+    : (* GccJitBlock)
+    "gcc_jit_function_new_block")
+
+(defstruct GccJitRValue)
+(defstruct GccJitLValue)
+
+(defmacro GCC_JIT_BINARY_OP_PLUS 0)
+(defmacro GCC_JIT_BINARY_OP_MINUS 1)
+(defmacro GCC_JIT_BINARY_OP_MULT 2)
+(defmacro GCC_JIT_BINARY_OP_DIVIDE 3)
+(defmacro GCC_JIT_BINARY_OP_MODULO 4)
+(defmacro GCC_JIT_BINARY_OP_BITWISE_AND 5)
+(defmacro GCC_JIT_BINARY_OP_BITWISE_XOR 6)
+(defmacro GCC_JIT_BINARY_OP_BITWISE_OR 7)
+(defmacro GCC_JIT_BINARY_OP_LOGICAL_AND 8)
+(defmacro GCC_JIT_BINARY_OP_LOGICAL_OR 9)
+(defmacro GCC_JIT_BINARY_OP_LSHIFT 10)
+(defmacro GCC_JIT_BINARY_OP_RSHIFT 11)
+(defext gcc-jit-context-new-binary-op
+    (context (* GccJitContext))
+    (location (* u8)) // TODO: gcc_jit_location implementation
+    (op u32)
+    (type (* GccJitType))
+    (a (* GccJitRValue))
+    (b (* GccJitRValue))
+    : (* GccJitRValue)
+    "gcc_jit_context_new_binary_op")
+
+(defext gcc-jit-block-end-with-return
+    (block (* GccJitBlock))
+    (location (* u8)) // TODO: gcc_jit_location implementation
+    (expression (* GccJitRValue))
+    "gcc_jit_block_end_with_return")
+
+(defmacro GCC_JIT_OUTPUT_KIND_ASSEMBLER 0)
+(defmacro GCC_JIT_OUTPUT_KIND_OBJECT_FILE 1)
+
+(defext gcc-jit-context-compile-to-file-raw
+    (context (* GccJitContext))
+    (output-kind u32)
+    (output-path (* u8))
+    "gcc_jit_context_compile_to_file")
+(defun gcc-jit-context-compile-to-file
+    (context (* GccJitContext))
+    (output-kind u32)
+    (output-path (@ u8))
 (seq
-    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
-    (let blocks = (ref (deref func).b.blocks))
-    (let last = (deref blocks).len)
-    (vec-push blocks (inst SsaBasicBlock
-        (parent-count 0)
-        (parameters (new-vec (deref ssa).funcs.A))
-        (insts (new-vec (deref ssa).funcs.A))))
-    (set (deref func).b.blocks = (deref blocks))
-    last))
-
-(defun parse-ssa-int (str (@ mut u8)) : u64 (seq
+    (let null-term = (alloca (+ output-path.len 1)))
     (let i = 0)
-    (let n = 0)
-    (while (< i str.len) (seqn
-        (let c = (get str i))
-        (cond
-            ((and (<= '0' c) (<= c '9')) (seqn
-                (set n = (+ (* n 10) (cast (- c '0'))))))
-            (:else
-                (break 0)))
-        (set i = (+ i 1)))
-    :else n)))
-
-(defun push-var-map-to-basic-block
-    (ssa (* mut Ssa))
-    (block u64)
-    (var-map (* mut (Vec (Vec (Pair (@ mut u8) (Pair u64 SsaType))))))
-(seqn
-    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
-    (let blocks = (ref (deref func).b.blocks))
-    (let block = (vec-get blocks block))
-    (let parameters = (ref (deref block).parameters))
-
-    (let i = 0)
-    (while (< i (deref var-map).len) (seqn
-        (let scope = (vec-get var-map i))
-        (let j = 0)
-        (while (< j (deref scope).len) (seqn
-            (let var = (vec-get scope j))
-            (let type = (deref var).b.b)
-            (let value = (inst SsaValue
-                (index (deref func).b.last-value)
-                (type type)))
-            (set (deref func).b.last-value = (+ (deref func).b.last-value 1))
-            (vec-push parameters value)
-            (set j = (+ j 1))))
-        (set i = (+ i 1))))
-
-    (set (deref block).parameters = (deref parameters))))
-
-(defun push-var-map-to-instr-args
-    (arguments (* mut (Vec SsaValue)))
-    (break-scope-count u64)
-    (var-map (* mut (Vec (Vec (Pair (@ mut u8) (Pair u64 SsaType))))))
-(seqn
-    (cond
-        ((not break-scope-count) (seqn
-            (set break-scope-count = (deref var-map).len))))
-    (let i = 0)
-    (while (< i break-scope-count) (seqn
-        (let scope = (vec-get var-map i))
-        (let j = 0)
-        (while (< j (deref scope).len) (seqn
-            (let var = (vec-get scope j))
-            (let index = (deref var).b.a)
-            (let type = (deref var).b.b)
-            (let value = (inst SsaValue
-                (index index)
-                (type type)))
-            (vec-push arguments value)
-            (set j = (+ j 1))))
-        (set i = (+ i 1))))))
-
-(defun load-var-map-from-block-params
-    (ssa (* mut Ssa))
-    (offset u64)
-    (var-map (* mut (Vec (Vec (Pair (@ mut u8) (Pair u64 SsaType))))))
-(seqn
-    (let func = (vec-get (ref (deref ssa).funcs) (deref ssa).current-func))
-    (let blocks = (ref (deref func).b.blocks))
-    (let block = (vec-get blocks (deref ssa).current-block))
-    (let parameters = (ref (deref block).parameters))
-    (let i = 0)
-    (while (< i (deref var-map).len) (seqn
-        (let scope = (vec-get var-map i))
-        (let j = 0)
-        (while (< j (deref scope).len) (seqn
-            (let var = (vec-get scope j))
-            (let param = (vec-get parameters offset))
-            (set (deref var).b.a = (deref param).index)
-            (set j = (+ j 1))
-            (set offset = (+ offset 1))))
-        (set i = (+ i 1))))))
-
-(defun ast-to-ssa-helper
-    (ast (* mut Ast))
-    (ssa (* mut Ssa))
-    (break-block u64)
-    (break-scope-count u64)
-    (var-map (* mut (Vec (Vec (Pair (@ mut u8) (Pair u64 SsaType))))))
-    (func-map (* mut (Vec (@ mut u8))))
-    : SsaValue
-(cond
-    ((== (deref ast).type (AST_NODE_TYPE_INT))
-        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (parse-ssa-int (deref ast).value) (new-vec (deref ast).children.A)))
-    ((== (deref ast).type (AST_NODE_TYPE_CHAR)) (seq
-        (let char = (cond
-            ((str-equals (deref ast).value "'\\n'")
-                '\n')
-            ((str-equals (deref ast).value "'\\r'")
-                '\r')
-            ((str-equals (deref ast).value "'\\t'")
-                '\t')
-            ((str-equals (deref ast).value "'\\''")
-                '\'')
-            ((str-equals (deref ast).value "'\\\"'")
-                '\"')
-            (:else
-                (get (deref ast).value 1))))
-        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (cast char) (new-vec (deref ast).children.A))))
-    ((== (deref ast).type (AST_NODE_TYPE_BOOL))
-        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) (cast (str-equals (deref ast).value "true")) (new-vec (deref ast).children.A)))
-    ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0))
-        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A)))
-
-    ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seq
-        (let var = (deref ast).value)
-        (let i = (deref var-map).len)
-        (while (> i 0) (seqn
-            (set i = (- i 1))
-            (let scope = (vec-get var-map i))
-            (cond
-                ((: u64 (cast (let var = (vec-find scope matches-key var))))
-                    (break (inst SsaValue
-                        (index (deref var).b.a)
-                        (type (deref var).b.b))))))
-        :else (seq
-            (let i = 0)
-            (while (< i (deref func-map).len) (seqn
-                (let func = (vec-get func-map i))
-                (cond
-                    ((str-equals var (deref func))
-                        (break (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_GET_FUNCTION) i (new-vec (deref ast).children.A)))))
-                (set i = (+ i 1)))
-            :else (inst SsaValue
-                (index 0)
-                (type (inst SsaType
-                    (data 0)))))))))
-
-    ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
-        (let func = (vec-get (ref (deref ast).children) 0))
-        (cond
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "seq")) (seq
-                (vec-push var-map (new-vec (deref var-map).A))
-
-                (let last = (inst SsaValue
-                    (index 0)
-                    (type (inst SsaType
-                        (data 0)))))
-                (let i = 1)
-                (while (< i (deref ast).children.len) (seqn
-                    (set last = (ast-to-ssa-helper (vec-get (ref (deref ast).children) i) ssa break-block break-scope-count var-map func-map))
-                    (set i = (+ i 1))))
-
-                (vec-pop var-map)
-                last))
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "seqn")) (seq
-                (vec-push var-map (new-vec (deref var-map).A))
-                (let i = 1)
-                (while (< i (deref ast).children.len) (seqn
-                    (ast-to-ssa-helper (vec-get (ref (deref ast).children) i) ssa break-block break-scope-count var-map func-map)
-                    (set i = (+ i 1))))
-                (vec-pop var-map)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ast).children.A))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "cond")) (seq
-                (let conds = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push conds (ssa-push-block ssa))
-                (let thens = (ref (new-vec (deref ssa).funcs.A)))
-
-                (let i = 1)
-                (while (< i (deref ast).children.len) (seqn
-                    (let pair = (vec-get (ref (deref ast).children) i))
-                    (let condy = (vec-get (ref (deref pair).children) 0))
-                    (cond
-                        ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
-                            (let condy = (ssa-push-block ssa))
-                            (push-var-map-to-basic-block ssa condy var-map)
-                            (let then = (ssa-push-block ssa))
-                            (vec-push conds condy)
-                            (vec-push thens then))))
-                    (set i = (+ i 1))))
-
-                (let last-block = (ssa-push-block ssa))
-                (let cond-value = (ssa-push-block-param ssa (ref (deref ast).typed) last-block))
-                (push-var-map-to-basic-block ssa last-block var-map)
-
-                (let i = 1)
-                (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
-                (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
-                (while (< i (deref ast).children.len) (seqn
-                    (let pair = (vec-get (ref (deref ast).children) i))
-                    (let condy = (vec-get (ref (deref pair).children) 0))
-                    (let then = (vec-get (ref (deref pair).children) 1))
-
-                    (vec-push var-map (new-vec (deref var-map).A))
-                    (cond
-                        ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
-                            (let condy = (ast-to-ssa-helper condy ssa break-block break-scope-count var-map func-map))
-                            (let args = (ref (new-vec (deref ssa).funcs.A)))
-                            (vec-push args condy)
-                            (push-var-map-to-instr-args args (- (deref var-map).len 1) var-map)
-                            (let next-cond-block = (deref (vec-get conds i)))
-                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE) next-cond-block (deref args))
-                            (let then-block = (deref (vec-get thens (- i 1))))
-                            (push-var-map-to-basic-block ssa then-block var-map)
-                            (let args = (ref (new-vec (deref args).A)))
-                            (push-var-map-to-instr-args args 0 var-map)
-                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) then-block (deref args))
-
-                            (set (deref ssa).current-block = then-block)
-                            (load-var-map-from-block-params ssa 0 var-map)
-                            (let then = (ast-to-ssa-helper then ssa break-block break-scope-count var-map func-map))
-                            (let args = (ref (new-vec (deref ssa).funcs.A)))
-                            (vec-push args then)
-                            (vec-pop var-map)
-                            (push-var-map-to-instr-args args 0 var-map)
-                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) last-block (deref args))
-
-                            (set (deref ssa).current-block = next-cond-block)
-                            (load-var-map-from-block-params ssa 0 var-map)))
-                        (:else (seqn
-                            (let else = (ast-to-ssa-helper then ssa break-block break-scope-count var-map func-map))
-                            (let args = (ref (new-vec (deref ssa).funcs.A)))
-                            (vec-push args else)
-                            (push-var-map-to-instr-args args 0 var-map)
-                            (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) last-block (deref args))
-                            (vec-pop var-map))))
-                    (set i = (+ i 1))))
-
-                (set (deref ssa).current-block = last-block)
-                (load-var-map-from-block-params ssa 1 var-map)
-                cond-value))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "loop")) (seq
-                (set break-scope-count = (deref var-map).len)
-                (vec-push var-map (new-vec (deref var-map).A))
-                (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
-                (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
-
-                (let loop-block = (ssa-push-block ssa))
-                (push-var-map-to-basic-block ssa loop-block var-map)
-
-                (let last-block = (ssa-push-block ssa))
-                (let loop-value = (ssa-push-block-param ssa (ref (deref ast).typed) last-block))
-                (push-var-map-to-basic-block ssa last-block var-map)
-
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (push-var-map-to-instr-args args 0 var-map)
-                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) loop-block (deref args))
-
-                (set (deref ssa).current-block = loop-block)
-                (load-var-map-from-block-params ssa 0 var-map)
-                (ast-to-ssa-helper (vec-get (ref (deref ast).children) 1) ssa last-block break-scope-count var-map func-map)
-
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (push-var-map-to-instr-args args 0 var-map)
-                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_JUMP) loop-block (deref args))
-
-                (vec-pop var-map)
-
-                (set (deref ssa).current-block = last-block)
-                (load-var-map-from-block-params ssa 1 var-map)
-
-                loop-value))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "break")) (seq
-                (let v = (cond
-                    ((== (deref ast).children.len 1)
-                        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ssa).funcs.A)))
-                    (:else
-                        (ast-to-ssa-helper (vec-get (ref (deref ast).children) 1) ssa break-block break-scope-count var-map func-map))))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args v)
-                (push-var-map-to-instr-args args break-scope-count var-map)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_JUMP) break-block (deref args))
-                (set (deref ssa).current-block = (ssa-push-block ssa))
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT) 0 (new-vec (deref ssa).funcs.A))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "*")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_MUL) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "/")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_DIV) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "%")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_MOD) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "+")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_ADD) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "-")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_SUB) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "<<")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_BSL) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value ">>")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_BSR) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "&")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_BAND) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "|")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_BOR) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "^")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_BXOR) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value ">")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_GT) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value ">=")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_GTE) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "<")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_LT) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "<=")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_LTE) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "==")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_EQ) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "!=")) (seq
-                (let a = (vec-get (ref (deref ast).children) 1))
-                (let b = (vec-get (ref (deref ast).children) 2))
-                (let a = (ast-to-ssa-helper a ssa break-block break-scope-count var-map func-map))
-                (let b = (ast-to-ssa-helper b ssa break-block break-scope-count var-map func-map))
-                (let args = (ref (new-vec (deref ssa).funcs.A)))
-                (vec-push args a)
-                (vec-push args b)
-                (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_INT_OPERATION) (SSA_OPERATION_METADATA_NE) (deref args))))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "let")) (seq
-                (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-                (let var = (deref (vec-get (ref (deref ast).children) 1)).value)
-                (let value = (ast-to-ssa-helper body ssa break-block break-scope-count var-map func-map))
-                (let scope = (vec-get var-map (- (deref var-map).len 1)))
-                (cond
-                    ((: u64 (cast (let var = (vec-find scope matches-key var)))) (seqn
-                        (set (deref var).b.a = value.index)
-                        (set (deref var).b.b = value.type)))
-                    (:else (seqn
-                        (let var = (inst Pair
-                            (a var)
-                            (b (inst Pair
-                                (a value.index)
-                                (b value.type)))))
-                        (vec-push scope var))))
-                value))
-
-            ((and (== (deref func).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref func).value "set")) (seq
-                (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-                (let var = (deref (vec-get (ref (deref ast).children) 1)).value)
-                (let value = (ast-to-ssa-helper body ssa break-block break-scope-count var-map func-map))
-                (let i = (deref var-map).len)
-                (while (> i 0) (seqn
-                    (set i = (- i 1))
-                    (let scope = (vec-get var-map i))
-                    (cond
-                        ((: u64 (cast (let var = (vec-find scope matches-key var)))) (seqn
-                            (set (deref var).b.a = value.index)
-                            (break))))))
-                value))
-
-            ((== (deref func).type (AST_NODE_TYPE_SYMBOL)) (seq
-                (let var = (deref func).value)
-                (let i = (deref var-map).len)
-                (let is-var = (while (> i 0) (seqn
-                    (set i = (- i 1))
-                    (let scope = (vec-get var-map i))
-                    (cond
-                        ((: u64 (cast (let var = (vec-find scope matches-key var)))) (seqn
-                            (break true)))))
-                :else false))
-                (cond
-                    (is-var (seq
-                        (let args = (ref (new-vec (deref ast).children.A)))
-                        (let i = 0)
-                        (while (< i (deref ast).children.len) (seqn
-                            (let arg = (vec-get (ref (deref ast).children) i))
-                            (let arg = (ast-to-ssa-helper arg ssa break-block break-scope-count var-map func-map))
-                            (vec-push args arg)
-                            (set i = (+ i 1))))
-                        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_CALL_INDIRECT) 0 (deref args))))
-                    (:else (seq
-                        (let id = 0)
-                        (while (< id (deref func-map).len) (seqn
-                            (let name = (deref (vec-get func-map id)))
-                            (cond
-                                ((str-equals name var)
-                                    (break)))
-                            (set id = (+ id 1))))
-
-                        (let args = (ref (new-vec (deref ast).children.A)))
-                        (let i = 1)
-                        (while (< i (deref ast).children.len) (seqn
-                            (let arg = (vec-get (ref (deref ast).children) i))
-                            (let arg = (ast-to-ssa-helper arg ssa break-block break-scope-count var-map func-map))
-                            (vec-push args arg)
-                            (set i = (+ i 1))))
-                        (ssa-push-instruction ssa (ref (deref ast).typed) (SSA_INSTRUCTION_OPCODE_CALL) id (deref args)))))))
-
-            (:else (seq
-                (eprint "todo: unsupported ast for lowering S expression to ssa: ")
-                (eprint (deref func).value)
-                (eprint "\n")
-                (exit 1)
-                (inst SsaValue
-                    (index 0)
-                    (type (inst SsaType
-                        (data 0)))))))))
-
-    (:else (seq
-        (eprint "todo: unsupported ast node ")
-        (eprint-int (deref ast).type)
-        (eprint " for lowering to ssa\n")
-        (exit 1)
-        (inst SsaValue
-            (index 0)
-            (type (inst SsaType
-                (data 0))))))))
-
-(defun ast-to-ssa (ast (* mut Ast)) (struct-map (* mut (Vec (Pair (@ mut u8) Struct)))) : Ssa (seq
-    (let ssa = (ref (inst Ssa
-        (funcs (new-vec (deref ast).children.A))
-        (raw-data (new-vec (deref ast).children.A))
-        (current-func 0)
-        (current-block 0))))
-    (let func-map = (ref (new-vec (deref ast).children.A)))
-    (let i = 0)
-    (while (< i (deref ast).children.len) (seqn
-        (let ast = (vec-get (ref (deref ast).children) i))
-        (cond
-            ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
-                (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
-                (vec-push func-map name))))
-        (set i = (+ i 1))))
-
-    (let i = 0)
-    (while (< i (deref ast).children.len) (seqn
-        (let ast = (vec-get (ref (deref ast).children) i))
-        (cond
-            ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
-                (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
-                (let name = (ref (mangle-func-name (deref struct-map).A name (ref (deref ast).typed))))
-                (let name-slice = (vec-slice name))
-
-                (let i = 0)
-                (while (< i (deref ssa).funcs.len) (seqn
-                    (let found-name = (ref (deref (vec-get (ref (deref ssa).funcs) i)).a))
-                    (let found-name-slice = (vec-slice found-name))
-                    (cond
-                        ((str-equals found-name-slice name-slice)
-                            (break)))
-                    (set i = (+ i 1))))
-
-                (cond
-                    ((>= i (deref ssa).funcs.len) (seqn
-                        (let funcs = (ref (deref ssa).funcs))
-                        (vec-push funcs (inst Pair
-                            (a (deref name))
-                            (b (inst SsaFunction
-                                (linkage 0)
-                                (last-value 0)
-                                (blocks (new-vec (deref struct-map).A))))))
-                        (set (deref ssa).funcs = (deref funcs)))))
-                (set (deref ssa).current-func = i)
-                (ssa-push-block ssa)
-                (set (deref ssa).current-block = 0)
-
-                (let scope = (ref (new-vec (deref ast).children.A)))
-
-                // TODO: arguments
-                (let j = 2)
-                (let func-type = (deref ast).typed)
-                (while (< j (- (deref ast).children.len 1)) (seqn
-                    (let arg = (vec-get (ref (deref ast).children) j))
-                    (cond
-                        ((!= (deref arg).type (AST_NODE_TYPE_SEXPR))
-                            (break)))
-
-                    (let name = (vec-get (ref (deref arg).children) 0))
-                    (let name = (deref name).value)
-
-                    (let type = (vec-get (ref func-type.subtypes) (- j 2)))
-                    (let arg = (ssa-push-block-param ssa type 0))
-                    (vec-push scope (inst Pair
-                        (a name)
-                        (b (inst Pair
-                            (a arg.index)
-                            (b arg.type)))))
-                    (set j = (+ j 1))))
-
-                (let var-map = (ref (new-vec (deref ast).children.A)))
-                (vec-push var-map (deref scope))
-                (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-                (let ret-value = (ast-to-ssa-helper body ssa 0 0 var-map func-map))
-                (let ret-args = (ref (new-vec (deref ssa).funcs.A)))
-                (let nil-type = (ref (empty-type (deref ssa).funcs.A)))
-                (set (deref nil-type).type = (TYPE_TYPE_TUPLE))
-                (vec-push ret-args ret-value)
-                (ssa-push-instruction ssa nil-type (SSA_INSTRUCTION_OPCODE_RETURN) 0 (deref ret-args)))))
-        (set i = (+ i 1))))
-    (deref ssa)))
-
-(defun print-ssa-value (value (* mut SsaValue)) (seqn
-    (print "%")
-    (print-int (deref value).index)
-    (print ":")
-    (cond
-        ((ssa-type-signed (deref value).type)
-            (print "i"))
-        (:else
-            (print "u")))
-    (print-int (ssa-type-width (deref value).type))
-    (print "f")
-    (print-int (ssa-type-field-count (deref value).type))
-    (print "@2^")
-    (print-int (ssa-type-alignment (deref value).type))))
-
-(defun print-ssa-instruction
-    (instruction (* mut SsaInstruction))
-    (ssa (* mut Ssa))
-(seqn
-    (print "    ")
-    (print-ssa-value (ref (deref instruction).returned))
-    (print " = ")
-    (cond
-        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT)) (seqn
-            (print "int ")
-            (print-int (deref instruction).metadata)))
-
-        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_RETURN))
-            (print "return"))
-
-        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_JUMP)) (seqn
-            (print "jump b")
-            (print-int (deref instruction).metadata)))
-
-        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE)) (seqn
-            (print "branch-false b")
-            (print-int (deref instruction).metadata)))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_MUL)))
-            (print "imul"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_DIV)))
-            (print "idiv"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_MOD)))
-            (print "mod"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_ADD)))
-            (print "iadd"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_SUB)))
-            (print "isub"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BSL)))
-            (print "bsl"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BSR)))
-            (print "bsr"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BAND)))
-            (print "band"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BOR)))
-            (print "bor"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BXOR)))
-            (print "bxor"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_GT)))
-            (print "igt"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_GTE)))
-            (print "igte"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_LT)))
-            (print "ilt"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_LTE)))
-            (print "ilte"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_EQ)))
-            (print "ieq"))
-
-        ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_NE)))
-            (print "ineq"))
-
-        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_CALL)) (seqn
-            (print "call ")
-            (print-int (deref instruction).metadata)
-            (let func = (vec-get (ref (deref ssa).funcs) (deref instruction).metadata))
-            (print "(")
-            (print (vec-slice (ref (deref func).a)))
-            (print ")")))
-
-        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_GET_FUNCTION)) (seqn
-            (print "getfunc ")
-            (print-int (deref instruction).metadata)
-            (let func = (vec-get (ref (deref ssa).funcs) (deref instruction).metadata))
-            (print "(")
-            (print (vec-slice (ref (deref func).a)))
-            (print ")")))
-
-        ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_CALL_INDIRECT)) (seqn
-            (print "icall")))
-
-        (:else (seqn
-            (print "UNKNOWN ")
-            (print-int (deref instruction).metadata))))
-    (let i = 0)
-    (while (< i (deref instruction).arguments.len) (seqn
-        (print " ")
-        (let value = (vec-get (ref (deref instruction).arguments) i))
-        (print-ssa-value value)
-        (set i = (+ i 1))))
-    (print "\n")))
-
-(defun print-ssa (ssa (* mut Ssa)) (seqn
-    (let i = 0)
-    (while (< i (deref ssa).funcs.len) (seqn
-        (let func = (vec-get (ref (deref ssa).funcs) i))
-        (print (vec-slice (ref (deref func).a)))
-        (print ":\n")
-        (let j = 0)
-        (while (< j (deref func).b.blocks.len) (seqn
-            (let block = (vec-get (ref (deref func).b.blocks) j))
-            (print "  ")
-            (print-int j)
-            (print ":")
-            (let k = 0)
-            (while (< k (deref block).parameters.len) (seqn
-                (print " ")
-                (print-ssa-value (vec-get (ref (deref block).parameters) k))
-                (set k = (+ k 1))))
-            (print "\n")
-            (let k = 0)
-            (while (< k (deref block).insts.len) (seqn
-                (print " ")
-                (let instruction = (vec-get (ref (deref block).insts) k))
-                (print-ssa-instruction instruction ssa)
-                (set k = (+ k 1))))
-            (print "\n")
-            (set j = (+ j 1))))
-        (print "\n")
-        (set i = (+ i 1))))))
-
-
-
-//
-// ==================================================================================================
-// REGISTER ALLOCATION
-// ==================================================================================================
-//
-
-(defstruct RegAllocGraphNode
-    (ssa-index u64)
-    (edge-count u64)
-    (register u64)
-    (on-stack u1)
-    (is-argument u1)
-    (first-usage u64)
-    (last-usage u64)
-    (usage-count u64)
-    (pinned u1)
-    (temporary-edge-count u64)
-    (temporarily-removed u1))
-
-(defstruct RegAllocGraph
-    (nodes (Vec RegAllocGraphNode))
-    (edges (Vec (Pair u64 u64))))
-
-(defun create-reg-alloc-graph-from-ssa
-    (func (* mut SsaFunction))
-    (arg-reg-count u64)
-    : RegAllocGraph
-(seq
-    (let nodes = (ref (new-vec (deref func).blocks.A)))
-    (let edges = (ref (new-vec (deref func).blocks.A)))
-    (let i = 0)
-    (while (< i (deref func).last-value) (seqn
-        (vec-push nodes (inst RegAllocGraphNode
-            (ssa-index i)
-            (edge-count 0)
-            (register (- 0 1))
-            (on-stack false)
-            (is-argument false)
-            (first-usage 0)
-            (last-usage 0)
-            (usage-count 0)
-            (pinned false)
-            (temporary-edge-count 0)
-            (temporarily-removed false)))
-        (set i = (+ i 1))))
-
-    (let i = 0)
-    (while (< i (deref func).blocks.len) (seqn
-        (let block = (vec-get (ref (deref func).blocks) i))
-        (let j = 0)
-        (while (< j (deref block).insts.len) (seqn
-            (let instr = (vec-get (ref (deref block).insts) j))
-            (cond
-                ((or (== (deref instr).opcode (SSA_INSTRUCTION_OPCODE_JUMP)) (== (deref instr).opcode (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE))) (seqn
-                    (let block = (vec-get (ref (deref func).blocks) (deref instr).metadata))
-                    (set (deref block).parent-count = (+ (deref block).parent-count 1)))))
-            (set j = (+ j 1))))
-        (set i = (+ i 1))))
-
-    (let i = 0)
-    (let index-counter = 0)
-    (while (< i (deref func).blocks.len) (seqn
-        (let block = (vec-get (ref (deref func).blocks) i))
-
-        (cond
-            ((== i 0) (seqn
-                (let j = 0)
-                (while (< j (deref block).parameters.len) (seqn
-                    (let param = (vec-get (ref (deref block).parameters) j))
-                    (let node = (vec-get nodes (deref param).index))
-                    (set (deref node).first-usage = index-counter)
-                    (set (deref node).register = j)
-                    (set (deref node).is-argument = true)
-                    (set (deref node).pinned = true)
-                    (set (deref node).on-stack = (>= j arg-reg-count))
-                    (cond
-                        ((== (deref node).last-usage 0) (seqn
-                            (set (deref node).last-usage = index-counter))))
-                    (set j = (+ j 1))))))
-            ((> (deref block).parent-count 1) (seqn
-                (let j = 0)
-                (while (< j (deref block).parameters.len) (seqn
-                    (let param = (vec-get (ref (deref block).parameters) j))
-                    (let node = (vec-get nodes (deref param).index))
-                    (set (deref node).first-usage = index-counter)
-                    (cond
-                        ((== (deref node).last-usage 0) (seqn
-                            (set (deref node).last-usage = index-counter))))
-                    (set j = (+ j 1)))))))
-        (set index-counter = (+ index-counter 1))
-
-        (let j = 0)
-        (while (< j (deref block).insts.len) (seqn
-            (let instr = (vec-get (ref (deref block).insts) j))
-            (let node = (vec-get nodes (deref instr).returned.index))
-            (set (deref node).first-usage = index-counter)
-            (cond
-                ((== (deref node).last-usage 0) (seqn
-                    (set (deref node).last-usage = index-counter))))
-
-            (let block = (deref instr).metadata)
-            (let block = (vec-get (ref (deref func).blocks) block))
-            (let k = 0)
-            (while (< k (deref instr).arguments.len) (seqn
-                (cond
-                    ((and (!= block (null)) (> (deref block).parent-count 1))
-                        ())
-                    ((or (== (deref instr).opcode (SSA_INSTRUCTION_OPCODE_JUMP)) (and (>= k 1) (== (deref instr).opcode (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE))))
-                        (break)))
-
-                (cond
-                    ((and (== (deref instr).opcode (SSA_INSTRUCTION_OPCODE_CALL)) (< k arg-reg-count)) (seqn
-                        (let new-node = (inst RegAllocGraphNode
-                            (ssa-index (deref nodes).len)
-                            (edge-count 0)
-                            (register k)
-                            (on-stack (>= k arg-reg-count))
-                            (is-argument true)
-                            (first-usage index-counter)
-                            (last-usage (+ index-counter 1))
-                            (usage-count 1)
-                            (pinned true)
-                            (temporary-edge-count 0)
-                            (temporarily-removed false)))
-                        (vec-push nodes new-node))))
-
-                (let arg = (vec-get (ref (deref instr).arguments) k))
-                (let index = (deref arg).index)
-                (let node = (vec-get nodes index))
-                (while (!= (deref node).ssa-index index) (seqn
-                    (set index = (deref node).ssa-index)
-                    (set node = (vec-get nodes index))))
-                (set (deref node).last-usage = index-counter)
-                (set k = (+ k 1))))
-            (let l = 0)
-            (cond
-                ((and (!= block (null)) (<= (deref block).parent-count 1))
-                    (while (< k (deref instr).arguments.len) (seqn
-                        (let arg = (vec-get (ref (deref instr).arguments) k))
-                        (let block-param = (vec-get (ref (deref block).parameters) l))
-                        (let node = (vec-get nodes (deref block-param).index))
-                        (set (deref node).ssa-index = (deref arg).index)
-                        (set l = (+ l 1))
-                        (set k = (+ k 1))))))
-
-            (set index-counter = (+ index-counter 1))
-            (set j = (+ j 1))))
-        (set i = (+ i 1))))
-
-    (let i = 0)
-    (while (< i (deref func).blocks.len) (seqn
-        (let block = (vec-get (ref (deref func).blocks) i))
-        (let j = 0)
-        (while (< j (deref block).insts.len) (seqn
-            (let instr = (vec-get (ref (deref block).insts) j))
-            (let k = 0)
-            (while (< k (deref instr).arguments.len) (seqn
-                (let arg = (vec-get (ref (deref instr).arguments) k))
-                (let index = (deref arg).index)
-                (let node = (vec-get nodes index))
-                (while (!= (deref node).ssa-index index) (seqn
-                    (set index = (deref node).ssa-index)
-                    (set node = (vec-get nodes index))))
-                (set (deref node).usage-count = (+ (deref node).usage-count 1))
-                (set k = (+ k 1))))
-            (set j = (+ j 1))))
-        (set i = (+ i 1))))
-
-    (let i = 0)
-    (while (< i (deref nodes).len) (seqn
-        (let index = i)
-        (let n1 = (vec-get nodes index))
-        (while (!= (deref n1).ssa-index index) (seqn
-            (set index = (deref n1).ssa-index)
-            (set n1 = (vec-get nodes index))))
-        (cond
-            ((!= (deref n1).first-usage (deref n1).last-usage) (seqn
-                (let j = (+ i 1))
-                (while (< j (deref nodes).len) (seqn
-                    (let index = j)
-                    (let n2 = (vec-get nodes index))
-                    (while (!= (deref n2).ssa-index index) (seqn
-                        (set index = (deref n2).ssa-index)
-                        (set n2 = (vec-get nodes index))))
-                    (cond
-                        ((== (deref n1).ssa-index (deref n2).ssa-index)
-                            ())
-                        ((or (and (== (deref n1).first-usage (deref n2).last-usage) (> (deref n1).last-usage (deref n2).first-usage)) (and (== (deref n1).last-usage (deref n2).first-usage) (< (deref n1).first-usage (deref n2).last-usage)))
-                            ())
-                        ((== (deref n2).first-usage (deref n2).last-usage)
-                            ())
-                        ((and (<= (deref n1).first-usage (deref n2).last-usage) (>= (deref n1).last-usage (deref n2).first-usage)) (seqn
-                            (let edge = (inst Pair
-                                (a (deref n1).ssa-index)
-                                (b (deref n2).ssa-index)))
-                            (cond
-                                ((not (: u64 (cast (vec-find edges matches-edge edge)))) (seqn
-                                    (set (deref n1).edge-count = (+ (deref n1).edge-count 1))
-                                    (set (deref n2).edge-count = (+ (deref n2).edge-count 1))
-                                    (vec-push edges edge)))))))
-                    (set j = (+ j 1)))))))
-        (set i = (+ i 1))))
-
-    (inst RegAllocGraph
-        (edges (deref edges))
-        (nodes (deref nodes)))))
-
-(defun matches-edge
-    (edge-1 (* mut (Pair u64 u64)))
-    (edge-2 (Pair u64 u64))
-    : u1
-(seq
-    (let edge-1 = (deref edge-1))
-    (or (and (== edge-1.a edge-2.a) (== edge-1.b edge-2.b)) (and (== edge-1.a edge-2.b) (== edge-1.b edge-2.a)))))
-
-(defun print-reg-alloc-graph
-    (graph (* mut RegAllocGraph))
-(seqn
-    (let i = 0)
-    (while (< i (deref graph).nodes.len) (seqn
-        (let node = (vec-get (ref (deref graph).nodes) i))
-        (print-int (deref node).ssa-index)
-        (print " (")
-        (print-int (deref node).usage-count)
-        (print "; ")
-        (print-int (deref node).first-usage)
-        (print " - ")
-        (print-int (deref node).last-usage)
-        (print ")")
-        (print ": ")
-        (cond
-            ((deref node).on-stack
-                (print "STACK="))
-            (:else
-                (print "REG=")))
-        (print-int (deref node).register)
-        (print "\n")
-        (set i = (+ i 1))))
-    (print "\n")
-    (let i = 0)
-    (print "graph {\n")
-    (while (< i (deref graph).edges.len) (seqn
-        (let edge = (vec-get (ref (deref graph).edges) i))
-        (print "    \"")
-        (print-int (deref edge).a)
-        (let node = (vec-get (ref (deref graph).nodes) (deref edge).a))
-        (print ": ")
-        (cond
-            ((deref node).on-stack
-                (print "STACK="))
-            (:else
-                (print "REG=")))
-        (print-int (deref node).register)
-        (print "\" -- \"")
-        (print-int (deref edge).b)
-        (let node = (vec-get (ref (deref graph).nodes) (deref edge).b))
-        (print ": ")
-        (cond
-            ((deref node).on-stack
-                (print "STACK="))
-            (:else
-                (print "REG=")))
-        (print-int (deref node).register)
-        (print "\"\n")
-        (set i = (+ i 1))))
-    (print "}\n")))
-
-(defun reg-alloc
-    (graph (* mut RegAllocGraph))
-    (argument-registers-to-registers (* mut (Vec u64)))
-    (reg-count u64)
-(seqn
-    (let i = 0)
-    (while (< i (deref graph).nodes.len) (seqn
-        (let node = (vec-get (ref (deref graph).nodes) i))
-        (set (deref node).temporary-edge-count = (deref node).edge-count)
-        (cond
-            ((and (deref node).is-argument (not (deref node).on-stack)) (seqn
-                (set (deref node).register = (deref (vec-get argument-registers-to-registers (deref node).register))))))
-        (set i = (+ i 1))))
-    (let stack = (ref (new-vec (deref graph).nodes.A)))
-    (let i = 0)
-    (while (< i (deref graph).nodes.len) (seqn
-        (let j = 0)
-        (let usage-count = (- 0 1))
-        (let index = (- 0 1))
-        (while (< j (deref graph).nodes.len) (seqn
-            (let node = (vec-get (ref (deref graph).nodes) j))
-            (let fewer-neighbours = (< (deref node).temporary-edge-count reg-count))
-            (cond
-                ((deref node).pinned
-                    ())
-                ((and (not (deref node).temporarily-removed) (or fewer-neighbours (< (deref node).usage-count usage-count))) (seqn
-                    (set index = j)
-                    (set usage-count = (deref node).usage-count)
-                    (cond
-                        (fewer-neighbours
-                            (break))))))
-            (set j = (+ j 1))))
-
-        (cond
-            ((!= index (- 0 1)) (seqn
-                (let node = (vec-get (ref (deref graph).nodes) index))
-                (set (deref node).temporarily-removed = true)
-                (vec-push stack index)
-                (let j = 0)
-                (while (< j (deref graph).edges.len) (seqn
-                    (let edge = (vec-get (ref (deref graph).edges) j))
-                    (cond
-                        ((== (deref edge).a index) (seqn
-                            (let node = (vec-get (ref (deref graph).nodes) (deref edge).b))
-                            (set (deref node).temporary-edge-count = (- (deref node).temporary-edge-count 1))))
-                        ((== (deref edge).b index) (seqn
-                            (let node = (vec-get (ref (deref graph).nodes) (deref edge).a))
-                            (set (deref node).temporary-edge-count = (- (deref node).temporary-edge-count 1)))))
-                    (set j = (+ j 1)))))))
-        (set i = (+ i 1))))
-
-        (let temp-vec = (ref (new-vec (deref graph).nodes.A)))
-        (while (deref stack).len (seqn
-            (let index = (deref (vec-get stack (- (deref stack).len 1))))
-            (vec-pop stack)
-            (let node = (vec-get (ref (deref graph).nodes) index))
-            (set (deref node).temporarily-removed = false)
-            (set (deref temp-vec).len = 0)
-            (let i = 0)
-            (while (< i (deref graph).edges.len) (seqn
-                (let edge = (vec-get (ref (deref graph).edges) i))
-                (cond
-                    ((== (deref edge).a index) (seqn
-                        (let n = (vec-get (ref (deref graph).nodes) (deref edge).b))
-                        (let register = (deref n).register)
-                        (cond
-                            ((and (not (deref n).on-stack) (not (: u64 (cast (vec-find temp-vec matches-register register)))))
-                                (vec-push temp-vec register)))))
-                    ((== (deref edge).b index) (seqn
-                        (let n = (vec-get (ref (deref graph).nodes) (deref edge).a))
-                        (let register = (deref n).register)
-                        (cond
-                            ((and (not (deref n).on-stack) (not (: u64 (cast (vec-find temp-vec matches-register register)))))
-                                (vec-push temp-vec register))))))
-                (set i = (+ i 1))))
-            (let i = 0)
-            (while (< i reg-count) (seqn
-                (cond
-                    ((not (: u64 (cast (vec-find temp-vec matches-register i)))) (seqn
-                        (set (deref node).register = i)
-                        (break))))
-                (set i = (+ i 1)))
-            :else (seqn
-                (set (deref node).on-stack = true)
-                (set (deref temp-vec).len = 0)
-                (let i = 0)
-                (while (< i (deref graph).edges.len) (seqn
-                    (let edge = (vec-get (ref (deref graph).edges) i))
-                    (cond
-                        ((== (deref edge).a index) (seqn
-                            (let n = (vec-get (ref (deref graph).nodes) (deref edge).b))
-                            (let register = (deref n).register)
-                            (cond
-                                ((and (and (deref n).on-stack (not (deref n).is-argument)) (not (: u64 (cast (vec-find temp-vec matches-register register)))))
-                                    (vec-push temp-vec register)))))
-                        ((== (deref edge).b index) (seqn
-                            (let n = (vec-get (ref (deref graph).nodes) (deref edge).a))
-                            (let register = (deref n).register)
-                            (cond
-                                ((and (and (deref n).on-stack (not (deref n).is-argument)) (not (: u64 (cast (vec-find temp-vec matches-register register)))))
-                                    (vec-push temp-vec register))))))
-                    (set i = (+ i 1))))
-                (let i = 1)
-                (while (!= i 0) (seqn
-                    (cond
-                        ((not (: u64 (cast (vec-find temp-vec matches-register i)))) (seqn
-                            (set (deref node).register = i)
-                            (break))))
-                    (set i = (+ i 1))))))))
-    (let i = 0)
-    (while (< i (deref graph).nodes.len) (seqn
-        (let index = i)
-        (let node = (vec-get (ref (deref graph).nodes) index))
-        (while (!= (deref node).ssa-index index) (seqn
-            (set index = (deref node).ssa-index)
-            (set node = (vec-get (ref (deref graph).nodes) index))))
-        (let source = (vec-get (ref (deref graph).nodes) i))
-        (set (deref source).register = (deref node).register)
-        (set (deref source).on-stack = (deref node).on-stack)
-        (set i = (+ i 1))))))
-
-(defun matches-register (reg (* mut u64)) (reg-2 u64) : u1
-    (== (deref reg) reg-2))
+    (while (< i output-path.len)
+        (seqn
+            (set (get null-term i) = (get output-path i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (gcc-jit-context-compile-to-file-raw context output-kind null-term.ptr)))
 
 
 
@@ -4689,868 +3519,26 @@
 // ==================================================================================================
 //
 
-(defun register-x86
-    (file File)
-    (on-stack u1)
-    (reg-index u64)
-(cond
-    (on-stack (seqn
-        (file-write file "qword [rsp - ")
-        (file-write-int file (* reg-index 8))
-        (file-write file "]")))
-    (:else (cond
-        ((== reg-index 0)
-            (file-write file "rax"))
-        ((== reg-index 1)
-            (file-write file "rbx"))
-        ((== reg-index 2)
-            (file-write file "rcx"))
-        ((== reg-index 3)
-            (file-write file "rdx"))
-        ((== reg-index 4)
-            (file-write file "rsi"))
-        ((== reg-index 5)
-            (file-write file "rdi"))
-        ((== reg-index 6)
-            (file-write file "r8"))
-        ((== reg-index 7)
-            (file-write file "r9"))
-        ((== reg-index 8)
-            (file-write file "r10"))
-        ((== reg-index 9)
-            (file-write file "r11"))
-        ((== reg-index 10)
-            (file-write file "r12"))
-        ((== reg-index 11)
-            (file-write file "r13"))
-        ((== reg-index 12)
-            (file-write file "r14"))
-        (:else
-            (file-write file "UNKNOWN"))))))
-
-// TODO: support functions with more than 6 arguments
-(defun argument-x86
-    (file File)
-    (arg-number u64)
-(cond
-    ((== arg-number 0)
-        (file-write file "rdi"))
-    ((== arg-number 1)
-        (file-write file "rsi"))
-    ((== arg-number 2)
-        (file-write file "rdx"))
-    ((== arg-number 3)
-        (file-write file "rcx"))
-    ((== arg-number 4)
-        (file-write file "r8"))
-    ((== arg-number 5)
-        (file-write file "r9"))
-    (:else
-        (file-write file "UNKNOWN"))))
-
-(defmacro X86_TEMPORARY_REGISTER "r15")
-(defmacro X86_REGISTER_COUNT 13)
-(defmacro X86_ARGUMENT_REGISTER_COUNT 6)
-
-(defun emit-assembly-x64
-    (ssa (* mut Ssa))
-    (filename (@ mut u8))
-    (graphs (* mut (Vec RegAllocGraph)))
+(defun compile-helper
+    (ast (* Ast))
 (seqn
-    (let file = (file-open filename (| (FILE_OPEN_FLAG_WRITE_ONLY) (| (FILE_OPEN_FLAG_CREATE) (FILE_OPEN_FLAG_TRUNCATE)))))
-    (let i = 0)
-    (while (< i (deref ssa).funcs.len) (seqn
-        (let graph = (vec-get graphs i))
-        (let func = (vec-get (ref (deref ssa).funcs) i))
-        (file-write file "global ")
-        (file-write file (vec-slice (ref (deref func).a)))
-        (file-write file "\n")
-        (file-write file (vec-slice (ref (deref func).a)))
-        // TODO: detect which callee saved registers are actually used
-        (file-write file ":\n    push rbp\n    mov rbp, rsp\n    push rbx\n    push r12\n    push r13\n    push r14")
+    (eprint "todo: literally everything\n")
+    (exit 1)))
 
-        (let j = 0)
-        (while (< j (deref func).b.blocks.len) (seqn
-            (let block = (vec-get (ref (deref func).b.blocks) j))
-            (file-write file "\n.L")
-            (file-write-int file j)
-            (file-write file ":\n")
-            (let k = 0)
-            (while (< k (deref block).insts.len) (seqn
-                (let instruction = (vec-get (ref (deref block).insts) k))
-                (cond
-                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT)) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let register = (deref node).register)
-                                (file-write file "    mov ")
-                                (register-x86 file (deref node).on-stack register)
-                                (file-write file ", ")
-                                (file-write-int file (deref instruction).metadata)
-                                (file-write file "\n"))))))
-
-                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_RETURN)) (seqn
-                        (file-write file "    mov rax, ")
-                        (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                        (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                        (let register = (deref node).register)
-                        (register-x86 file (deref node).on-stack register)
-                        (file-write file "\n    pop r14\n    pop r13\n    pop r12\n    pop rbx\n    mov rsp, rbp\n    pop rbp\n    ret\n")))
-                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_BRANCH_FALSE)) (seqn
-                        // TODO: figure out if this needs to transfer args
-                        (file-write file "    test ")
-                        (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                        (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                        (let register = (deref node).register)
-                        (register-x86 file (deref node).on-stack register)
-                        (file-write file ", ")
-                        (register-x86 file (deref node).on-stack register)
-                        (file-write file "\n    jz .L")
-                        (file-write-int file (deref instruction).metadata)
-                        (file-write file "\n")))
-                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_JUMP)) (seqn
-                        (let block = (deref instruction).metadata)
-                        (let block = (vec-get (ref (deref func).b.blocks) block))
-
-                        (cond
-                            ((> (deref block).parent-count 1) (seqn
-                                (let i = 0)
-                                (let transforms = (ref (: (Vec (Pair (Pair u1 u64) (Pair u1 u64))) (new-vec (deref graph).nodes.A))))
-                                (let should-xchg = (ref (new-vec (deref transforms).A)))
-                                (while (< i (deref block).parameters.len) (seqn
-                                    (vec-push should-xchg false)
-                                    (let dest = (vec-get (ref (deref block).parameters) i))
-                                    (let dest = (vec-get (ref (deref graph).nodes) (deref dest).index))
-                                    (let source = (vec-get (ref (deref instruction).arguments) i))
-                                    (let source = (vec-get (ref (deref graph).nodes) (deref source).index))
-                                    (let pair = (inst Pair
-                                        (a (inst Pair
-                                            (a (deref dest).on-stack)
-                                            (b (deref dest).register)))
-                                        (b (inst Pair
-                                            (a (deref source).on-stack)
-                                            (b (deref source).register)))))
-                                    (let j = 0)
-                                    (while (< j (deref transforms).len) (seqn
-                                        (let v = (deref (vec-get transforms j)))
-                                        (cond
-                                            ((and (== v.a.a pair.b.a) (== v.a.b pair.b.b)) (seqn
-                                                (vec-insert transforms pair j)
-                                                (break)))
-                                            ((and (== v.b.a pair.a.a) (== v.b.b pair.a.b)) (seqn
-                                                (vec-insert transforms pair (+ j 1))
-                                                (break))))
-                                        (set j = (+ j 1)))
-                                    :else (vec-push transforms pair))
-                                    (let j = 1)
-                                    (while (< j (deref transforms).len) (seqn
-                                        (let a = (deref (vec-get transforms (- j 1))))
-                                        (let b = (vec-get transforms j))
-                                        (cond
-                                            ((and (and (== a.a.a (deref b).b.a) (== a.a.b (deref b).b.b)) (and (== a.b.a (deref b).a.a) (== a.b.b (deref b).a.b))) (seqn
-                                                (let xchg = (vec-get should-xchg (- j 1)))
-                                                (set (deref xchg) = true)
-                                                (set (deref b) = (inst Pair
-                                                    (a (inst Pair
-                                                        (a false)
-                                                        (b 0)))
-                                                    (b (inst Pair
-                                                        (a false)
-                                                        (b 0))))))))
-                                        (set j = (+ j 1))))
-                                    (set i = (+ i 1))))
-                                (let i = 0)
-                                (while (< i (deref transforms).len) (seqn
-                                    (let transform = (deref (vec-get transforms i)))
-                                    (cond
-                                        ((and (== transform.a.a transform.b.a) (== transform.a.b transform.b.b))
-                                            ())
-                                        (:else (seqn
-                                            (cond
-                                                ((deref (vec-get should-xchg i))
-                                                    (file-write file "    xchg "))
-                                                (:else
-                                                    (file-write file "    mov ")))
-                                            (register-x86 file transform.a.a transform.a.b)
-                                            (file-write file ", ")
-                                            (register-x86 file transform.b.a transform.b.b)
-                                            (file-write file "\n"))))
-                                    (set i = (+ i 1)))))))
-
-                        (file-write file "    jmp .L")
-                        (file-write-int file (deref instruction).metadata)
-                        (file-write file "\n")))
-
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_MUL))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (cond
-                                    ((== dest-reg source-reg-1) (seqn
-                                        (file-write file "    imul ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)))
-                                    ((== dest-reg source-reg-2) (seqn
-                                        (file-write file "    imul ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)))
-                                    (:else (seqn
-                                        (file-write file "    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    imul ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2))))
-                                (file-write file "\n"))))))
-
-                    // TODO: div/mod
-
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_ADD))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (cond
-                                    ((== dest-reg source-reg-1) (seqn
-                                        (file-write file "    add ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)))
-                                    ((== dest-reg source-reg-2) (seqn
-                                        (file-write file "    add ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)))
-                                    (:else (seqn
-                                        (file-write file "    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    add ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2))))
-                                (file-write file "\n"))))))
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_SUB))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (cond
-                                    ((== dest-reg source-reg-1) (seqn
-                                        (file-write file "    sub ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)))
-                                    ((== dest-reg source-reg-2) (seqn
-                                        (file-write file "    mov ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    sub ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))))
-                                    (:else (seqn
-                                        (file-write file "    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    sub ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2))))
-                                (file-write file "\n"))))))
-
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BSL))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                // shl/shr need to use cl for some reason
-                                (cond
-                                    ((== dest-reg source-reg-1) (seqn
-                                        (file-write file "    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    shl ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", cl\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)))
-                                    ((== dest-reg source-reg-2) (seqn
-                                        (file-write file "    mov ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    shl ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", cl\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))))
-                                    (:else (seqn
-                                        (file-write file "    mov ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    shl ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", cl\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (file-write file (X86_TEMPORARY_REGISTER)))))
-                                (file-write file "\n"))))))
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BSR))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                // shl/shr need to use cl for some reason
-                                (cond
-                                    ((== dest-reg source-reg-1) (seqn
-                                        (file-write file "    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    shr ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", cl\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)))
-                                    ((== dest-reg source-reg-2) (seqn
-                                        (file-write file "    mov ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    shr ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", cl\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))))
-                                    (:else (seqn
-                                        (file-write file "    mov ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    shr ")
-                                        (file-write file (X86_TEMPORARY_REGISTER))
-                                        (file-write file ", cl\n    xchg rcx, ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)
-                                        (file-write file "\n    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (file-write file (X86_TEMPORARY_REGISTER)))))
-                                (file-write file "\n"))))))
-
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BAND))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (cond
-                                    ((== dest-reg source-reg-1) (seqn
-                                        (file-write file "    and ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)))
-                                    ((== dest-reg source-reg-2) (seqn
-                                        (file-write file "    and ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)))
-                                    (:else (seqn
-                                        (file-write file "    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    and ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2))))
-                                (file-write file "\n"))))))
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BOR))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (cond
-                                    ((== dest-reg source-reg-1) (seqn
-                                        (file-write file "    or ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)))
-                                    ((== dest-reg source-reg-2) (seqn
-                                        (file-write file "    or ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)))
-                                    (:else (seqn
-                                        (file-write file "    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    or ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2))))
-                                (file-write file "\n"))))))
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_BXOR))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (cond
-                                    ((== dest-reg source-reg-1) (seqn
-                                        (file-write file "    xor ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2)))
-                                    ((== dest-reg source-reg-2) (seqn
-                                        (file-write file "    xor ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)))
-                                    (:else (seqn
-                                        (file-write file "    mov ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-1 source-reg-1)
-                                        (file-write file "\n    xor ")
-                                        (register-x86 file dest-on-stack dest-reg)
-                                        (file-write file ", ")
-                                        (register-x86 file source-on-stack-2 source-reg-2))))
-                                (file-write file "\n"))))))
-
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_GT))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (file-write file "    mov ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file ", 1\n    cmp ")
-                                (register-x86 file source-on-stack-1 source-reg-1)
-                                (file-write file ", ")
-                                (register-x86 file source-on-stack-2 source-reg-2)
-                                (file-write file "\n    mov ")
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", 0\n    cmov")
-                                (cond
-                                    ((ssa-type-signed (deref arg).type)
-                                        (file-write file "g "))
-                                    (:else
-                                        (file-write file "a ")))
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file "\n"))))))
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_GTE))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (file-write file "    mov ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file ", 1\n    cmp ")
-                                (register-x86 file source-on-stack-1 source-reg-1)
-                                (file-write file ", ")
-                                (register-x86 file source-on-stack-2 source-reg-2)
-                                (file-write file "\n    mov ")
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", 0\n    cmov")
-                                (cond
-                                    ((ssa-type-signed (deref arg).type)
-                                        (file-write file "ge "))
-                                    (:else
-                                        (file-write file "ae ")))
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file "\n"))))))
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_LT))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (file-write file "    mov ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file ", 1\n    cmp ")
-                                (register-x86 file source-on-stack-1 source-reg-1)
-                                (file-write file ", ")
-                                (register-x86 file source-on-stack-2 source-reg-2)
-                                (file-write file "\n    mov ")
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", 0\n    cmov")
-                                (cond
-                                    ((ssa-type-signed (deref arg).type)
-                                        (file-write file "l "))
-                                    (:else
-                                        (file-write file "b ")))
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file "\n"))))))
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_LTE))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (file-write file "    mov ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file ", 1\n    cmp ")
-                                (register-x86 file source-on-stack-1 source-reg-1)
-                                (file-write file ", ")
-                                (register-x86 file source-on-stack-2 source-reg-2)
-                                (file-write file "\n    mov ")
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", 0\n    cmov")
-                                (cond
-                                    ((ssa-type-signed (deref arg).type)
-                                        (file-write file "le "))
-                                    (:else
-                                        (file-write file "be ")))
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file "\n"))))))
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_EQ))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (file-write file "    mov ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file ", 1\n    cmp ")
-                                (register-x86 file source-on-stack-1 source-reg-1)
-                                (file-write file ", ")
-                                (register-x86 file source-on-stack-2 source-reg-2)
-                                (file-write file "\n    mov ")
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", 0\n    cmove ")
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file "\n"))))))
-                    ((and (== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_INT_OPERATION)) (== (deref instruction).metadata (SSA_OPERATION_METADATA_NE))) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (cond
-                            ((!= (deref node).first-usage (deref node).last-usage) (seqn
-                                (let dest-reg = (deref node).register)
-                                (let dest-on-stack = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 0))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-1 = (deref node).register)
-                                (let source-on-stack-1 = (deref node).on-stack)
-                                (let arg = (vec-get (ref (deref instruction).arguments) 1))
-                                (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                                (let source-reg-2 = (deref node).register)
-                                (let source-on-stack-2 = (deref node).on-stack)
-
-                                (file-write file "    mov ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file ", 1\n    cmp ")
-                                (register-x86 file source-on-stack-1 source-reg-1)
-                                (file-write file ", ")
-                                (register-x86 file source-on-stack-2 source-reg-2)
-                                (file-write file "\n    mov ")
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", 0\n    cmovne ")
-                                (register-x86 file dest-on-stack dest-reg)
-                                (file-write file ", ")
-                                (file-write file (X86_TEMPORARY_REGISTER))
-                                (file-write file "\n"))))))
-
-                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_CALL)) (seqn
-                        (let index = (deref instruction).returned.index)
-                        (let i = 0)
-                        (while (< i (deref graph).edges.len) (seqn
-                            (let edge = (deref (vec-get (ref (deref graph).edges) i)))
-                            (let node = (cond
-                                ((== edge.a index)
-                                    edge.b)
-                                ((== edge.b index)
-                                    edge.a)
-                                (:else
-                                    index)))
-                            (cond
-                                ((!= node index) (seqn
-                                    (let node = (vec-get (ref (deref graph).nodes) node))
-                                    (cond
-                                        ((and (not (deref node).on-stack) (and (!= (deref node).register 1) (< (deref node).register 10))) (seqn
-                                            (file-write file "    push ")
-                                            (register-x86 file (deref node).on-stack (deref node).register)
-                                            (file-write file "\n")))))))
-                            (set i = (+ i 1))))
-
-                        (let i = 0)
-                        (while (< i (deref instruction).arguments.len) (seqn
-                            (let arg = (vec-get (ref (deref instruction).arguments) i))
-                            (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                            (file-write file "    mov ")
-                            (argument-x86 file i)
-                            (file-write file ", ")
-                            (register-x86 file (deref node).on-stack (deref node).register)
-                            (file-write file "\n")
-                            (set i = (+ i 1))))
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (file-write file "    call ")
-                        (file-write file (vec-slice (ref (deref (vec-get (ref (deref ssa).funcs) (deref instruction).metadata)).a)))
-                        (file-write file "\n")
-                        (file-write file "    mov ")
-                        (register-x86 file (deref node).on-stack (deref node).register)
-                        (file-write file ", rax\n")
-
-                        (let i = (deref graph).edges.len)
-                        (while (> i 0) (seqn
-                            (set i = (- i 1))
-                            (let edge = (deref (vec-get (ref (deref graph).edges) i)))
-                            (let node = (cond
-                                ((== edge.a index)
-                                    edge.b)
-                                ((== edge.b index)
-                                    edge.a)
-                                (:else
-                                    index)))
-                            (cond
-                                ((!= node index) (seqn
-                                    (let node = (vec-get (ref (deref graph).nodes) node))
-                                    (cond
-                                        ((and (not (deref node).on-stack) (and (!= (deref node).register 1) (< (deref node).register 10))) (seqn
-                                            (file-write file "    pop ")
-                                            (register-x86 file (deref node).on-stack (deref node).register)
-                                            (file-write file "\n")))))))))))
-
-                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_GET_FUNCTION)) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (file-write file "    mov ")
-                        (register-x86 file (deref node).on-stack (deref node).register)
-                        (file-write file ", ")
-                        (let func = (vec-get (ref (deref ssa).funcs) (deref instruction).metadata))
-                        (file-write file (vec-slice (ref (deref func).a)))
-                        (file-write file "\n")))
-
-                    ((== (deref instruction).opcode (SSA_INSTRUCTION_OPCODE_CALL_INDIRECT)) (seqn
-                        (let node = (vec-get (ref (deref graph).nodes) (deref (vec-get (ref (deref instruction).arguments) 0)).index))
-                        (file-write file "    mov r15, ")
-                        (register-x86 file (deref node).on-stack (deref node).register)
-                        (file-write file "\n")
-                        (let index = (deref instruction).returned.index)
-                        (let i = 0)
-                        (while (< i (deref graph).edges.len) (seqn
-                            (let edge = (deref (vec-get (ref (deref graph).edges) i)))
-                            (let node = (cond
-                                ((== edge.a index)
-                                    edge.b)
-                                ((== edge.b index)
-                                    edge.a)
-                                (:else
-                                    index)))
-                            (cond
-                                ((!= node index) (seqn
-                                    (let node = (vec-get (ref (deref graph).nodes) node))
-                                    (cond
-                                        ((and (not (deref node).on-stack) (and (!= (deref node).register 1) (< (deref node).register 10))) (seqn
-                                            (file-write file "    push ")
-                                            (register-x86 file (deref node).on-stack (deref node).register)
-                                            (file-write file "\n")))))))
-                            (set i = (+ i 1))))
-
-                        (let i = 1)
-                        (while (< i (deref instruction).arguments.len) (seqn
-                            (let arg = (vec-get (ref (deref instruction).arguments) i))
-                            (let node = (vec-get (ref (deref graph).nodes) (deref arg).index))
-                            (file-write file "    mov ")
-                            (argument-x86 file (- i 1))
-                            (file-write file ", ")
-                            (register-x86 file (deref node).on-stack (deref node).register)
-                            (file-write file "\n")
-                            (set i = (+ i 1))))
-                        (let node = (vec-get (ref (deref graph).nodes) (deref instruction).returned.index))
-                        (file-write file "    call (r15)\n    mov ")
-                        (register-x86 file (deref node).on-stack (deref node).register)
-                        (file-write file ", rax\n")
-
-                        (let i = (deref graph).edges.len)
-                        (while (> i 0) (seqn
-                            (set i = (- i 1))
-                            (let edge = (deref (vec-get (ref (deref graph).edges) i)))
-                            (let node = (cond
-                                ((== edge.a index)
-                                    edge.b)
-                                ((== edge.b index)
-                                    edge.a)
-                                (:else
-                                    index)))
-                            (cond
-                                ((!= node index) (seqn
-                                    (let node = (vec-get (ref (deref graph).nodes) node))
-                                    (cond
-                                        ((and (not (deref node).on-stack) (and (!= (deref node).register 1) (< (deref node).register 10))) (seqn
-                                            (file-write file "    pop ")
-                                            (register-x86 file (deref node).on-stack (deref node).register)
-                                            (file-write file "\n")))))))))))
-
-                    (:else (seqn
-                        (file-write file "    TODO unknown ssa instruction ")
-                        (file-write-int file (deref instruction).opcode)
-                        (file-write file ":")
-                        (file-write-int file (deref instruction).metadata)
-                        (file-write file "\n"))))
-                (set k = (+ k 1))))
-            (set j = (+ j 1))))
-        (set i = (+ i 1))))
-    (file-close file)))
+(defun compile-using-libgccjit
+    (ast (* Ast))
+(seqn
+    (let context = (gcc-jit-context-acquire))
+    (let i32-type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))
+    (let param = (gcc-jit-context-new-param context (null) i32-type "i"))
+    (let params = (alloca 1))
+    (set (get params 0) = param)
+    (let square = (gcc-jit-context-new-function context (null) (GCC_JIT_FUNCTION_EXPORTED) i32-type "square" params false))
+    (let block = (gcc-jit-function-new-block square (null)))
+    (let expr = (gcc-jit-context-new-binary-op context (null) (GCC_JIT_BINARY_OP_MULT) i32-type (gcc-jit-param-as-rvalue param) (gcc-jit-param-as-rvalue param)))
+    (gcc-jit-block-end-with-return block (null) expr)
+    (gcc-jit-context-compile-to-file context (GCC_JIT_OUTPUT_KIND_ASSEMBLER) "a")
+    (gcc-jit-context-release context)))
 
 
 
@@ -5560,7 +3548,7 @@
 // ==================================================================================================
 //
 
-(defun main (argv (* mut (* mut u8))) (argc u64)
+(defun main (argv (* (* u8))) (argc u64)
     (seqn
         (let filename = (get-argv argv 1))
         (cond
@@ -5594,25 +3582,7 @@
             (print-type-errors contents-ref errors)
             (check ast errors func-map struct-map)
             (print-type-errors contents-ref errors)
-            (let ssa = (ref (ast-to-ssa ast struct-map)))
-            (print-ssa ssa)
-            (let graphs = (ref (new-vec (deref errors).A)))
-            (let i = 0)
-            (let arguments-to-registers = (ref (new-vec (deref errors).A)))
-            (vec-push arguments-to-registers 5)
-            (vec-push arguments-to-registers 4)
-            (vec-push arguments-to-registers 3)
-            (vec-push arguments-to-registers 2)
-            (vec-push arguments-to-registers 7)
-            (vec-push arguments-to-registers 8)
-            (while (< i (deref ssa).funcs.len) (seqn
-                (let func = (ref (deref (vec-get (ref (deref ssa).funcs) i)).b))
-                (let graph = (ref (create-reg-alloc-graph-from-ssa func (X86_ARGUMENT_REGISTER_COUNT))))
-                (reg-alloc graph arguments-to-registers (X86_REGISTER_COUNT))
-                (print-reg-alloc-graph graph)
-                (vec-push graphs (deref graph))
-                (set i = (+ i 1))))
-            (emit-assembly-x64 ssa "a.s" graphs)
+            (compile-using-libgccjit ast)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (seqn

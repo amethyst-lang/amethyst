@@ -258,6 +258,7 @@ pub enum SExpr<'a> {
         name: &'a str,
         ret_type: Type<'a>,
         args: Vec<(&'a str, Type<'a>)>,
+        linked_to: String,
     },
 
     StructDef {
@@ -762,12 +763,17 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                     }
 
                     Ast::Symbol(_, "defext") => {
-                        if sexpr.len() < 2 {
+                        if sexpr.len() < 3 {
                             return Err(LoweringError::InvalidDefun);
                         }
 
                         let name = match sexpr[1] {
                             Ast::Symbol(_, name) => name,
+                            _ => return Err(LoweringError::InvalidDefun),
+                        };
+
+                        let linked_to = match sexpr.remove(sexpr.len() - 1) {
+                            Ast::Str(_, linked) => linked,
                             _ => return Err(LoweringError::InvalidDefun),
                         };
 
@@ -805,6 +811,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             name,
                             ret_type,
                             args,
+                            linked_to,
                         }
                     }
 
