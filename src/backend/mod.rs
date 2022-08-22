@@ -59,10 +59,10 @@ impl Generator {
                 ..
             } = sexpr
             {
-                externals.insert(*name, linked_to);
                 if args.iter().any(|(_, v)| v.has_generic()) || ret_type.has_generic() {
                     continue;
                 }
+                externals.insert(*name, linked_to);
 
                 for (_, typ) in args {
                     for t in Self::convert_type_to_type(typ, structs) {
