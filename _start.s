@@ -25,6 +25,7 @@ section .note.openbsd.ident
 	%define SYS_exit	60
 %endif
 
+
 _start:
     pop rsi
     mov rdi, rsp

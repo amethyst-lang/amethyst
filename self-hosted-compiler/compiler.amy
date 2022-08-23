@@ -3496,7 +3496,7 @@
     (context (* GccJitContext))
     (output-kind u32)
     (output-path (* u8))
-    "gcc_jit_context_compile_to_file")
+    "gcc_jit_context_compile_to_file_raw")
 (defun gcc-jit-context-compile-to-file
     (context (* GccJitContext))
     (output-kind u32)
@@ -3537,7 +3537,7 @@
     (let block = (gcc-jit-function-new-block square (null)))
     (let expr = (gcc-jit-context-new-binary-op context (null) (GCC_JIT_BINARY_OP_MULT) i32-type (gcc-jit-param-as-rvalue param) (gcc-jit-param-as-rvalue param)))
     (gcc-jit-block-end-with-return block (null) expr)
-    (gcc-jit-context-compile-to-file context (GCC_JIT_OUTPUT_KIND_ASSEMBLER) "a")
+    (gcc-jit-context-compile-to-file context (GCC_JIT_OUTPUT_KIND_OBJECT_FILE) "a.o")
     (gcc-jit-context-release context)))
 
 

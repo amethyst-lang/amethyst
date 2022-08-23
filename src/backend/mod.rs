@@ -23,9 +23,11 @@ impl Default for Generator {
         let mut b = settings::builder();
         b.set("opt_level", "speed_and_size").unwrap();
         b.set("enable_probestack", "false").unwrap();
+        b.set("is_pic", "true").unwrap();
+        b.set("preserve_frame_pointers", "true").unwrap();
 
         let f = settings::Flags::new(b);
-        let isa_data = isa::lookup(Triple::host()).unwrap().finish(f);
+        let isa_data = isa::lookup(Triple::host()).unwrap().finish(f).unwrap();
         let builder = ObjectBuilder::new(
             isa_data,
             "x86_64",
@@ -570,7 +572,7 @@ impl Generator {
                                 SIZE as i64,
                             );
                             builder.ins().trapz(flags, TrapCode::StackOverflow);
-                            let slot = builder.create_stack_slot(StackSlotData::new(
+                            let slot = builder.create_sized_stack_slot(StackSlotData::new(
                                 StackSlotKind::ExplicitSlot,
                                 SIZE,
                             ));
@@ -606,7 +608,7 @@ impl Generator {
                     SExpr::Symbol { value: "ref", .. } => {
                         if let SExprType::Pointer(_, t) = &meta.type_ {
                             let value = &values[0];
-                            let slot = builder.create_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, Self::size_of(&**t, structs)));
+                            let slot = builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, Self::size_of(&**t, structs)));
                             for (&value, (offset, _)) in value.iter().zip(Self::offsets_and_sizes_of(&**t, structs)) {
                                 builder.ins().stack_store(value, slot, offset);
                             }
