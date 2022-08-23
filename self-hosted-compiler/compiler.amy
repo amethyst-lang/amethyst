@@ -3390,17 +3390,18 @@
     (slice len raw)))
 
 (struct GccJitParam)
+(defstruct GccJitLocation)
 
 (defext gcc-jit-context-new-param-raw
     (context (* GccJitContext))
-    (location (* u8)) // TODO: gcc_jit_location implementation
+    (location (* GccJitLocation))
     (type (* GccJitType))
     (name (* u8))
     : (* GccJitParam)
     "gcc_jit_context_new_param")
 (defun gcc-jit-context-new-param
     (context (* GccJitContext))
-    (location (* u8))
+    (location (* GccJitLocation))
     (type (* GccJitType))
     (name (@ u8))
     : (* GccJitParam)
@@ -3422,7 +3423,7 @@
 (defmacro GCC_JIT_FUNCTION_ALWAYS_INLINE 3)
 (defext gcc-jit-context-new-function-raw
     (context (* GccJitContext))
-    (location (* u8)) // TODO: gcc_jit_location implementation
+    (location (* GccJitLocation))
     (linkage u32)
     (return-type (* GccJitType))
     (name (* u8))
@@ -3433,7 +3434,7 @@
     "gcc_jit_context_new_function")
 (defun gcc-jit-context-new-function
     (context (* GccJitContext))
-    (location (* u8)) // TODO: gcc_jit_location implementation
+    (location (* GccJitLocation))
     (linkage u32)
     (return-type (* GccJitType))
     (name (@ u8))
@@ -3454,7 +3455,7 @@
 
 (defext gcc-jit-function-new-block
     (function (* GccJitFunction))
-    (location (* u8)) // TODO: gcc_jit_location implementation
+    (location (* GccJitLocation))
     : (* GccJitBlock)
     "gcc_jit_function_new_block")
 
@@ -3475,7 +3476,7 @@
 (defmacro GCC_JIT_BINARY_OP_RSHIFT 11)
 (defext gcc-jit-context-new-binary-op
     (context (* GccJitContext))
-    (location (* u8)) // TODO: gcc_jit_location implementation
+    (location (* GccJitLocation))
     (op u32)
     (type (* GccJitType))
     (a (* GccJitRValue))
@@ -3485,7 +3486,7 @@
 
 (defext gcc-jit-block-end-with-return
     (block (* GccJitBlock))
-    (location (* u8)) // TODO: gcc_jit_location implementation
+    (location (* GccJitLocation))
     (expression (* GccJitRValue))
     "gcc_jit_block_end_with_return")
 
@@ -3511,6 +3512,43 @@
     (set (get null-term i) = '\0')
     (gcc-jit-context-compile-to-file-raw context output-kind null-term.ptr)))
 
+(defext gcc-jit-context-new-rvalue-from-long
+    (context (* GccJitContext))
+    (type (* GccJitType))
+    (value u64)
+    : (* GccJitRValue)
+    "gcc_jit_context_new_rvalue_from_long")
+
+(defmacro GCC_JIT_BOOL_OPTION_DEBUGINFO 0)
+(defext gcc-jit-context-set-bool-option
+    (context (* GccJitContext))
+    (option u64)
+    (value u1)
+    "gcc_jit_context_set_bool_option")
+
+(defext gcc-jit-context-new-location-raw
+    (context (* GccJitContext))
+    (filename (* u8))
+    (line u64)
+    (col u64)
+    : (* GccJitLocation)
+    "gcc_jit_context_new_location")
+(defun gcc-jit-context-new-location
+    (context (* GccJitContext))
+    (filename (@ u8))
+    (line u64)
+    (col u64)
+    : (* GccJitLocation)
+(seq
+    (let null-term = (alloca (+ filename.len 1)))
+    (let i = 0)
+    (while (< i filename.len)
+        (seqn
+            (set (get null-term i) = (get filename i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (gcc-jit-context-new-location-raw context null-term.ptr line col)))
+
 
 
 //
@@ -3519,24 +3557,61 @@
 // ==================================================================================================
 //
 
+(defun parse-int (str (@ u8)) : u64 (seq
+    (let i = 0)
+    (let n = 0)
+    (while (< i str.len) (seqn
+        (let c = (get str i))
+        (cond
+            ((and (<= '0' c) (<= c '9')) (seqn
+                (set n = (+ (* n 10) (cast (- c '0'))))))
+            (:else (break 0)))
+        (set i = (+ i 1)))
+    :else n)))
+
 (defun compile-helper
     (ast (* Ast))
-(seqn
-    (eprint "todo: literally everything\n")
-    (exit 1)))
+    (filename (@ u8))
+    (source (@ u8))
+    (context (* GccJitContext))
+    : (* GccJitRValue)
+(seq
+    (cond
+        ((== (deref ast).type (AST_NODE_TYPE_INT)) (seq
+            (let type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))
+            (gcc-jit-context-new-rvalue-from-long context type (parse-int (deref ast).value))))
+        (:else (seq
+            (eprint "todo: unsupported expression ")
+            (eprint-int (deref ast).type)
+            (eprint "\n")
+            (exit 1)
+            (null))))))
 
 (defun compile-using-libgccjit
     (ast (* Ast))
+    (filename (@ u8))
+    (source (@ u8))
 (seqn
     (let context = (gcc-jit-context-acquire))
-    (let i32-type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))
-    (let param = (gcc-jit-context-new-param context (null) i32-type "i"))
-    (let params = (alloca 1))
-    (set (get params 0) = param)
-    (let square = (gcc-jit-context-new-function context (null) (GCC_JIT_FUNCTION_EXPORTED) i32-type "square" params false))
-    (let block = (gcc-jit-function-new-block square (null)))
-    (let expr = (gcc-jit-context-new-binary-op context (null) (GCC_JIT_BINARY_OP_MULT) i32-type (gcc-jit-param-as-rvalue param) (gcc-jit-param-as-rvalue param)))
-    (gcc-jit-block-end-with-return block (null) expr)
+    (gcc-jit-context-set-bool-option context (GCC_JIT_BOOL_OPTION_DEBUGINFO) true)
+    (let i = 0)
+    (while (< i (deref ast).children.len) (seqn
+        (let ast = (vec-get (ref (deref ast).children) i))
+        (cond
+            ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
+                (let type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))
+                (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
+                (let func-type = (ref (deref ast).typed))
+                (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
+
+                (let loc = (loc-to-line-col source (deref ast).loc))
+                (let func-code = (gcc-jit-context-new-function context (gcc-jit-context-new-location context filename loc.line-start loc.col-start) (GCC_JIT_FUNCTION_EXPORTED) type name (slice 0 (null)) false))
+                (let entry = (gcc-jit-function-new-block func-code (gcc-jit-context-new-location context filename loc.line-start loc.col-start)))
+                (let expr = (compile-helper body filename source context))
+
+                (let loc = (loc-to-line-col source (deref body).loc))
+                (gcc-jit-block-end-with-return entry (gcc-jit-context-new-location context filename loc.line-end loc.col-end) expr))))
+        (set i = (+ i 1))))
     (gcc-jit-context-compile-to-file context (GCC_JIT_OUTPUT_KIND_OBJECT_FILE) "a.o")
     (gcc-jit-context-release context)))
 
@@ -3582,7 +3657,7 @@
             (print-type-errors contents-ref errors)
             (check ast errors func-map struct-map)
             (print-type-errors contents-ref errors)
-            (compile-using-libgccjit ast)
+            (compile-using-libgccjit ast filename contents-ref)
             (ast-drop ast)
             (vec-drop macros empty-dealloc)))
         (:else (seqn
