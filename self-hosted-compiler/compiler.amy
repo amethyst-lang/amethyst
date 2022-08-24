@@ -3453,11 +3453,24 @@
 
 (defstruct GccJitBlock)
 
-(defext gcc-jit-function-new-block
+(defext gcc-jit-function-new-block-raw
     (function (* GccJitFunction))
-    (location (* GccJitLocation))
+    (name (* u8))
     : (* GccJitBlock)
     "gcc_jit_function_new_block")
+(defun gcc-jit-function-new-block
+    (function (* GccJitFunction))
+    (name (@ u8))
+    : (* GccJitBlock)
+(seq
+    (let null-term = (alloca (+ name.len 1)))
+    (let i = 0)
+    (while (< i name.len)
+        (seqn
+            (set (get null-term i) = (get name i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (gcc-jit-function-new-block-raw function null-term.ptr)))
 
 (defstruct GccJitRValue)
 (defstruct GccJitLValue)
@@ -3489,6 +3502,20 @@
     (location (* GccJitLocation))
     (expression (* GccJitRValue))
     "gcc_jit_block_end_with_return")
+
+(defext gcc-jit-block-end-with-jump
+    (block (* GccJitBlock))
+    (location (* GccJitLocation))
+    (jump-to (* GccJitBlock))
+    "gcc_jit_block_end_with_jump")
+
+(defext gcc-jit-block-end-with-conditional
+    (block (* GccJitBlock))
+    (location (* GccJitLocation))
+    (condition (* GccJitRValue))
+    (on-true (* GccJitBlock))
+    (on-false (* GccJitBlock))
+    "gcc_jit_block_end_with_conditional_wrapper")
 
 (defmacro GCC_JIT_OUTPUT_KIND_ASSEMBLER 0)
 (defmacro GCC_JIT_OUTPUT_KIND_OBJECT_FILE 1)
@@ -3549,6 +3576,56 @@
     (set (get null-term i) = '\0')
     (gcc-jit-context-new-location-raw context null-term.ptr line col)))
 
+(defext gcc-jit-function-new-local-raw
+    (function (* GccJitFunction))
+    (location (* GccJitLocation))
+    (type (* GccJitType))
+    (name (* u8))
+    : (* GccJitLValue)
+    "gcc_jit_function_new_local")
+(defun gcc-jit-function-new-local
+    (function (* GccJitFunction))
+    (location (* GccJitLocation))
+    (type (* GccJitType))
+    (name (@ u8))
+    : (* GccJitLValue)
+(seq
+    (let null-term = (alloca (+ name.len 1)))
+    (let i = 0)
+    (while (< i name.len)
+        (seqn
+            (set (get null-term i) = (get name i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (gcc-jit-function-new-local-raw function location type null-term.ptr)))
+
+(defext gcc-jit-lvalue-as-rvalue
+    (lvalue (* GccJitLValue))
+    : (* GccJitRValue)
+    "gcc_jit_lvalue_as_rvalue")
+
+(defext gcc-jit-block-add-assignment
+    (block (* GccJitBlock))
+    (location (* GccJitLocation))
+    (lvalue (* GccJitLValue))
+    (rvalue (* GccJitRValue))
+    "gcc_jit_block_add_assignment")
+
+(defmacro GCC_JIT_COMPARISON_EQ 0)
+(defmacro GCC_JIT_COMPARISON_NE 1)
+(defmacro GCC_JIT_COMPARISON_LT 2)
+(defmacro GCC_JIT_COMPARISON_LE 3)
+(defmacro GCC_JIT_COMPARISON_GT 4)
+(defmacro GCC_JIT_COMPARISON_GE 5)
+(defext gcc-jit-context-new-comparison
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (op u64)
+    (a (* GccJitRValue))
+    (b (* GccJitRValue))
+    : (* GccJitRValue)
+    "gcc_jit_context_new_comparison")
+
 
 
 //
@@ -3557,17 +3634,23 @@
 // ==================================================================================================
 //
 
-(defun parse-int (str (@ u8)) : u64 (seq
-    (let i = 0)
-    (let n = 0)
-    (while (< i str.len) (seqn
-        (let c = (get str i))
-        (cond
-            ((and (<= '0' c) (<= c '9')) (seqn
-                (set n = (+ (* n 10) (cast (- c '0'))))))
-            (:else (break 0)))
-        (set i = (+ i 1)))
-    :else n)))
+(defun parse-int (str (@ u8)) : u64
+(cond
+    ((str-equals str "true")
+        1)
+    ((str-equals str "false")
+        0)
+    (:else (seq
+        (let i = 0)
+        (let n = 0)
+        (while (< i str.len) (seqn
+            (let c = (get str i))
+            (cond
+                ((and (<= '0' c) (<= c '9')) (seqn
+                    (set n = (+ (* n 10) (cast (- c '0'))))))
+                (:else (break 0)))
+            (set i = (+ i 1)))
+        :else n)))))
 
 (defun ast-type-to-gcc-jit-type
     (context (* GccJitContext))
@@ -3581,156 +3664,301 @@
     (filename (@ u8))
     (source (@ u8))
     (context (* GccJitContext))
+    (func (* GccJitFunction))
+    (block (* (* GccJitBlock)))
     : (* GccJitRValue)
-(seq
-    (cond
-        ((== (deref ast).type (AST_NODE_TYPE_INT)) (seq
-            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-            (gcc-jit-context-new-rvalue-from-long context type (parse-int (deref ast).value))))
-        ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (> (deref ast).children.len 0)) (seq
-            (let func = (vec-get (ref (deref ast).children) 0))
-            (cond
-                ((== (deref func).type (AST_NODE_TYPE_SYMBOL)) (seq
-                    (let symbol = (deref func).value)
-                    (cond
-                        ((str-equals symbol "*") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_MULT)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        ((str-equals symbol "/") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_DIVIDE)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        ((str-equals symbol "%") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_MODULO)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        ((str-equals symbol "+") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_PLUS)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        ((str-equals symbol "-") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_MINUS)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        ((str-equals symbol "<<") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_LSHIFT)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        ((str-equals symbol ">>") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_RSHIFT)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        ((str-equals symbol "&") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_BITWISE_AND)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        ((str-equals symbol "|") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_BITWISE_OR)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        ((str-equals symbol "^") (seq
-                            (let loc = (loc-to-line-col source (deref ast).loc))
-                            (let a = (vec-get (ref (deref ast).children) 1))
-                            (let b = (vec-get (ref (deref ast).children) 2))
-                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                            (gcc-jit-context-new-binary-op
-                                context
-                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                                (GCC_JIT_BINARY_OP_BITWISE_XOR)
-                                type
-                                (compile-helper a filename source context)
-                                (compile-helper b filename source context))))
-                        (:else (seq
-                            (eprint "todo: unsupported function ")
-                            (eprint (deref func).value)
-                            (eprint "\n")
-                            (exit 1)
-                            (null))))))
-                (:else (seq
-                    (eprint "todo: unsupported sexpr function ")
-                    (eprint-int (deref func).type)
-                    (eprint "\n")
-                    (exit 1)
-                    (null))))))
-        (:else (seq
-            (eprint "todo: unsupported expression ")
-            (eprint-int (deref ast).type)
-            (eprint "\n")
-            (exit 1)
-            (null))))))
+(cond
+    ((or (== (deref ast).type (AST_NODE_TYPE_INT)) (== (deref ast).type (AST_NODE_TYPE_BOOL))) (seq
+        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+        (gcc-jit-context-new-rvalue-from-long context type (parse-int (deref ast).value))))
+    ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (> (deref ast).children.len 0)) (seq
+        (let func-ast = (vec-get (ref (deref ast).children) 0))
+        (cond
+            ((== (deref func-ast).type (AST_NODE_TYPE_SYMBOL)) (seq
+                (let symbol = (deref func-ast).value)
+                (cond
+                    ((str-equals symbol "*") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_MULT)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "/") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_DIVIDE)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "%") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_MODULO)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "+") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_PLUS)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "-") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_MINUS)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "<<") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_LSHIFT)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol ">>") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_RSHIFT)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "&") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_BITWISE_AND)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "|") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_BITWISE_OR)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "^") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-binary-op
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_BINARY_OP_BITWISE_XOR)
+                            type
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "==") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-comparison
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_COMPARISON_EQ)
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "!=") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-comparison
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_COMPARISON_NE)
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "<") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-comparison
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_COMPARISON_LT)
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol "<=") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-comparison
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_COMPARISON_LE)
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol ">") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-comparison
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_COMPARISON_GT)
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+                    ((str-equals symbol ">=") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (gcc-jit-context-new-comparison
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (GCC_JIT_COMPARISON_GE)
+                            (compile-helper a filename source context func block)
+                            (compile-helper b filename source context func block))))
+
+                    ((str-equals symbol "cond") (seq
+                        (let conds = (ref (new-vec (deref ast).children.A)))
+                        (let thens = (ref (new-vec (deref ast).children.A)))
+
+                        (let i = 1)
+                        (while (< i (deref ast).children.len) (seqn
+                            (let pair = (vec-get (ref (deref ast).children) i))
+                            (let condy = (vec-get (ref (deref pair).children) 0))
+                            (cond
+                                ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
+                                    (let condy = (gcc-jit-function-new-block func "cond"))
+                                    (let then = (gcc-jit-function-new-block func "then"))
+                                    (vec-push conds condy)
+                                    (vec-push thens then))))
+                            (set i = (+ i 1))))
+
+                        (let last-block = (gcc-jit-function-new-block func "cond-end"))
+
+                        (let result = (gcc-jit-function-new-local func (null) (ast-type-to-gcc-jit-type context (ref (deref ast).typed)) "cond-result"))
+
+                        (let i = 1)
+                        (while (< i (deref ast).children.len) (seqn
+                            (let pair = (vec-get (ref (deref ast).children) i))
+                            (let condy = (vec-get (ref (deref pair).children) 0))
+                            (let then = (vec-get (ref (deref pair).children) 1))
+
+                            (cond
+                                ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
+                                    (let condy-ast = condy)
+                                    (let condy = (compile-helper condy filename source context func block))
+                                    (let loc = (loc-to-line-col source (deref condy-ast).loc))
+                                    (let condy = (gcc-jit-context-new-comparison
+                                        context
+                                        (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                                        (GCC_JIT_COMPARISON_NE)
+                                        condy
+                                        (gcc-jit-context-new-rvalue-from-long context (ast-type-to-gcc-jit-type context (ref (deref condy-ast).typed)) 0)))
+                                    (let next-cond-block = (deref (vec-get conds (- i 1))))
+                                    (let then-block = (deref (vec-get thens (- i 1))))
+                                    (gcc-jit-block-end-with-conditional
+                                        (deref block)
+                                        (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                        condy
+                                        then-block
+                                        next-cond-block)
+
+                                    (set (deref block) = then-block)
+                                    (let loc = (loc-to-line-col source (deref then).loc))
+                                    (let then = (compile-helper then filename source context func block))
+                                    (gcc-jit-block-add-assignment
+                                        (deref block)
+                                        (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                        result
+                                        then)
+                                    (gcc-jit-block-end-with-jump
+                                        (deref block)
+                                        (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                        last-block)
+
+                                    (set (deref block) = next-cond-block)))
+                                (:else (seqn
+                                    (let loc = (loc-to-line-col source (deref then).loc))
+                                    (let else = (compile-helper then filename source context func block))
+                                    (gcc-jit-block-add-assignment
+                                        (deref block)
+                                        (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                        result
+                                        else)
+                                    (gcc-jit-block-end-with-jump
+                                        (deref block)
+                                        (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                        last-block))))
+                            (set i = (+ i 1))))
+
+                        (set (deref block) = last-block)
+                        (gcc-jit-lvalue-as-rvalue result)))
+
+                    (:else (seq
+                        (eprint "todo: unsupported function ")
+                        (eprint (deref func-ast).value)
+                        (eprint "\n")
+                        (exit 1)
+                        (null))))))
+            (:else (seq
+                (eprint "todo: unsupported sexpr function ")
+                (eprint-int (deref func-ast).type)
+                (eprint "\n")
+                (exit 1)
+                (null))))))
+    (:else (seq
+        (eprint "todo: unsupported expression ")
+        (eprint-int (deref ast).type)
+        (eprint "\n")
+        (exit 1)
+        (null)))))
 
 (defun compile-using-libgccjit
     (ast (* Ast))
@@ -3750,12 +3978,20 @@
                 (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
 
                 (let loc = (loc-to-line-col source (deref ast).loc))
-                (let func-code = (gcc-jit-context-new-function context (gcc-jit-context-new-location context filename loc.line-start loc.col-start) (GCC_JIT_FUNCTION_EXPORTED) type name (slice 0 (null)) false))
-                (let entry = (gcc-jit-function-new-block func-code (gcc-jit-context-new-location context filename loc.line-start loc.col-start)))
-                (let expr = (compile-helper body filename source context))
+                (let func-code = (gcc-jit-context-new-function
+                    context
+                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                    (GCC_JIT_FUNCTION_EXPORTED)
+                    type
+                    name
+                    (slice 0 (null))
+                    false))
+                (let entry = (gcc-jit-function-new-block func-code "entry"))
+                (let block = (ref entry))
+                (let expr = (compile-helper body filename source context func-code block))
 
                 (let loc = (loc-to-line-col source (deref body).loc))
-                (gcc-jit-block-end-with-return entry (gcc-jit-context-new-location context filename loc.line-end loc.col-end) expr))))
+                (gcc-jit-block-end-with-return (deref block) (gcc-jit-context-new-location context filename loc.line-end loc.col-end) expr))))
         (set i = (+ i 1))))
     (gcc-jit-context-compile-to-file context (GCC_JIT_OUTPUT_KIND_OBJECT_FILE) "a.o")
     (gcc-jit-context-release context)))
@@ -3769,45 +4005,45 @@
 //
 
 (defun main (argv (* (* u8))) (argc u64)
-    (seqn
-        (let filename = (get-argv argv 1))
-        (cond
-            ((== filename.ptr (null)) (seqn
-                (eprint "please provide a file to compile\n")
-                (exit 1))))
-        (let file = (file-open filename (FILE_OPEN_FLAG_READ_ONLY)))
-        (cond
-            ((not (file-is-valid file)) (seqn
-                (eprint "error: failed to open file ")
-                (eprint filename)
-                (eprint "\n")
-                (exit 1))))
-        (let A = (ref (new-alloc)))
-        (let contents = (file-read-all file A))
-        (let contents-ref = (vec-slice (ref contents)))
-        (file-close file)
-        (let lexer = (ref (new-lexer A contents-ref)))
-        (let result = (parse lexer))
-        (cond (result.success (seq
-            (let ast = (ref result.ast))
-            (let macros = (ref (new-vec A)))
-            (extract-macros macros ast)
-            (replace-macros macros ast)
-            (let func-map = (ref (create-default-signatures A)))
-            (let struct-map = (ref (new-vec A)))
-            (let errors = (ref (new-vec A)))
-            (extract-structs ast struct-map errors)
-            (print-type-errors contents-ref errors)
-            (extract-functions ast func-map errors)
-            (print-type-errors contents-ref errors)
-            (check ast errors func-map struct-map)
-            (print-type-errors contents-ref errors)
-            (compile-using-libgccjit ast filename contents-ref)
-            (ast-drop ast)
-            (vec-drop macros empty-dealloc)))
-        (:else (seqn
-            (print-parse-error contents-ref (ref result.fail))
+(seqn
+    (let filename = (get-argv argv 1))
+    (cond
+        ((== filename.ptr (null)) (seqn
+            (eprint "please provide a file to compile\n")
             (exit 1))))
-        (lexer-drop lexer)
-        (vec-drop (ref contents) empty-dealloc)))
+    (let file = (file-open filename (FILE_OPEN_FLAG_READ_ONLY)))
+    (cond
+        ((not (file-is-valid file)) (seqn
+            (eprint "error: failed to open file ")
+            (eprint filename)
+            (eprint "\n")
+            (exit 1))))
+    (let A = (ref (new-alloc)))
+    (let contents = (file-read-all file A))
+    (let contents-ref = (vec-slice (ref contents)))
+    (file-close file)
+    (let lexer = (ref (new-lexer A contents-ref)))
+    (let result = (parse lexer))
+    (cond (result.success (seq
+        (let ast = (ref result.ast))
+        (let macros = (ref (new-vec A)))
+        (extract-macros macros ast)
+        (replace-macros macros ast)
+        (let func-map = (ref (create-default-signatures A)))
+        (let struct-map = (ref (new-vec A)))
+        (let errors = (ref (new-vec A)))
+        (extract-structs ast struct-map errors)
+        (print-type-errors contents-ref errors)
+        (extract-functions ast func-map errors)
+        (print-type-errors contents-ref errors)
+        (check ast errors func-map struct-map)
+        (print-type-errors contents-ref errors)
+        (compile-using-libgccjit ast filename contents-ref)
+        (ast-drop ast)
+        (vec-drop macros empty-dealloc)))
+    (:else (seqn
+        (print-parse-error contents-ref (ref result.fail))
+        (exit 1))))
+    (lexer-drop lexer)
+    (vec-drop (ref contents) empty-dealloc)))
 
