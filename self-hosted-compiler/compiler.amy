@@ -3349,7 +3349,6 @@
     (context (* GccJitContext))
     "gcc_jit_context_release")
 
-
 (defstruct GccJitType)
 
 (defmacro GCC_JIT_TYPE_INT 8)
@@ -3504,6 +3503,11 @@
     (location (* GccJitLocation))
     (expression (* GccJitRValue))
     "gcc_jit_block_end_with_return")
+
+(defext gcc-jit-block-end-with-void-return
+    (block (* GccJitBlock))
+    (location (* GccJitLocation))
+    "gcc_jit_block_end_with_void_return")
 
 (defext gcc-jit-block-end-with-jump
     (block (* GccJitBlock))
@@ -3664,8 +3668,11 @@
     (context (* GccJitContext))
     (type (* Type))
     : (* GccJitType)
-(seq
-    (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT))))
+(cond
+    ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
+        (null))
+    (:else
+        (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))))
 
 (defun compile-helper
     (ast (* Ast))
@@ -3679,7 +3686,9 @@
     ((or (== (deref ast).type (AST_NODE_TYPE_INT)) (== (deref ast).type (AST_NODE_TYPE_BOOL))) (seq
         (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
         (gcc-jit-context-new-rvalue-from-long context type (parse-int (deref ast).value))))
-    ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (> (deref ast).children.len 0)) (seq
+    ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0))
+        (null))
+    ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
         (let func-ast = (vec-get (ref (deref ast).children) 0))
         (cond
             ((== (deref func-ast).type (AST_NODE_TYPE_SYMBOL)) (seq
@@ -3879,13 +3888,29 @@
                             (let node = (vec-get (ref (deref ast).children) i))
                             (let loc = (loc-to-line-col source (deref node).loc))
                             (let node = (compile-helper node filename source context func block))
-                            (gcc-jit-block-add-eval
-                                (deref block)
-                                (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
-                                node)
+                            (cond
+                                ((: u64 (cast node))
+                                    (gcc-jit-block-add-eval
+                                        (deref block)
+                                        (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                        node)))
                             (set last = node)
                             (set i = (+ i 1))))
                         last))
+                    ((str-equals symbol "seqn") (seq
+                        (let i = 1)
+                        (while (< i (deref ast).children.len) (seqn
+                            (let node = (vec-get (ref (deref ast).children) i))
+                            (let loc = (loc-to-line-col source (deref node).loc))
+                            (let node = (compile-helper node filename source context func block))
+                            (cond
+                                ((: u64 (cast node))
+                                    (gcc-jit-block-add-eval
+                                        (deref block)
+                                        (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                        node)))
+                            (set i = (+ i 1))))
+                        (null)))
 
                     ((str-equals symbol "cond") (seq
                         (let conds = (ref (new-vec (deref ast).children.A)))
@@ -3905,7 +3930,12 @@
 
                         (let last-block = (gcc-jit-function-new-block func "cond-end"))
 
-                        (let result = (gcc-jit-function-new-local func (null) (ast-type-to-gcc-jit-type context (ref (deref ast).typed)) "cond-result"))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let result = (cond
+                            ((: u64 (cast type))
+                                (gcc-jit-function-new-local func (null) type "cond-result"))
+                            (:else
+                                (null))))
 
                         (let i = 1)
                         (while (< i (deref ast).children.len) (seqn
@@ -3936,11 +3966,13 @@
                                     (set (deref block) = then-block)
                                     (let loc = (loc-to-line-col source (deref then).loc))
                                     (let then = (compile-helper then filename source context func block))
-                                    (gcc-jit-block-add-assignment
-                                        (deref block)
-                                        (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
-                                        result
-                                        then)
+                                    (cond
+                                        ((: u64 (cast result))
+                                            (gcc-jit-block-add-assignment
+                                                (deref block)
+                                                (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                                result
+                                                then)))
                                     (gcc-jit-block-end-with-jump
                                         (deref block)
                                         (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
@@ -3950,11 +3982,13 @@
                                 (:else (seqn
                                     (let loc = (loc-to-line-col source (deref then).loc))
                                     (let else = (compile-helper then filename source context func block))
-                                    (gcc-jit-block-add-assignment
-                                        (deref block)
-                                        (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
-                                        result
-                                        else)
+                                    (cond
+                                        ((: u64 (cast result))
+                                            (gcc-jit-block-add-assignment
+                                                (deref block)
+                                                (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                                result
+                                                else)))
                                     (gcc-jit-block-end-with-jump
                                         (deref block)
                                         (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
@@ -3962,7 +3996,11 @@
                             (set i = (+ i 1))))
 
                         (set (deref block) = last-block)
-                        (gcc-jit-lvalue-as-rvalue result)))
+                        (cond
+                            ((: u64 (cast result))
+                                (gcc-jit-lvalue-as-rvalue result))
+                            (:else
+                                (null)))))
 
                     (:else (seq
                         (eprint "todo: unsupported function ")
@@ -3995,7 +4033,7 @@
         (let ast = (vec-get (ref (deref ast).children) i))
         (cond
             ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
-                (let type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))
+                (let type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT))) // TODO: TEMPORARY, WILL SEGFAULT IF PASSED IN NIL
                 (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
                 (let func-type = (ref (deref ast).typed))
                 (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
@@ -4014,7 +4052,11 @@
                 (let expr = (compile-helper body filename source context func-code block))
 
                 (let loc = (loc-to-line-col source (deref body).loc))
-                (gcc-jit-block-end-with-return (deref block) (gcc-jit-context-new-location context filename loc.line-end loc.col-end) expr))))
+                (cond
+                    ((: u64 (cast expr))
+                        (gcc-jit-block-end-with-return (deref block) (gcc-jit-context-new-location context filename loc.line-end loc.col-end) expr))
+                    (:else
+                        (gcc-jit-block-end-with-void-return (deref block) (gcc-jit-context-new-location context filename loc.line-end loc.col-end)))))))
         (set i = (+ i 1))))
     (gcc-jit-context-compile-to-file context (GCC_JIT_OUTPUT_KIND_OBJECT_FILE) "a.o")
     (gcc-jit-context-release context)))
