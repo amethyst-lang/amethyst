@@ -3638,6 +3638,11 @@
     (rvalue (* GccJitRValue))
     "gcc_jit_block_add_eval")
 
+(defext gcc-jit-context-set-bool-allow-unreachable-blocks
+    (context (* GccJitContext))
+    (enable u1)
+    "gcc_jit_context_set_bool_allow_unreachable_blocks")
+
 
 
 //
@@ -4002,6 +4007,31 @@
                             (:else
                                 (null)))))
 
+                    ((str-equals symbol "loop") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let loop-block = (gcc-jit-function-new-block func "loop"))
+                        (gcc-jit-block-end-with-jump
+                            (deref block)
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            loop-block)
+                        (set (deref block) = loop-block)
+                        (let node = (vec-get (ref (deref ast).children) 1))
+                        (let loc = (loc-to-line-col source (deref node).loc))
+                        (let node = (compile-helper node filename source context func block))
+                        (cond
+                            ((: u64 (cast node))
+                                (gcc-jit-block-add-eval
+                                    (deref block)
+                                    (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                    node)))
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (gcc-jit-block-end-with-jump
+                            (deref block)
+                            (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                            loop-block)
+                        (set (deref block) = (gcc-jit-function-new-block func "loop-end"))
+                        (null)))
+
                     (:else (seq
                         (eprint "todo: unsupported function ")
                         (eprint (deref func-ast).value)
@@ -4028,12 +4058,14 @@
 (seqn
     (let context = (gcc-jit-context-acquire))
     (gcc-jit-context-set-bool-option context (GCC_JIT_BOOL_OPTION_DEBUGINFO) true)
+    (gcc-jit-context-set-bool-allow-unreachable-blocks context true)
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
         (let ast = (vec-get (ref (deref ast).children) i))
         (cond
             ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
-                (let type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT))) // TODO: TEMPORARY, WILL SEGFAULT IF PASSED IN NIL
+                //(let type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT))) // TODO: TEMPORARY, WILL SEGFAULT IF PASSED IN NIL
+                (let type = (gcc-jit-context-get-type context 0))
                 (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
                 (let func-type = (ref (deref ast).typed))
                 (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
