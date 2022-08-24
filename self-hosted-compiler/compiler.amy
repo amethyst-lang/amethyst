@@ -3569,6 +3569,13 @@
         (set i = (+ i 1)))
     :else n)))
 
+(defun ast-type-to-gcc-jit-type
+    (context (* GccJitContext))
+    (type (* Type))
+    : (* GccJitType)
+(seq
+    (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT))))
+
 (defun compile-helper
     (ast (* Ast))
     (filename (@ u8))
@@ -3578,8 +3585,38 @@
 (seq
     (cond
         ((== (deref ast).type (AST_NODE_TYPE_INT)) (seq
-            (let type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))
+            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
             (gcc-jit-context-new-rvalue-from-long context type (parse-int (deref ast).value))))
+        ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (> (deref ast).children.len 0)) (seq
+            (let func = (vec-get (ref (deref ast).children) 0))
+            (cond
+                ((== (deref func).type (AST_NODE_TYPE_SYMBOL)) (seq
+                    (let symbol = (deref func).value)
+                    (cond
+                        ((str-equals symbol "+") (seq
+                            (let loc = (loc-to-line-col source (deref ast).loc))
+                            (let a = (vec-get (ref (deref ast).children) 1))
+                            (let b = (vec-get (ref (deref ast).children) 2))
+                            (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                            (gcc-jit-context-new-binary-op
+                                context
+                                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                                (GCC_JIT_BINARY_OP_PLUS)
+                                type
+                                (compile-helper a filename source context)
+                                (compile-helper b filename source context))))
+                        (:else (seq
+                            (eprint "todo: unsupported function ")
+                            (eprint (deref func).value)
+                            (eprint "\n")
+                            (exit 1)
+                            (null))))))
+                (:else (seq
+                    (eprint "todo: unsupported sexpr function ")
+                    (eprint-int (deref func).type)
+                    (eprint "\n")
+                    (exit 1)
+                    (null))))))
         (:else (seq
             (eprint "todo: unsupported expression ")
             (eprint-int (deref ast).type)
