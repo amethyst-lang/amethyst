@@ -3507,7 +3507,7 @@
 (defext gcc-jit-block-end-with-void-return
     (block (* GccJitBlock))
     (location (* GccJitLocation))
-    "gcc_jit_block_end_with_void_return_wrapper")
+    "gcc_jit_block_end_with_void_return")
 
 (defext gcc-jit-block-end-with-jump
     (block (* GccJitBlock))
@@ -3521,7 +3521,7 @@
     (condition (* GccJitRValue))
     (on-true (* GccJitBlock))
     (on-false (* GccJitBlock))
-    "gcc_jit_block_end_with_conditional_wrapper")
+    "gcc_jit_block_end_with_conditional")
 
 (defmacro GCC_JIT_OUTPUT_KIND_ASSEMBLER 0)
 (defmacro GCC_JIT_OUTPUT_KIND_OBJECT_FILE 1)
@@ -3608,7 +3608,7 @@
 (defext gcc-jit-lvalue-as-rvalue
     (lvalue (* GccJitLValue))
     : (* GccJitRValue)
-    "gcc_jit_lvalue_as_rvalue")
+    "gcc_jit_lvalue_as_rvalue_wrapper")
 
 (defext gcc-jit-block-add-assignment
     (block (* GccJitBlock))
@@ -3642,6 +3642,14 @@
     (context (* GccJitContext))
     (enable u1)
     "gcc_jit_context_set_bool_allow_unreachable_blocks")
+
+(defext gcc-jit-context-new-cast
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (rvalue (* GccJitRValue))
+    (type (* GccJitType))
+    : (* GccJitRValue)
+    "gcc_jit_context_new_cast")
 
 
 
@@ -3838,67 +3846,97 @@
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                        (gcc-jit-context-new-comparison
+                        (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_EQ)
                             (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                        (gcc-jit-context-new-cast
+                            context 
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            v
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
                     ((str-equals symbol "!=") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                        (gcc-jit-context-new-comparison
+                        (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_NE)
                             (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                        (gcc-jit-context-new-cast
+                            context 
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            v
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
                     ((str-equals symbol "<") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                        (gcc-jit-context-new-comparison
+                        (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_LT)
                             (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                        (gcc-jit-context-new-cast
+                            context 
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            v
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
                     ((str-equals symbol "<=") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                        (gcc-jit-context-new-comparison
+                        (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_LE)
                             (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                        (gcc-jit-context-new-cast
+                            context 
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            v
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
                     ((str-equals symbol ">") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                        (gcc-jit-context-new-comparison
+                        (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_GT)
                             (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                        (gcc-jit-context-new-cast
+                            context 
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            v
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
                     ((str-equals symbol ">=") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
-                        (gcc-jit-context-new-comparison
+                        (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_GE)
                             (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                        (gcc-jit-context-new-cast
+                            context 
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            v
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
 
                     ((str-equals symbol "seq") (seq
                         (let i = 1)
@@ -4061,7 +4099,11 @@
                             loop-block)
                         (set (deref block) = break-block)
                         (vec-pop var-map)
-                        (gcc-jit-lvalue-as-rvalue break-lvalue)))
+                        (cond
+                            ((: u64 (cast break-lvalue))
+                                (gcc-jit-lvalue-as-rvalue break-lvalue))
+                            (:else
+                                (null)))))
                     ((str-equals symbol "break") (seq
                         (let break-rvalue = (cond
                             ((> (deref ast).children.len 1) (seq
