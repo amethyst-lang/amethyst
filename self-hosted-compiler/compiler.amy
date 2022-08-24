@@ -1496,6 +1496,7 @@
 
         ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
             (let first = (vec-get (ref (deref ast).children) 0))
+
             (cond
                 ((== (deref first).type (AST_NODE_TYPE_SYMBOL))
                     (cond
@@ -1511,7 +1512,7 @@
                                     (set (deref type).type = (TYPE_TYPE_POINTER))
                                     (set (deref type).signed-mutable = false)
                                     (set (deref type).boxed = (alloc (deref ast).children.A))
-                                    (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 2) errors))))
+                                    (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 1) errors))))
 
                                 (:else
                                     (vec-push errors (type-error (deref ast).loc "could not parse pointer type")))))
@@ -1528,7 +1529,7 @@
                                     (set (deref type).type = (TYPE_TYPE_SLICE))
                                     (set (deref type).signed-mutable = false)
                                     (set (deref type).boxed = (alloc (deref ast).children.A))
-                                    (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 2) errors))))
+                                    (set (deref (deref type).boxed) = (parse-type (vec-get (ref (deref ast).children) 1) errors))))
 
                                 (:else
                                     (vec-push errors (type-error (deref ast).loc "could not parse slice type")))))
@@ -1657,7 +1658,7 @@
             ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (>= (deref ast).children.len 3)) (seqn
                 (let defun = (vec-get (ref (deref ast).children) 0))
                 (cond
-                    ((and (== (deref defun).type (AST_NODE_TYPE_SYMBOL)) (str-equals (deref defun).value "defun")) (seqn
+                    ((and (== (deref defun).type (AST_NODE_TYPE_SYMBOL)) (or (str-equals (deref defun).value "defun") (str-equals (deref defun).value "defext"))) (seqn
                         (let name = (vec-get (ref (deref ast).children) 1))
                         (cond
                             ((== (deref name).type (AST_NODE_TYPE_SYMBOL)) (seqn
@@ -2711,6 +2712,7 @@
                             (substitute (deref body).loc type func-type.boxed substitutions errors)
                             (set (deref body).typed = (deref type))))))
 
+                ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defext")) ())
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defstruct")) ())
                 ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defmacro")) ())
 
@@ -3389,7 +3391,7 @@
         (set len = (+ len 1))))
     (slice len raw)))
 
-(struct GccJitParam)
+(defstruct GccJitParam)
 (defstruct GccJitLocation)
 
 (defext gcc-jit-context-new-param-raw
