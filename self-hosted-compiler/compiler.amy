@@ -3626,6 +3626,12 @@
     : (* GccJitRValue)
     "gcc_jit_context_new_comparison")
 
+(defext gcc-jit-block-add-eval
+    (block (* GccJitBlock))
+    (location (* GccJitLocation))
+    (rvalue (* GccJitRValue))
+    "gcc_jit_block_add_eval")
+
 
 
 //
@@ -3863,6 +3869,21 @@
                             (GCC_JIT_COMPARISON_GE)
                             (compile-helper a filename source context func block)
                             (compile-helper b filename source context func block))))
+
+                    ((str-equals symbol "seq") (seq
+                        (let i = 1)
+                        (let last = (null))
+                        (while (< i (deref ast).children.len) (seqn
+                            (let node = (vec-get (ref (deref ast).children) i))
+                            (let loc = (loc-to-line-col source (deref node).loc))
+                            (let node = (compile-helper node filename source context func block))
+                            (gcc-jit-block-add-eval
+                                (deref block)
+                                (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
+                                node)
+                            (set last = node)
+                            (set i = (+ i 1))))
+                        last))
 
                     ((str-equals symbol "cond") (seq
                         (let conds = (ref (new-vec (deref ast).children.A)))
