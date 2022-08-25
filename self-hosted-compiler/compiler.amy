@@ -3351,6 +3351,7 @@
 
 (defstruct GccJitType)
 
+(defmacro GCC_JIT_TYPE_VOID 0)
 (defmacro GCC_JIT_TYPE_INT 8)
 
 (defext gcc-jit-context-get-type
@@ -3432,7 +3433,7 @@
     (param-list (* (* GccJitParam)))
     (is-variadic u1)
     : (* GccJitFunction)
-    "gcc_jit_context_new_function")
+    "gcc_jit_context_new_function_wrapper")
 (defun gcc-jit-context-new-function
     (context (* GccJitContext))
     (location (* GccJitLocation))
@@ -3530,7 +3531,7 @@
     (context (* GccJitContext))
     (output-kind u32)
     (output-path (* u8))
-    "gcc_jit_context_compile_to_file_raw")
+    "gcc_jit_context_compile_to_file_wrapper")
 (defun gcc-jit-context-compile-to-file
     (context (* GccJitContext))
     (output-kind u32)
@@ -3608,7 +3609,12 @@
 (defext gcc-jit-lvalue-as-rvalue
     (lvalue (* GccJitLValue))
     : (* GccJitRValue)
-    "gcc_jit_lvalue_as_rvalue_wrapper")
+    "gcc_jit_lvalue_as_rvalue")
+
+(defext gcc-jit-param-as-lvalue
+    (param (* GccJitParam))
+    : (* GccJitLValue)
+    "gcc_jit_param_as_lvalue")
 
 (defext gcc-jit-block-add-assignment
     (block (* GccJitBlock))
@@ -4202,30 +4208,88 @@
     (let context = (gcc-jit-context-acquire))
     (gcc-jit-context-set-bool-option context (GCC_JIT_BOOL_OPTION_DEBUGINFO) true)
     (gcc-jit-context-set-bool-allow-unreachable-blocks context true)
+    (let func-map = (ref (new-vec (deref ast).children.A)))
+    (let i = 0)
+    (while (< i (deref ast).children.len) (seqn
+        (let ast = (vec-get (ref (deref ast).children) i))
+        (let v = (deref (vec-get (ref (deref ast).children) 0)))
+        (cond
+            ((and (== v.type (AST_NODE_TYPE_SYMBOL)) (or (str-equals v.value "defun") (str-equals v.value "defext"))) (seqn
+                (let func-type = (deref ast).typed)
+                (let ret-type = func-type.boxed)
+                (let arg-types = (ref func-type.subtypes))
+                (let type = (ast-type-to-gcc-jit-type context ret-type))
+                (cond
+                    ((: u64 (cast type))
+                        ())
+                    (:else (seqn
+                        (set type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_VOID))))))
+                (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
+                (let j = 0)
+                (let params = (ref (new-vec (deref ast).children.A)))
+                (while (< j (deref arg-types).len) (seqn
+                    (let type = (ast-type-to-gcc-jit-type context (vec-get arg-types j)))
+                    (let arg = (vec-get (ref (deref ast).children) (+ j 2)))
+                    (let name = (vec-get (ref (deref arg).children) 0))
+                    (let name = (deref name).value)
+                    (let loc = (loc-to-line-col source (deref arg).loc))
+                    (let param = (gcc-jit-context-new-param
+                        context
+                        (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                        type
+                        name))
+                    (vec-push params param)
+                    (set j = (+ j 1))))
+
+                (cond
+                    ((str-equals v.value "defext") (seqn
+                        (set name = (deref (vec-get (ref (deref ast).children) (- (deref ast).children.len 1))).value))))
+                (let loc = (loc-to-line-col source (deref ast).loc))
+                (let func-code = (gcc-jit-context-new-function
+                    context
+                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                    (cond
+                        ((str-equals v.value "defext")
+                            (GCC_JIT_FUNCTION_IMPORTED))
+                        (:else
+                            (GCC_JIT_FUNCTION_EXPORTED)))
+                    type
+                    name
+                    (vec-slice params)
+                    false))
+                (vec-push func-map (inst Pair
+                    (a name)
+                    (b (inst Pair
+                        (a func-code)
+                        (b (deref params)))))))))
+        (set i = (+ i 1))))
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
         (let ast = (vec-get (ref (deref ast).children) i))
         (cond
             ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
-                (let type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT))) // TODO: TEMPORARY, WILL SEGFAULT IF PASSED IN NIL
-                //(let type = (gcc-jit-context-get-type context 0))
                 (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
-                (let func-type = (ref (deref ast).typed))
-                (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-
-                (let loc = (loc-to-line-col source (deref ast).loc))
-                (let func-code = (gcc-jit-context-new-function
-                    context
-                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                    (GCC_JIT_FUNCTION_EXPORTED)
-                    type
-                    name
-                    (slice 0 (null))
-                    false))
+                (let func = (vec-find func-map matches-key name))
+                (let func-code = (deref func).b.a)
+                (let params = (ref (deref func).b.b))
                 (let var-map = (ref (new-vec (deref ast).children.A)))
-                (vec-push var-map (new-vec (deref ast).children.A))
+                (let scope = (ref (new-vec (deref ast).children.A)))
+                (let j = 0)
+                (while (< j (deref params).len) (seqn
+                    (let param = (deref (vec-get params j)))
+                    (let lvalue = (gcc-jit-param-as-lvalue param))
+                    (let arg = (vec-get (ref (deref ast).children) (+ j 2)))
+                    (let name = (vec-get (ref (deref arg).children) 0))
+                    (let name = (deref name).value)
+                    (vec-push scope (inst Pair
+                        (a name)
+                        (b lvalue)))
+                    (set j = (+ j 1))))
+                (vec-push var-map (deref scope))
+                (print "\n")
                 (let entry = (gcc-jit-function-new-block func-code "entry"))
                 (let block = (ref entry))
+                (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
                 (let expr = (compile-helper body filename source context func-code block (null) (null) var-map))
 
                 (let loc = (loc-to-line-col source (deref body).loc))

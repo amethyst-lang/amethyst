@@ -24,7 +24,7 @@ impl Default for Generator {
         b.set("opt_level", "speed_and_size").unwrap();
         b.set("enable_probestack", "false").unwrap();
         b.set("is_pic", "true").unwrap();
-        b.set("preserve_frame_pointers", "true").unwrap();
+        //b.set("preserve_frame_pointers", "true").unwrap();
 
         let f = settings::Flags::new(b);
         let isa_data = isa::lookup(Triple::host()).unwrap().finish(f).unwrap();
