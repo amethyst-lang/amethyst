@@ -3673,7 +3673,6 @@
     : (* GccJitRValue)
     (gcc-jit-context-new-call-raw context location function args.len args.ptr))
 
-
 (defext gcc-jit-context-new-call-through-ptr-raw
     (context (* GccJitContext))
     (location (* GccJitLocation))
@@ -3721,6 +3720,9 @@
 // CODE GENERATION
 // ==================================================================================================
 //
+
+(defun matches-type (pair (* (Pair Type 'a))) (type Type) : u1
+    (type-equals (deref pair).a type))
 
 (defun parse-int (str (@ u8)) : u64
 (cond
@@ -3777,7 +3779,7 @@
     (break-block (* GccJitBlock))
     (break-lvalue (* GccJitLValue))
     (var-map (* (Vec (Vec (Pair (@ u8) (* GccJitLValue))))))
-    (func-map (* (Vec (Pair (@ u8) (Pair (* GccJitFunction) (Vec (* GccJitParam)))))))
+    (func-map (* (Vec (Pair (@ u8) (Vec (Pair Type (Pair (* GccJitFunction) (Vec (* GccJitParam)))))))))
     : (* GccJitRValue)
 (cond
     ((or (== (deref ast).type (AST_NODE_TYPE_INT)) (== (deref ast).type (AST_NODE_TYPE_BOOL))) (seq
@@ -3796,6 +3798,7 @@
         :else (cond
             ((: u64 (cast (let func = (vec-find func-map matches-key (deref ast).value)))) (seq
                 (let loc = (loc-to-line-col source (deref ast).loc))
+                (let func = (vec-find (ref (deref func).b) matches-type (deref ast).typed))
                 (gcc-jit-function-get-address (deref func).b.a (gcc-jit-context-new-location context filename loc.line-start loc.col-start))))
             (:else
                 (null))))))
@@ -3808,6 +3811,7 @@
                 (let symbol = (deref func-ast).value)
                 (cond
                     ((: u64 (cast (let callee = (vec-find func-map matches-key symbol)))) (seq
+                        (let callee = (vec-find (ref (deref callee).b) matches-type (deref func-ast).typed))
                         (let callee = (deref callee).b.a)
                         (let args = (ref (new-vec (deref ast).children.A)))
                         (let j = 1)
@@ -4320,13 +4324,14 @@
     (gcc-jit-context-set-bool-option context (GCC_JIT_BOOL_OPTION_DEBUGINFO) true)
     (gcc-jit-context-set-bool-allow-unreachable-blocks context true)
     (let func-map = (ref (new-vec (deref ast).children.A)))
+    (: (* (Vec (Pair (@ u8) (Vec (Pair Type (Pair (* GccJitFunction) (Vec (* GccJitParam)))))))) func-map)
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
         (let ast = (vec-get (ref (deref ast).children) i))
         (let v = (deref (vec-get (ref (deref ast).children) 0)))
+        (let func-type = (deref ast).typed)
         (cond
-            ((and (== v.type (AST_NODE_TYPE_SYMBOL)) (or (str-equals v.value "defun") (str-equals v.value "defext"))) (seqn
-                (let func-type = (deref ast).typed)
+            ((and (== v.type (AST_NODE_TYPE_SYMBOL)) (and (or (str-equals v.value "defun") (str-equals v.value "defext")) (not (has-generic (ref func-type))))) (seqn
                 (let ret-type = func-type.boxed)
                 (let arg-types = (ref func-type.subtypes))
                 (let type = (ast-type-to-gcc-jit-type context ret-type))
@@ -4363,8 +4368,18 @@
                         (while (< i name.len) (seqn
                             (vec-push name-vec (get name i))
                             (set i = (+ i 1))))))
+                    ((str-equals name "main") (seqn
+                        (let i = 0)
+                        (while (< i name.len) (seqn
+                            (vec-push name-vec (get name i))
+                            (set i = (+ i 1))))))
                     (:else (seqn
                         (let i = 0)
+                        (vec-push name-vec '_')
+                        (vec-push name-vec 'a')
+                        (vec-push name-vec 'm')
+                        (vec-push name-vec 'y')
+                        (vec-push name-vec '_')
                         (while (< i name.len) (seqn
                             (let c = (get name i))
                             // TODO: better way of mangling invalid characters in libgccjit
@@ -4373,7 +4388,20 @@
                                     (vec-push name-vec '_')))
                                 (:else (seqn
                                     (vec-push name-vec c))))
-                            (set i = (+ i 1)))))))
+                            (set i = (+ i 1))))
+                        (vec-push name-vec '_')
+                        // TODO: make this based on types
+                        // or maybe not? maybe this is sufficient? who knows
+                        (let monomorphisms = (vec-find func-map matches-key name))
+                        (cond
+                            ((: u64 (cast monomorphisms)) (seqn
+                                (let i = (deref monomorphisms).b.len)
+                                (while (!= i 0) (seqn
+                                    (let c = (+ '0' (cast (% i 10))))
+                                    (vec-push name-vec c)
+                                    (set i = (/ i 10))))))
+                            (:else (seqn
+                                (vec-push name-vec '0')))))))
                 (let loc = (loc-to-line-col source (deref ast).loc))
                 (let func-code = (gcc-jit-context-new-function
                     context
@@ -4387,19 +4415,34 @@
                     (vec-slice name-vec)
                     (vec-slice params)
                     false))
-                (vec-push func-map (inst Pair
-                    (a name)
-                    (b (inst Pair
-                        (a func-code)
-                        (b (deref params)))))))))
+                (cond
+                    ((: u64 (cast (let monomorphisms = (vec-find func-map matches-key name)))) (seqn
+                        (let morphisms = (ref (deref monomorphisms).b))
+                        (vec-push morphisms (inst Pair
+                            (a func-type)
+                            (b (inst Pair
+                                (a func-code)
+                                (b (deref params))))))
+                        (set (deref monomorphisms).b = (deref morphisms))))
+                    (:else (seqn
+                        (let morphisms = (ref (new-vec (deref ast).children.A)))
+                        (vec-push morphisms (inst Pair
+                            (a func-type)
+                            (b (inst Pair
+                                (a func-code)
+                                (b (deref params))))))
+                        (vec-push func-map (inst Pair
+                            (a name)
+                            (b (deref morphisms))))))))))
         (set i = (+ i 1))))
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
         (let ast = (vec-get (ref (deref ast).children) i))
         (cond
-            ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defun")) (seqn
+            ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (and (str-equals v.value "defun") (not (has-generic (ref (deref ast).typed))))) (seqn
                 (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
                 (let func = (vec-find func-map matches-key name))
+                (let func = (vec-find (ref (deref func).b) matches-type (deref ast).typed))
                 (let func-code = (deref func).b.a)
                 (let params = (ref (deref func).b.b))
                 (let var-map = (ref (new-vec (deref ast).children.A)))
