@@ -3956,7 +3956,7 @@
                             (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
                             (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
                         (gcc-jit-context-new-cast
-                            context 
+                            context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             v
                             (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
@@ -4276,7 +4276,26 @@
 
                 (cond
                     ((str-equals v.value "defext") (seqn
-                        (set name = (deref (vec-get (ref (deref ast).children) (- (deref ast).children.len 1))).value))))
+                        (set name = (deref (vec-get (ref (deref ast).children) (- (deref ast).children.len 1))).value)
+                        (set name = (subslice name 1 (- name.len 1))))))
+                (let name-vec = (ref (new-vec (deref ast).children.A)))
+                (cond
+                    ((str-equals v.value "defext") (seqn
+                        (let i = 0)
+                        (while (< i name.len) (seqn
+                            (vec-push name-vec (get name i))
+                            (set i = (+ i 1))))))
+                    (:else (seqn
+                        (let i = 0)
+                        (while (< i name.len) (seqn
+                            (let c = (get name i))
+                            // TODO: better way of mangling invalid characters in libgccjit
+                            (cond
+                                ((== c '-') (seqn
+                                    (vec-push name-vec '_')))
+                                (:else (seqn
+                                    (vec-push name-vec c))))
+                            (set i = (+ i 1)))))))
                 (let loc = (loc-to-line-col source (deref ast).loc))
                 (let func-code = (gcc-jit-context-new-function
                     context
@@ -4287,7 +4306,7 @@
                         (:else
                             (GCC_JIT_FUNCTION_EXPORTED)))
                     type
-                    name
+                    (vec-slice name-vec)
                     (vec-slice params)
                     false))
                 (vec-push func-map (inst Pair
