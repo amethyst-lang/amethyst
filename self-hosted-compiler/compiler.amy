@@ -3429,7 +3429,7 @@
     (linkage u32)
     (return-type (* GccJitType))
     (name (* u8))
-    (param-count u32)
+    (param-count u64)
     (param-list (* (* GccJitParam)))
     (is-variadic u1)
     : (* GccJitFunction)
@@ -3451,7 +3451,7 @@
             (set (get null-term i) = (get name i))
             (set i = (+ i 1))))
     (set (get null-term i) = '\0')
-    (gcc-jit-context-new-function-raw context location linkage return-type null-term.ptr (cast params.len) params.ptr is-variadic)))
+    (gcc-jit-context-new-function-raw context location linkage return-type null-term.ptr params.len params.ptr is-variadic)))
 
 (defstruct GccJitBlock)
 
@@ -3664,8 +3664,7 @@
     (arg-count u64)
     (arg-list (* (* GccJitRValue)))
     : (* GccJitRValue)
-    "gcc_jit_context_new_call")
-
+    "gcc_jit_context_new_call_wrapper")
 (defun gcc-jit-context-new-call
     (context (* GccJitContext))
     (location (* GccJitLocation))
@@ -3673,6 +3672,47 @@
     (args (@ (* GccJitRValue)))
     : (* GccJitRValue)
     (gcc-jit-context-new-call-raw context location function args.len args.ptr))
+
+
+(defext gcc-jit-context-new-call-through-ptr-raw
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (function (* GccJitRValue))
+    (arg-count u64)
+    (arg-list (* (* GccJitRValue)))
+    : (* GccJitRValue)
+    "gcc_jit_context_new_call_through_ptr")
+(defun gcc-jit-context-new-call-through-ptr
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (function (* GccJitRValue))
+    (args (@ (* GccJitRValue)))
+    : (* GccJitRValue)
+    (gcc-jit-context-new-call-through-ptr-raw context location function args.len args.ptr))
+
+(defext gcc-jit-function-get-address
+    (function (* GccJitFunction))
+    (location (* GccJitLocation))
+    : (* GccJitRValue)
+    "gcc_jit_function_get_address")
+
+(defext gcc-jit-context-new-function-ptr-type-raw
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (return-type (* GccJitType))
+    (param-count u64)
+    (param-list (* (* GccJitType)))
+    (is-variadic u1)
+    : (* GccJitType)
+    "gcc_jit_context_new_function_ptr_type")
+(defun gcc-jit-context-new-function-ptr-type
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (return-type (* GccJitType))
+    (params (@ (* GccJitType)))
+    (is-variadic u1)
+    : (* GccJitType)
+    (gcc-jit-context-new-function-ptr-type-raw context location return-type params.len params.ptr is-variadic))
 
 
 
@@ -3707,8 +3747,25 @@
 (cond
     ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
         (null))
+    ((== (deref type).type (TYPE_TYPE_INT))
+        (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))
+    ((== (deref type).type (TYPE_TYPE_FUNCTION)) (seq
+        (let return-type = (ast-type-to-gcc-jit-type context (deref type).boxed))
+        (cond
+            ((: u64 (cast return-type))
+                ())
+            (:else (seqn
+                (set return-type = (gcc-jit-context-get-type context (GCC_JIT_TYPE_VOID))))))
+        (let params = (ref (new-vec (deref type).subtypes.A)))
+        (let i = 0)
+        (while (< i (deref type).subtypes.len) (seqn
+            (let arg = (vec-get (ref (deref type).subtypes) i))
+            (let arg = (ast-type-to-gcc-jit-type context arg))
+            (vec-push params arg)
+            (set i = (+ i 1))))
+        (gcc-jit-context-new-function-ptr-type context (null) return-type (vec-slice params) false)))
     (:else
-        (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))))
+        (gcc-jit-context-get-type context (GCC_JIT_TYPE_VOID)))))
 
 (defun compile-helper
     (ast (* Ast))
@@ -3736,7 +3793,12 @@
             (cond
                 ((: u64 (cast value))
                     (break (gcc-jit-lvalue-as-rvalue (deref value).b)))))
-        :else (null))))
+        :else (cond
+            ((: u64 (cast (let func = (vec-find func-map matches-key (deref ast).value)))) (seq
+                (let loc = (loc-to-line-col source (deref ast).loc))
+                (gcc-jit-function-get-address (deref func).b.a (gcc-jit-context-new-location context filename loc.line-start loc.col-start))))
+            (:else
+                (null))))))
     ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0))
         (null))
     ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
@@ -3745,8 +3807,8 @@
             ((== (deref func-ast).type (AST_NODE_TYPE_SYMBOL)) (seq
                 (let symbol = (deref func-ast).value)
                 (cond
-                    ((: u64 (cast (let func = (vec-find func-map matches-key symbol)))) (seq
-                        (let func = (deref func).b.a)
+                    ((: u64 (cast (let callee = (vec-find func-map matches-key symbol)))) (seq
+                        (let callee = (deref callee).b.a)
                         (let args = (ref (new-vec (deref ast).children.A)))
                         (let j = 1)
                         (while (< j (deref ast).children.len) (seqn
@@ -3758,8 +3820,24 @@
                         (gcc-jit-context-new-call
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                            func
+                            callee
                             (vec-slice args))))
+
+                    ((: u64 (cast (let callee = (compile-helper func-ast filename source context func block break-block break-lvalue var-map func-map)))) (seq
+                        (let args = (ref (new-vec (deref ast).children.A)))
+                        (let j = 1)
+                        (while (< j (deref ast).children.len) (seqn
+                            (let arg = (vec-get (ref (deref ast).children) j))
+                            (let arg = (compile-helper arg filename source context func block break-block break-lvalue var-map func-map))
+                            (vec-push args arg)
+                            (set j = (+ j 1))))
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (gcc-jit-context-new-call-through-ptr
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            callee
+                            (vec-slice args))))
+
                     ((str-equals symbol "*") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))

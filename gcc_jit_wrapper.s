@@ -8,6 +8,8 @@
 .extern gcc_jit_lvalue_as_rvalue
 .global gcc_jit_context_new_function_wrapper
 .extern gcc_jit_context_new_function
+.global gcc_jit_context_new_call_wrapper
+.extern gcc_jit_context_new_call
 
 .intel_syntax
 
@@ -44,11 +46,15 @@ gcc_jit_lvalue_as_rvalue_wrapper:
     ret
 
 gcc_jit_context_new_function_wrapper:
-    mov %r11, [%rsp + 0x18]
+    mov %r11, 0
     push %r11
     mov %r11, [%rsp + 0x10]
     push %r11
     call gcc_jit_context_new_function
     pop %r11
     pop %r11
+    ret
+
+gcc_jit_context_new_call_wrapper:
+    call gcc_jit_context_new_call
     ret
