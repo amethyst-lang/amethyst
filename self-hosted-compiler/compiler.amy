@@ -3657,6 +3657,23 @@
     : (* GccJitRValue)
     "gcc_jit_context_new_cast")
 
+(defext gcc-jit-context-new-call-raw
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (function (* GccJitFunction))
+    (arg-count u64)
+    (arg-list (* (* GccJitRValue)))
+    : (* GccJitRValue)
+    "gcc_jit_context_new_call")
+
+(defun gcc-jit-context-new-call
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (function (* GccJitFunction))
+    (args (@ (* GccJitRValue)))
+    : (* GccJitRValue)
+    (gcc-jit-context-new-call-raw context location function args.len args.ptr))
+
 
 
 //
@@ -3703,6 +3720,7 @@
     (break-block (* GccJitBlock))
     (break-lvalue (* GccJitLValue))
     (var-map (* (Vec (Vec (Pair (@ u8) (* GccJitLValue))))))
+    (func-map (* (Vec (Pair (@ u8) (Pair (* GccJitFunction) (Vec (* GccJitParam)))))))
     : (* GccJitRValue)
 (cond
     ((or (== (deref ast).type (AST_NODE_TYPE_INT)) (== (deref ast).type (AST_NODE_TYPE_BOOL))) (seq
@@ -3727,6 +3745,21 @@
             ((== (deref func-ast).type (AST_NODE_TYPE_SYMBOL)) (seq
                 (let symbol = (deref func-ast).value)
                 (cond
+                    ((: u64 (cast (let func = (vec-find func-map matches-key symbol)))) (seq
+                        (let func = (deref func).b.a)
+                        (let args = (ref (new-vec (deref ast).children.A)))
+                        (let j = 1)
+                        (while (< j (deref ast).children.len) (seqn
+                            (let arg = (vec-get (ref (deref ast).children) j))
+                            (let arg = (compile-helper arg filename source context func block break-block break-lvalue var-map func-map))
+                            (vec-push args arg)
+                            (set j = (+ j 1))))
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (gcc-jit-context-new-call
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            func
+                            (vec-slice args))))
                     ((str-equals symbol "*") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3737,8 +3770,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_MULT)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol "/") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3749,8 +3782,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_DIVIDE)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol "%") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3761,8 +3794,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_MODULO)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol "+") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3773,8 +3806,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_PLUS)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol "-") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3785,8 +3818,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_MINUS)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol "<<") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3797,8 +3830,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_LSHIFT)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol ">>") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3809,8 +3842,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_RSHIFT)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol "&") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3821,8 +3854,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_BITWISE_AND)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol "|") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3833,8 +3866,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_BITWISE_OR)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol "^") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3845,8 +3878,8 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_BITWISE_XOR)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
                     ((str-equals symbol "==") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -3856,8 +3889,8 @@
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_EQ)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
@@ -3872,8 +3905,8 @@
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_NE)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
@@ -3888,8 +3921,8 @@
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_LT)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
@@ -3904,8 +3937,8 @@
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_LE)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
@@ -3920,8 +3953,8 @@
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_GT)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
@@ -3936,8 +3969,8 @@
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_GE)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
@@ -3951,7 +3984,7 @@
                         (while (< i (deref ast).children.len) (seqn
                             (let node = (vec-get (ref (deref ast).children) i))
                             (let loc = (loc-to-line-col source (deref node).loc))
-                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map))
+                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
                             (cond
                                 ((: u64 (cast node))
                                     (gcc-jit-block-add-eval
@@ -3968,7 +4001,7 @@
                         (while (< i (deref ast).children.len) (seqn
                             (let node = (vec-get (ref (deref ast).children) i))
                             (let loc = (loc-to-line-col source (deref node).loc))
-                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map))
+                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
                             (cond
                                 ((: u64 (cast node))
                                     (gcc-jit-block-add-eval
@@ -4014,7 +4047,7 @@
                                 ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
                                     (vec-push var-map (new-vec (deref ast).children.A))
                                     (let condy-ast = condy)
-                                    (let condy = (compile-helper condy filename source context func block break-block break-lvalue var-map))
+                                    (let condy = (compile-helper condy filename source context func block break-block break-lvalue var-map func-map))
                                     (let loc = (loc-to-line-col source (deref condy-ast).loc))
                                     (let condy = (gcc-jit-context-new-comparison
                                         context
@@ -4033,7 +4066,7 @@
 
                                     (set (deref block) = then-block)
                                     (let loc = (loc-to-line-col source (deref then).loc))
-                                    (let then = (compile-helper then filename source context func block break-block break-lvalue var-map))
+                                    (let then = (compile-helper then filename source context func block break-block break-lvalue var-map func-map))
                                     (cond
                                         ((: u64 (cast result))
                                             (gcc-jit-block-add-assignment
@@ -4051,7 +4084,7 @@
                                 (:else (seqn
                                     (vec-push var-map (new-vec (deref ast).children.A))
                                     (let loc = (loc-to-line-col source (deref then).loc))
-                                    (let else = (compile-helper then filename source context func block break-block break-lvalue var-map))
+                                    (let else = (compile-helper then filename source context func block break-block break-lvalue var-map func-map))
                                     (cond
                                         ((: u64 (cast result))
                                             (gcc-jit-block-add-assignment
@@ -4091,7 +4124,7 @@
                         (set (deref block) = loop-block)
                         (let node = (vec-get (ref (deref ast).children) 1))
                         (let loc = (loc-to-line-col source (deref node).loc))
-                        (let node = (compile-helper node filename source context func block break-block break-lvalue var-map))
+                        (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
                         (cond
                             ((: u64 (cast node))
                                 (gcc-jit-block-add-eval
@@ -4114,7 +4147,7 @@
                         (let break-rvalue = (cond
                             ((> (deref ast).children.len 1) (seq
                                 (let node = (vec-get (ref (deref ast).children) 1))
-                                (compile-helper node filename source context func block break-block break-lvalue var-map)))
+                                (compile-helper node filename source context func block break-block break-lvalue var-map func-map)))
                             (:else
                                 (null))))
                         (let loc = (loc-to-line-col source (deref ast).loc))
@@ -4138,7 +4171,7 @@
                         (let value = (vec-find top matches-key (deref var).value))
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let node = (vec-get (ref (deref ast).children) 3))
-                        (let rvalue = (compile-helper node filename source context func block break-block break-lvalue var-map))
+                        (let rvalue = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
                         (let lvalue = (gcc-jit-function-new-local
                             func
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
@@ -4172,7 +4205,7 @@
                                         (break (deref value).b))))
                             :else (null)))
                         (let node = (vec-get (ref (deref ast).children) 3))
-                        (let rvalue = (compile-helper node filename source context func block break-block break-lvalue var-map))
+                        (let rvalue = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (gcc-jit-block-add-assignment
                             (deref block)
@@ -4286,11 +4319,10 @@
                         (b lvalue)))
                     (set j = (+ j 1))))
                 (vec-push var-map (deref scope))
-                (print "\n")
                 (let entry = (gcc-jit-function-new-block func-code "entry"))
                 (let block = (ref entry))
                 (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-                (let expr = (compile-helper body filename source context func-code block (null) (null) var-map))
+                (let expr = (compile-helper body filename source context func-code block (null) (null) var-map func-map))
 
                 (let loc = (loc-to-line-col source (deref body).loc))
                 (cond
@@ -4310,8 +4342,8 @@
 // ==================================================================================================
 //
 
-(defun main (argv (* (* u8))) (argc u64)
-(seqn
+(defun main (argv (* (* u8))) (argc u64) : i32
+(seq
     (let filename = (get-argv argv 1))
     (cond
         ((== filename.ptr (null)) (seqn
@@ -4351,5 +4383,6 @@
         (print-parse-error contents-ref (ref result.fail))
         (exit 1))))
     (lexer-drop lexer)
-    (vec-drop (ref contents) empty-dealloc)))
+    (vec-drop (ref contents) empty-dealloc)
+    0))
 
