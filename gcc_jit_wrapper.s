@@ -10,6 +10,8 @@
 .extern gcc_jit_context_new_function
 .global gcc_jit_context_new_call_wrapper
 .extern gcc_jit_context_new_call
+.global gcc_jit_function_new_local_wrapper
+.extern gcc_jit_function_new_local
 
 .intel_syntax
 
@@ -57,4 +59,8 @@ gcc_jit_context_new_function_wrapper:
 
 gcc_jit_context_new_call_wrapper:
     call gcc_jit_context_new_call
+    ret
+
+gcc_jit_function_new_local_wrapper:
+    call gcc_jit_function_new_local
     ret

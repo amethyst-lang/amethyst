@@ -1602,8 +1602,9 @@
                                     (cond
                                         ((and (== (deref field).type (AST_NODE_TYPE_SEXPR)) (== (deref field).children.len 2)) (seqn
                                             (let name = (vec-get (ref (deref field).children) 0))
-                                            (let type = (vec-get (ref (deref field).children) 1))
-                                            (let type = (parse-type type errors))
+                                            (let type-ast = (vec-get (ref (deref field).children) 1))
+                                            (let type = (parse-type type-ast errors))
+                                            (set (deref type-ast).typed = type)
                                             (cond
                                                 ((== (deref name).type (AST_NODE_TYPE_SYMBOL)) (seqn
                                                     (vec-push fields (inst Pair
@@ -3589,7 +3590,7 @@
     (type (* GccJitType))
     (name (* u8))
     : (* GccJitLValue)
-    "gcc_jit_function_new_local")
+    "gcc_jit_function_new_local_wrapper")
 (defun gcc-jit-function-new-local
     (function (* GccJitFunction))
     (location (* GccJitLocation))
@@ -3713,6 +3714,94 @@
     : (* GccJitType)
     (gcc-jit-context-new-function-ptr-type-raw context location return-type params.len params.ptr is-variadic))
 
+(defstruct GccJitStruct)
+(defstruct GccJitField)
+
+(defext gcc-jit-context-new-opaque-struct-raw
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (name (* u8))
+    : (* GccJitStruct)
+    "gcc_jit_context_new_opaque_struct")
+(defun gcc-jit-context-new-opaque-struct
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (name (@ u8))
+    : (* GccJitStruct) (seq
+    (let null-term = (alloca (+ name.len 1)))
+    (let i = 0)
+    (while (< i name.len)
+        (seqn
+            (set (get null-term i) = (get name i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (gcc-jit-context-new-opaque-struct-raw context location null-term.ptr)))
+
+(defext gcc-jit-context-new-field-raw
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (type (* GccJitType))
+    (name (* u8))
+    : (* GccJitField)
+    "gcc_jit_context_new_field")
+(defun gcc-jit-context-new-field
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (type (* GccJitType))
+    (name (@ u8))
+    : (* GccJitField)
+(seq
+    (let null-term = (alloca (+ name.len 1)))
+    (let i = 0)
+    (while (< i name.len)
+        (seqn
+            (set (get null-term i) = (get name i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (gcc-jit-context-new-field-raw context location type null-term.ptr)))
+
+(defext gcc-jit-struct-set-fields-raw
+    (struct (* GccJitStruct))
+    (location (* GccJitLocation))
+    (field-count u64)
+    (field-list (* (* GccJitField)))
+    "gcc_jit_struct_set_fields")
+(defun gcc-jit-struct-set-fields
+    (struct (* GccJitStruct))
+    (location (* GccJitLocation))
+    (fields (@ (* GccJitField)))
+    (gcc-jit-struct-set-fields-raw struct location fields.len fields.ptr))
+
+(defext gcc-jit-context-new-struct-constructor-raw
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (type (* GccJitType))
+    (value-count u64)
+    (field-list (* (* GccJitField)))
+    (value-list (* (* GccJitRValue)))
+    : (* GccJitRValue)
+    "gcc_jit_context_new_struct_constructor")
+(defun gcc-jit-context-new-struct-constructor
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (type (* GccJitType))
+    (fields (@ (* GccJitField)))
+    (values (@ (* GccJitRValue)))
+    : (* GccJitRValue)
+    (gcc-jit-context-new-struct-constructor-raw context location type fields.len fields.ptr values.ptr))
+
+(defext gcc-jit-struct-as-type
+    (struct (* GccJitStruct))
+    : (* GccJitType)
+    "gcc_jit_struct_as_type")
+
+(defext gcc-jit-rvalue-access-field
+    (struct (* GccJitRValue))
+    (location (* GccJitLocation))
+    (field (* GccJitField))
+    : (* GccJitRValue)
+    "gcc_jit_rvalue_access_field")
+
 
 
 //
@@ -3745,6 +3834,7 @@
 (defun ast-type-to-gcc-jit-type
     (context (* GccJitContext))
     (type (* Type))
+    (struct-map (* (Vec (Pair (@ u8) (Pair (* GccJitStruct) (Pair (Vec (@ u8)) (Vec (* GccJitField))))))))
     : (* GccJitType)
 (cond
     ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
@@ -3752,7 +3842,7 @@
     ((== (deref type).type (TYPE_TYPE_INT))
         (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))
     ((== (deref type).type (TYPE_TYPE_FUNCTION)) (seq
-        (let return-type = (ast-type-to-gcc-jit-type context (deref type).boxed))
+        (let return-type = (ast-type-to-gcc-jit-type context (deref type).boxed struct-map))
         (cond
             ((: u64 (cast return-type))
                 ())
@@ -3762,10 +3852,17 @@
         (let i = 0)
         (while (< i (deref type).subtypes.len) (seqn
             (let arg = (vec-get (ref (deref type).subtypes) i))
-            (let arg = (ast-type-to-gcc-jit-type context arg))
+            (let arg = (ast-type-to-gcc-jit-type context arg struct-map))
             (vec-push params arg)
             (set i = (+ i 1))))
         (gcc-jit-context-new-function-ptr-type context (null) return-type (vec-slice params) false)))
+
+    // TODO: generics
+    ((== (deref type).type (TYPE_TYPE_STRUCT)) (seq
+        (let name = (deref type).name)
+        (let struct = (vec-find struct-map matches-key name))
+        (gcc-jit-struct-as-type (deref struct).b.a)))
+
     (:else
         (gcc-jit-context-get-type context (GCC_JIT_TYPE_VOID)))))
 
@@ -3780,10 +3877,11 @@
     (break-lvalue (* GccJitLValue))
     (var-map (* (Vec (Vec (Pair (@ u8) (* GccJitLValue))))))
     (func-map (* (Vec (Pair (@ u8) (Vec (Pair Type (Pair (* GccJitFunction) (Vec (* GccJitParam)))))))))
+    (struct-map (* (Vec (Pair (@ u8) (Pair (* GccJitStruct) (Pair (Vec (@ u8)) (Vec (* GccJitField))))))))
     : (* GccJitRValue)
 (cond
     ((or (== (deref ast).type (AST_NODE_TYPE_INT)) (== (deref ast).type (AST_NODE_TYPE_BOOL))) (seq
-        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)  struct-map))
         (gcc-jit-context-new-rvalue-from-long context type (parse-int (deref ast).value))))
     ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seq
         (let i = (deref var-map).len)
@@ -3817,7 +3915,7 @@
                         (let j = 1)
                         (while (< j (deref ast).children.len) (seqn
                             (let arg = (vec-get (ref (deref ast).children) j))
-                            (let arg = (compile-helper arg filename source context func block break-block break-lvalue var-map func-map))
+                            (let arg = (compile-helper arg filename source context func block break-block break-lvalue var-map func-map struct-map))
                             (vec-push args arg)
                             (set j = (+ j 1))))
                         (let loc = (loc-to-line-col source (deref ast).loc))
@@ -3827,12 +3925,12 @@
                             callee
                             (vec-slice args))))
 
-                    ((: u64 (cast (let callee = (compile-helper func-ast filename source context func block break-block break-lvalue var-map func-map)))) (seq
+                    ((: u64 (cast (let callee = (compile-helper func-ast filename source context func block break-block break-lvalue var-map func-map struct-map)))) (seq
                         (let args = (ref (new-vec (deref ast).children.A)))
                         (let j = 1)
                         (while (< j (deref ast).children.len) (seqn
                             (let arg = (vec-get (ref (deref ast).children) j))
-                            (let arg = (compile-helper arg filename source context func block break-block break-lvalue var-map func-map))
+                            (let arg = (compile-helper arg filename source context func block break-block break-lvalue var-map func-map struct-map))
                             (vec-push args arg)
                             (set j = (+ j 1))))
                         (let loc = (loc-to-line-col source (deref ast).loc))
@@ -3846,218 +3944,218 @@
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_MULT)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol "/") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_DIVIDE)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol "%") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_MODULO)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol "+") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_PLUS)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol "-") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_MINUS)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol "<<") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_LSHIFT)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol ">>") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_RSHIFT)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol "&") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_BITWISE_AND)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol "|") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_BITWISE_OR)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol "^") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (gcc-jit-context-new-binary-op
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_BINARY_OP_BITWISE_XOR)
                             type
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map))))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map))))
                     ((str-equals symbol "==") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_EQ)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             v
-                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))))
                     ((str-equals symbol "!=") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_NE)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             v
-                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))))
                     ((str-equals symbol "<") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_LT)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             v
-                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))))
                     ((str-equals symbol "<=") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_LE)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             v
-                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))))
                     ((str-equals symbol ">") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_GT)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map)))
                         (gcc-jit-context-new-cast
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             v
-                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))))
                     ((str-equals symbol ">=") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (let v = (gcc-jit-context-new-comparison
                             context
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             (GCC_JIT_COMPARISON_GE)
-                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map)
-                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map)))
+                            (compile-helper a filename source context func block break-block break-lvalue var-map func-map struct-map)
+                            (compile-helper b filename source context func block break-block break-lvalue var-map func-map struct-map)))
                         (gcc-jit-context-new-cast
                             context 
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             v
-                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))))
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))))
 
                     ((str-equals symbol "seq") (seq
                         (let i = 1)
@@ -4066,7 +4164,7 @@
                         (while (< i (deref ast).children.len) (seqn
                             (let node = (vec-get (ref (deref ast).children) i))
                             (let loc = (loc-to-line-col source (deref node).loc))
-                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
+                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map struct-map))
                             (cond
                                 ((: u64 (cast node))
                                     (gcc-jit-block-add-eval
@@ -4083,7 +4181,7 @@
                         (while (< i (deref ast).children.len) (seqn
                             (let node = (vec-get (ref (deref ast).children) i))
                             (let loc = (loc-to-line-col source (deref node).loc))
-                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
+                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map struct-map))
                             (cond
                                 ((: u64 (cast node))
                                     (gcc-jit-block-add-eval
@@ -4112,7 +4210,7 @@
 
                         (let last-block = (gcc-jit-function-new-block func "cond-end"))
 
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (let result = (cond
                             ((: u64 (cast type))
                                 (gcc-jit-function-new-local func (null) type "cond-result"))
@@ -4129,14 +4227,14 @@
                                 ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
                                     (vec-push var-map (new-vec (deref ast).children.A))
                                     (let condy-ast = condy)
-                                    (let condy = (compile-helper condy filename source context func block break-block break-lvalue var-map func-map))
+                                    (let condy = (compile-helper condy filename source context func block break-block break-lvalue var-map func-map struct-map))
                                     (let loc = (loc-to-line-col source (deref condy-ast).loc))
                                     (let condy = (gcc-jit-context-new-comparison
                                         context
                                         (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                                         (GCC_JIT_COMPARISON_NE)
                                         condy
-                                        (gcc-jit-context-new-rvalue-from-long context (ast-type-to-gcc-jit-type context (ref (deref condy-ast).typed)) 0)))
+                                        (gcc-jit-context-new-rvalue-from-long context (ast-type-to-gcc-jit-type context (ref (deref condy-ast).typed) struct-map) 0)))
                                     (let next-cond-block = (deref (vec-get conds (- i 1))))
                                     (let then-block = (deref (vec-get thens (- i 1))))
                                     (gcc-jit-block-end-with-conditional
@@ -4148,7 +4246,7 @@
 
                                     (set (deref block) = then-block)
                                     (let loc = (loc-to-line-col source (deref then).loc))
-                                    (let then = (compile-helper then filename source context func block break-block break-lvalue var-map func-map))
+                                    (let then = (compile-helper then filename source context func block break-block break-lvalue var-map func-map struct-map))
                                     (cond
                                         ((: u64 (cast result))
                                             (gcc-jit-block-add-assignment
@@ -4166,7 +4264,7 @@
                                 (:else (seqn
                                     (vec-push var-map (new-vec (deref ast).children.A))
                                     (let loc = (loc-to-line-col source (deref then).loc))
-                                    (let else = (compile-helper then filename source context func block break-block break-lvalue var-map func-map))
+                                    (let else = (compile-helper then filename source context func block break-block break-lvalue var-map func-map struct-map))
                                     (cond
                                         ((: u64 (cast result))
                                             (gcc-jit-block-add-assignment
@@ -4197,7 +4295,7 @@
                             (deref block)
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             loop-block)
-                        (let break-type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)))
+                        (let break-type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
                         (let break-lvalue = (cond
                             ((: u64 (cast break-type))
                                 (gcc-jit-function-new-local func (null) break-type "loop-result"))
@@ -4206,7 +4304,7 @@
                         (set (deref block) = loop-block)
                         (let node = (vec-get (ref (deref ast).children) 1))
                         (let loc = (loc-to-line-col source (deref node).loc))
-                        (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
+                        (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map struct-map))
                         (cond
                             ((: u64 (cast node))
                                 (gcc-jit-block-add-eval
@@ -4229,7 +4327,7 @@
                         (let break-rvalue = (cond
                             ((> (deref ast).children.len 1) (seq
                                 (let node = (vec-get (ref (deref ast).children) 1))
-                                (compile-helper node filename source context func block break-block break-lvalue var-map func-map)))
+                                (compile-helper node filename source context func block break-block break-lvalue var-map func-map struct-map)))
                             (:else
                                 (null))))
                         (let loc = (loc-to-line-col source (deref ast).loc))
@@ -4253,11 +4351,11 @@
                         (let value = (vec-find top matches-key (deref var).value))
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (let node = (vec-get (ref (deref ast).children) 3))
-                        (let rvalue = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
+                        (let rvalue = (compile-helper node filename source context func block break-block break-lvalue var-map func-map struct-map))
                         (let lvalue = (gcc-jit-function-new-local
                             func
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed))
+                            (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map)
                             (deref var).value))
                         (cond
                             ((: u64 (cast value)) (seqn
@@ -4287,7 +4385,7 @@
                                         (break (deref value).b))))
                             :else (null)))
                         (let node = (vec-get (ref (deref ast).children) 3))
-                        (let rvalue = (compile-helper node filename source context func block break-block break-lvalue var-map func-map))
+                        (let rvalue = (compile-helper node filename source context func block break-block break-lvalue var-map func-map struct-map))
                         (let loc = (loc-to-line-col source (deref ast).loc))
                         (gcc-jit-block-add-assignment
                             (deref block)
@@ -4295,6 +4393,53 @@
                             lvalue
                             rvalue)
                         rvalue))
+
+                    ((str-equals symbol "inst") (seq
+                        (let struct = (vec-get (ref (deref ast).children) 1))
+                        (let struct = (deref struct).value)
+                        (let struct = (vec-find struct-map matches-key struct))
+                        (let field-names = (ref (deref struct).b.b.a))
+                        (let fields = (ref (deref struct).b.b.b))
+                        (let field-fields = (ref (new-vec (deref ast).children.A)))
+                        (let field-values = (ref (new-vec (deref ast).children.A)))
+                        (let j = 0)
+                        (while (< j (deref fields).len) (seqn
+                            (let pair = (vec-get (ref (deref ast).children) (+ j 2)))
+                            (let field-name = (deref (vec-get (ref (deref pair).children) 0)).value)
+                            (let k = 0)
+                            (let index =
+                                (while (< k (deref field-names).len) (seqn
+                                    (let name = (deref (vec-get field-names k)))
+                                    (cond
+                                        ((str-equals field-name name)
+                                            (break k)))
+                                    (set k = (+ k 1)))
+                                :else (- 0 1)))
+                            (cond
+                                ((< k (deref field-names).len) (seqn
+                                    (vec-push field-fields (deref (vec-get fields k)))
+                                    (let value = (compile-helper
+                                        (vec-get (ref (deref pair).children) 1)
+                                        filename
+                                        source
+                                        context
+                                        func
+                                        block
+                                        break-block
+                                        break-lvalue
+                                        var-map
+                                        func-map
+                                        struct-map))
+                                    (vec-push field-values value)
+                                    )))
+                            (set j = (+ j 1))))
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (gcc-jit-context-new-struct-constructor
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (gcc-jit-struct-as-type (deref struct).b.a)
+                            (vec-slice field-fields)
+                            (vec-slice field-values))))
 
                     (:else (seq
                         (eprint "todo: unsupported function ")
@@ -4308,6 +4453,41 @@
                 (eprint "\n")
                 (exit 1)
                 (null))))))
+
+    // TODO: slices
+    ((== (deref ast).type (AST_NODE_TYPE_ATTR)) (seq
+        (let value = (vec-get (ref (deref ast).children) 0))
+        (let type = (deref value).typed)
+        (let value = (compile-helper value filename source context func block break-block break-lvalue var-map func-map struct-map))
+        (let j = 1)
+        (let loc = (loc-to-line-col source (deref ast).loc))
+        (while (< j (deref ast).children.len) (seqn
+            (let attr = (vec-get (ref (deref ast).children) j))
+            (let struct = (vec-find struct-map matches-key type.name))
+            (let field-names = (ref (deref struct).b.b.a))
+            (let fields = (ref (deref struct).b.b.b))
+            (let attr = (deref attr).value)
+            (let k = 0)
+            (let index =
+                (while (< k (deref field-names).len) (seqn
+                    (let name = (deref (vec-get field-names k)))
+                    (cond
+                        ((str-equals attr name)
+                            (break k)))
+                    (set k = (+ k 1)))
+                :else (- 0 1)))
+            (let attr = (cond
+                ((< k (deref fields).len)
+                    (deref (vec-get fields k)))
+                (:else
+                    (null))))
+            (set value = (gcc-jit-rvalue-access-field
+                value
+                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                attr))
+            (set j = (+ j 1))))
+        value))
+
     (:else (seq
         (eprint "todo: unsupported expression ")
         (eprint-int (deref ast).type)
@@ -4324,6 +4504,7 @@
     (gcc-jit-context-set-bool-option context (GCC_JIT_BOOL_OPTION_DEBUGINFO) true)
     (gcc-jit-context-set-bool-allow-unreachable-blocks context true)
     (let func-map = (ref (new-vec (deref ast).children.A)))
+    (let struct-map = (ref (new-vec (deref ast).children.A)))
     (: (* (Vec (Pair (@ u8) (Vec (Pair Type (Pair (* GccJitFunction) (Vec (* GccJitParam)))))))) func-map)
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
@@ -4334,7 +4515,7 @@
             ((and (== v.type (AST_NODE_TYPE_SYMBOL)) (and (or (str-equals v.value "defun") (str-equals v.value "defext")) (not (has-generic (ref func-type))))) (seqn
                 (let ret-type = func-type.boxed)
                 (let arg-types = (ref func-type.subtypes))
-                (let type = (ast-type-to-gcc-jit-type context ret-type))
+                (let type = (ast-type-to-gcc-jit-type context ret-type struct-map))
                 (cond
                     ((: u64 (cast type))
                         ())
@@ -4344,7 +4525,7 @@
                 (let j = 0)
                 (let params = (ref (new-vec (deref ast).children.A)))
                 (while (< j (deref arg-types).len) (seqn
-                    (let type = (ast-type-to-gcc-jit-type context (vec-get arg-types j)))
+                    (let type = (ast-type-to-gcc-jit-type context (vec-get arg-types j) struct-map))
                     (let arg = (vec-get (ref (deref ast).children) (+ j 2)))
                     (let name = (vec-get (ref (deref arg).children) 0))
                     (let name = (deref name).value)
@@ -4433,7 +4614,49 @@
                                 (b (deref params))))))
                         (vec-push func-map (inst Pair
                             (a name)
-                            (b (deref morphisms))))))))))
+                            (b (deref morphisms)))))))))
+
+            ((and (== v.type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defstruct")) (seqn
+                (let name = (vec-get (ref (deref ast).children) 1))
+                (let name = (deref name).value)
+                (let loc = (loc-to-line-col source (deref ast).loc))
+                (let struct = (gcc-jit-context-new-opaque-struct
+                    context
+                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                    name))
+                (let fields = (ref (new-vec (deref ast).children.A)))
+                (let field-names = (ref (new-vec (deref ast).children.A)))
+                (vec-push struct-map (inst Pair
+                    (a name)
+                    (b (inst Pair
+                        (a struct)
+                        (b (inst Pair
+                            (a (deref field-names))
+                            (b (deref fields))))))))
+                (let j = 2)
+                (while (< j (deref ast).children.len) (seqn
+                    (let field = (vec-get (ref (deref ast).children) j))
+                    (let name = (vec-get (ref (deref field).children) 0))
+                    (let name = (deref name).value)
+                    (let type = (vec-get (ref (deref field).children) 1))
+                    (let type = (deref type).typed)
+                    (let type = (ast-type-to-gcc-jit-type context (ref type) struct-map))
+                    (let loc = (loc-to-line-col source (deref field).loc))
+                    (let field = (gcc-jit-context-new-field
+                        context
+                        (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                        type
+                        name))
+                    (vec-push field-names name)
+                    (vec-push fields field)
+                    (set j = (+ j 1))))
+                (gcc-jit-struct-set-fields
+                    struct
+                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                    (vec-slice fields))
+                (let last = (vec-get struct-map (- (deref struct-map).len 1)))
+                (set (deref last).b.b.a = (deref field-names))
+                (set (deref last).b.b.b = (deref fields)))))
         (set i = (+ i 1))))
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
@@ -4462,7 +4685,7 @@
                 (let entry = (gcc-jit-function-new-block func-code "entry"))
                 (let block = (ref entry))
                 (let body = (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)))
-                (let expr = (compile-helper body filename source context func-code block (null) (null) var-map func-map))
+                (let expr = (compile-helper body filename source context func-code block (null) (null) var-map func-map struct-map))
 
                 (let loc = (loc-to-line-col source (deref body).loc))
                 (cond
