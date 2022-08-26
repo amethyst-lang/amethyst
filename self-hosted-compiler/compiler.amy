@@ -1051,32 +1051,27 @@
 
 (defun parse-attribute (lexer (* Lexer)) : ParseResult
     (pguard top = (parse-value lexer)
-        (seq
-            (let attrs = (ref (new-vec (deref lexer).tokens.A)))
-            (vec-push attrs top)
-            (while (== (lex-peek lexer).type (TOKEN_TYPE_DOT))
-                (seqn
-                    (lex-next lexer)
-                    (let attr = (parse-attr-item lexer))
-                    (cond
-                        (attr.success
-                            (vec-push attrs attr.ast))
-                        (:else (seqn
-                            (vec-drop attrs ast-drop)
-                            (break attr)))))
-            :else (cond
-                ((> (deref attrs).len 1)
-                    (parse-success (inst Ast
-                        (type (AST_NODE_TYPE_ATTR))
-                        (loc (inst Location
-                            (start top.loc.start)
-                            (end (deref (vec-get attrs (- (deref attrs).len 1))).loc.end)))
-                        (typed (empty-type (deref lexer).tokens.A))
-                        (value "")
-                        (children (deref attrs)))))
-                (:else (seq
-                    (vec-drop attrs empty-dealloc)
-                    (parse-success top))))))))
+        (while (== (lex-peek lexer).type (TOKEN_TYPE_DOT))
+            (seqn
+                (lex-next lexer)
+                (let attr = (parse-attr-item lexer))
+                (cond
+                    (attr.success (seqn
+                        (let children = (ref (new-vec (deref lexer).tokens.A)))
+                        (vec-push children top)
+                        (vec-push children attr.ast)
+                        (set top = (inst Ast
+                            (type (AST_NODE_TYPE_ATTR))
+                            (loc (inst Location
+                                (start top.loc.start)
+                                (end attr.ast.loc.end)))
+                            (typed (empty-type (deref lexer).tokens.A))
+                            (value "")
+                            (children (deref children))))
+                        ))
+                    (:else
+                        (break attr))))
+        :else (parse-success top))))
 
 (defun parse-sexpr (lexer (* Lexer)) : ParseResult
     (lguard left = (lexer-expect lexer (TOKEN_TYPE_LPAREN)) (seq
@@ -3743,7 +3738,7 @@
     (type (* GccJitType))
     (name (* u8))
     : (* GccJitField)
-    "gcc_jit_context_new_field")
+    "gcc_jit_context_new_field_wrapper")
 (defun gcc-jit-context-new-field
     (context (* GccJitContext))
     (location (* GccJitLocation))
@@ -4459,34 +4454,30 @@
         (let value = (vec-get (ref (deref ast).children) 0))
         (let type = (deref value).typed)
         (let value = (compile-helper value filename source context func block break-block break-lvalue var-map func-map struct-map))
-        (let j = 1)
         (let loc = (loc-to-line-col source (deref ast).loc))
-        (while (< j (deref ast).children.len) (seqn
-            (let attr = (vec-get (ref (deref ast).children) j))
-            (let struct = (vec-find struct-map matches-key type.name))
-            (let field-names = (ref (deref struct).b.b.a))
-            (let fields = (ref (deref struct).b.b.b))
-            (let attr = (deref attr).value)
-            (let k = 0)
-            (let index =
-                (while (< k (deref field-names).len) (seqn
-                    (let name = (deref (vec-get field-names k)))
-                    (cond
-                        ((str-equals attr name)
-                            (break k)))
-                    (set k = (+ k 1)))
-                :else (- 0 1)))
-            (let attr = (cond
-                ((< k (deref fields).len)
-                    (deref (vec-get fields k)))
-                (:else
-                    (null))))
-            (set value = (gcc-jit-rvalue-access-field
-                value
-                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-                attr))
-            (set j = (+ j 1))))
-        value))
+        (let attr = (vec-get (ref (deref ast).children) 1))
+        (let attr = (deref attr).value)
+        (let struct = (vec-find struct-map matches-key type.name))
+        (let field-names = (ref (deref struct).b.b.a))
+        (let fields = (ref (deref struct).b.b.b))
+        (let j = 0)
+        (let index =
+            (while (< j (deref field-names).len) (seqn
+                (let name = (deref (vec-get field-names j)))
+                (cond
+                    ((str-equals attr name)
+                        (break j)))
+                (set j = (+ j 1)))
+            :else (- 0 1)))
+        (let attr = (cond
+            ((< j (deref fields).len)
+                (deref (vec-get fields j)))
+            (:else
+                (null))))
+        (gcc-jit-rvalue-access-field
+            value
+            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+            attr)))
 
     (:else (seq
         (eprint "todo: unsupported expression ")
@@ -4506,6 +4497,29 @@
     (let func-map = (ref (new-vec (deref ast).children.A)))
     (let struct-map = (ref (new-vec (deref ast).children.A)))
     (: (* (Vec (Pair (@ u8) (Vec (Pair Type (Pair (* GccJitFunction) (Vec (* GccJitParam)))))))) func-map)
+    (let i = 0)
+    (while (< i (deref ast).children.len) (seqn
+        (let ast = (vec-get (ref (deref ast).children) i))
+        (let v = (deref (vec-get (ref (deref ast).children) 0)))
+        (cond
+            ((and (== v.type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defstruct")) (seqn
+                (let name = (vec-get (ref (deref ast).children) 1))
+                (let name = (deref name).value)
+                (let loc = (loc-to-line-col source (deref ast).loc))
+                (let struct = (gcc-jit-context-new-opaque-struct
+                    context
+                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                    name))
+                (let fields = (ref (new-vec (deref ast).children.A)))
+                (let field-names = (ref (new-vec (deref ast).children.A)))
+                (vec-push struct-map (inst Pair
+                    (a name)
+                    (b (inst Pair
+                        (a struct)
+                        (b (inst Pair
+                            (a (deref field-names))
+                            (b (deref fields)))))))))))
+        (set i = (+ i 1))))
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
         (let ast = (vec-get (ref (deref ast).children) i))
@@ -4626,13 +4640,6 @@
                     name))
                 (let fields = (ref (new-vec (deref ast).children.A)))
                 (let field-names = (ref (new-vec (deref ast).children.A)))
-                (vec-push struct-map (inst Pair
-                    (a name)
-                    (b (inst Pair
-                        (a struct)
-                        (b (inst Pair
-                            (a (deref field-names))
-                            (b (deref fields))))))))
                 (let j = 2)
                 (while (< j (deref ast).children.len) (seqn
                     (let field = (vec-get (ref (deref ast).children) j))
@@ -4654,9 +4661,9 @@
                     struct
                     (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                     (vec-slice fields))
-                (let last = (vec-get struct-map (- (deref struct-map).len 1)))
-                (set (deref last).b.b.a = (deref field-names))
-                (set (deref last).b.b.b = (deref fields)))))
+                (let struct = (vec-find struct-map matches-key name))
+                (set (deref struct).b.b.a = (deref field-names))
+                (set (deref struct).b.b.b = (deref fields)))))
         (set i = (+ i 1))))
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
