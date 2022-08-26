@@ -258,6 +258,7 @@ pub enum SExpr<'a> {
         name: &'a str,
         ret_type: Type<'a>,
         args: Vec<(&'a str, Type<'a>)>,
+        linked_to: String,
     },
 
     StructDef {
@@ -366,7 +367,7 @@ pub enum LoweringError {
     InvalidBreak,
     InvalidSet,
     InvalidTypeSpecifier,
-    InvalidDefun,
+    InvalidDefun(String),
     InvalidType,
     InvalidLet,
     InvalidDefStruct,
@@ -714,12 +715,12 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
 
                     Ast::Symbol(_, "defun") => {
                         if sexpr.len() < 3 {
-                            return Err(LoweringError::InvalidDefun);
+                            return Err(LoweringError::InvalidDefun(String::from("unknown")));
                         }
 
                         let name = match sexpr[1] {
                             Ast::Symbol(_, name) => name,
-                            _ => return Err(LoweringError::InvalidDefun),
+                            _ => return Err(LoweringError::InvalidDefun(String::from("unknown"))),
                         };
 
                         let expr = lower_helper(sexpr.remove(sexpr.len() - 1), quoting)?;
@@ -738,11 +739,11 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                     if let Ast::Symbol(_, name) = arg[0] {
                                         args.push((name, parse_type(arg.remove(1))?));
                                     } else {
-                                        return Err(LoweringError::InvalidDefun);
+                                        return Err(LoweringError::InvalidDefun(String::from(name)));
                                     }
                                 }
 
-                                _ => return Err(LoweringError::InvalidDefun),
+                                _ => return Err(LoweringError::InvalidDefun(String::from(name))),
                             }
                         }
 
@@ -762,13 +763,18 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                     }
 
                     Ast::Symbol(_, "defext") => {
-                        if sexpr.len() < 2 {
-                            return Err(LoweringError::InvalidDefun);
+                        if sexpr.len() < 3 {
+                            return Err(LoweringError::InvalidDefun(String::from("unknown")));
                         }
 
                         let name = match sexpr[1] {
                             Ast::Symbol(_, name) => name,
-                            _ => return Err(LoweringError::InvalidDefun),
+                            _ => return Err(LoweringError::InvalidDefun(String::from("unknown"))),
+                        };
+
+                        let linked_to = match sexpr.remove(sexpr.len() - 1) {
+                            Ast::Str(_, linked) => linked,
+                            _ => return Err(LoweringError::InvalidDefun(String::from(name))),
                         };
 
                         let ret_type = if let Ast::Symbol(_, ":") = sexpr[sexpr.len() - 2] {
@@ -786,11 +792,11 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                     if let Ast::Symbol(_, name) = arg[0] {
                                         args.push((name, parse_type(arg.remove(1))?));
                                     } else {
-                                        return Err(LoweringError::InvalidDefun);
+                                        return Err(LoweringError::InvalidDefun(String::from(name)));
                                     }
                                 }
 
-                                _ => return Err(LoweringError::InvalidDefun),
+                                _ => return Err(LoweringError::InvalidDefun(String::from(name))),
                             }
                         }
 
@@ -805,6 +811,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             name,
                             ret_type,
                             args,
+                            linked_to,
                         }
                     }
 

@@ -23,25 +23,4 @@ fn main() {
     let mut gen = Generator::default();
     gen.compile(sexprs, &struct_map);
     std::fs::write(&object, gen.emit_object()).unwrap();
-    let code = Command::new("nasm")
-        .arg("-f")
-        .arg("elf64")
-        .arg("-o")
-        .arg("_start.o")
-        .arg("_start.s")
-        .spawn()
-        .unwrap()
-        .wait()
-        .unwrap();
-    assert_eq!(code.code().unwrap(), 0);
-    let code = Command::new("ld")
-        .arg("_start.o")
-        .arg(&object)
-        .arg("-o")
-        .arg(&output)
-        .spawn()
-        .unwrap()
-        .wait()
-        .unwrap();
-    assert_eq!(code.code().unwrap(), 0);
 }
