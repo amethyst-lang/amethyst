@@ -3348,8 +3348,11 @@
 (defstruct GccJitType)
 
 (defmacro GCC_JIT_TYPE_VOID 0)
-(defmacro GCC_JIT_TYPE_VOID_PTR 1)
-(defmacro GCC_JIT_TYPE_INT 8)
+(defmacro GCC_JIT_TYPE_UINT8 23)
+(defmacro GCC_JIT_TYPE_UINT16 24)
+(defmacro GCC_JIT_TYPE_UINT32 25)
+(defmacro GCC_JIT_TYPE_UINT64 26)
+(defmacro GCC_JIT_TYPE_UINT128 27)
 
 (defext gcc-jit-context-get-type
     (context (* GccJitContext))
@@ -3776,7 +3779,7 @@
     (field-list (* (* GccJitField)))
     (value-list (* (* GccJitRValue)))
     : (* GccJitRValue)
-    "gcc_jit_context_new_struct_constructor")
+    "gcc_jit_context_new_struct_constructor_wrapper")
 (defun gcc-jit-context-new-struct-constructor
     (context (* GccJitContext))
     (location (* GccJitLocation))
@@ -3797,6 +3800,64 @@
     (field (* GccJitField))
     : (* GccJitRValue)
     "gcc_jit_rvalue_access_field")
+
+(defext gcc-jit-type-get-pointer
+    (type (* GccJitType))
+    : (* GccJitType)
+    "gcc_jit_type_get_pointer")
+
+(defmacro GCC_JIT_GLOBAL_INTERNAL 1)
+
+(defext gcc-jit-context-new-global-raw
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (kind u64)
+    (type (* GccJitType))
+    (name (* u8))
+    : (* GccJitLValue)
+    "gcc_jit_context_new_global")
+(defun gcc-jit-context-new-global
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (kind u64)
+    (type (* GccJitType))
+    (name (@ u8))
+    : (* GccJitLValue)
+(seq
+    (let null-term = (alloca (+ name.len 1)))
+    (let i = 0)
+    (while (< i name.len)
+        (seqn
+            (set (get null-term i) = (get name i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (gcc-jit-context-new-global-raw context location kind type null-term.ptr)))
+
+(defext gcc-jit-global-set-initializer-raw
+    (global (* GccJitLValue))
+    (blob (* u8))
+    (length u64)
+    : (* GccJitLValue)
+    "gcc_jit_global_set_initializer_wrapper")
+(defun gcc-jit-global-set-initializer
+    (global (* GccJitLValue))
+    (blob (@ u8))
+    : (* GccJitLValue)
+    (gcc-jit-global-set-initializer-raw global blob.ptr blob.len))
+
+(defext gcc-jit-context-new-array-type
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (type (* GccJitType))
+    (length u64)
+    : (* GccJitType)
+    "gcc_jit_context_new_array_type")
+
+(defext gcc-jit-lvalue-get-address
+    (lvalue (* GccJitLValue))
+    (location (* GccJitLocation))
+    : (* GccJitRValue)
+    "gcc_jit_lvalue_get_address")
 
 
 
@@ -3855,77 +3916,83 @@
             (set i = (+ i 1)))
         :else n)))))
 
-/*
-(defstruct StructMonomorphism
-    (struct (* GccJitStruct))
-    (fields (Vec (* GccJitField))))
-*/
 (defun instantiate-struct-monomorphism
     (context (* GccJitContext))
     (struct-map (* (Vec (Pair (@ u8) StructBack))))
-    (struct-name (@ u8))
-    (struct-generics (Vec Type))
-    : (* (Pair (Vec Type) StructMonomorphism))
-(seq
-    (let struct-pair = (vec-find struct-map matches-key struct-name))
-    (let struct = (deref struct-pair).b)
-    (let found = (vec-find (ref struct.monomorphisms) matches-types struct-generics))
-    (cond
-        ((: u64 (cast found))
-            found)
-        (:else (seq
-            (let struct-gcc-jit = (gcc-jit-context-new-opaque-struct context (null) struct-name)) // TODO: location
-            (let fields = (ref (new-vec (deref struct-map).A)))
-            (let monomorphisms = (ref struct.monomorphisms))
-            (vec-push monomorphisms (inst Pair
-                (a struct-generics)
-                (b (inst StructMonomorphism
-                    (struct struct-gcc-jit)
-                    (fields (deref fields))))))
-            (set (deref struct-pair).b.monomorphisms = (deref monomorphisms))
-            (let i = 0)
-            (while (< i struct.fields.len) (seqn
-                (let field = (vec-get (ref struct.fields) i))
-                (let name = (deref field).a)
-                (let type = (ref (type-clone (ref (deref field).b))))
-                (let generics = (ref (new-vec (deref struct-map).A)))
-                (find-generics type generics)
-                (let generics-subs = (ref (new-vec (deref struct-map).A)))
-                (let j = 0)
-                (while (< j (deref generics).len) (seqn
-                    (let name = (deref (vec-get generics j)))
-                    (let type = (deref (vec-get (ref struct-generics) j)))
-                    (vec-push generics-subs (inst Pair
-                        (a name)
-                        (b type)))
-                    (set j = (+ j 1))))
-                (let subs = (ref (new-vec (deref struct-map).A)))
-                (replace-generics type generics-subs subs)
-                (find-structs type context struct-map)
-                (vec-push fields (gcc-jit-context-new-field context (null) (ast-type-to-gcc-jit-type context type struct-map) name)) // TODO: location
-                (set i = (+ i 1))))
-            (gcc-jit-struct-set-fields struct-gcc-jit (null) (vec-slice fields))
-            (let monomorphism = (vec-find (ref (deref struct-pair).b.monomorphisms) matches-types struct-generics))
-            (set (deref monomorphism).b.fields = (deref fields))
-            monomorphism)))))
-
-(defun find-structs
     (type (* Type))
-    (context (* GccJitContext))
-    (struct-map (* (Vec (Pair (@ u8) StructBack))))
+    : (* (Pair (Vec Type) StructMonomorphism))
 (cond
-    ((== (deref type).type (TYPE_TYPE_STRUCT))
-        (seqn
-            (instantiate-struct-monomorphism context struct-map (deref type).name (deref type).subtypes)))
-    (:else (seqn
+    ((== (deref type).type (TYPE_TYPE_STRUCT)) (seq
+        (let struct-name = (deref type).name)
+        (let struct-generics = (deref type).subtypes)
+        (let struct-pair = (vec-find struct-map matches-key struct-name))
+        (let struct = (deref struct-pair).b)
+        (let found = (vec-find (ref struct.monomorphisms) matches-types struct-generics))
         (cond
-            ((: u64 (cast (deref type).boxed))
-                (find-structs (deref type).boxed context struct-map)))
-        (let i = 0)
-        (while (< i (deref type).subtypes.len) (seqn
-            (find-structs (vec-get (ref (deref type).subtypes) i) context struct-map)
-            (set i = (+ i 1))))))))
-
+            ((: u64 (cast found))
+                found)
+            (:else (seq
+                (let struct-gcc-jit = (gcc-jit-context-new-opaque-struct context (null) struct-name)) // TODO: location
+                (let fields = (ref (new-vec (deref struct-map).A)))
+                (let monomorphisms = (ref struct.monomorphisms))
+                (vec-push monomorphisms (inst Pair
+                    (a struct-generics)
+                    (b (inst StructMonomorphism
+                        (struct struct-gcc-jit)
+                        (fields (deref fields))))))
+                (set (deref struct-pair).b.monomorphisms = (deref monomorphisms))
+                (let i = 0)
+                (while (< i struct.fields.len) (seqn
+                    (let field = (vec-get (ref struct.fields) i))
+                    (let name = (deref field).a)
+                    (let type = (ref (type-clone (ref (deref field).b))))
+                    (let generics = (ref (new-vec (deref struct-map).A)))
+                    (find-generics type generics)
+                    (let generics-subs = (ref (new-vec (deref struct-map).A)))
+                    (let j = 0)
+                    (while (< j (deref generics).len) (seqn
+                        (let name = (deref (vec-get generics j)))
+                        (let type = (deref (vec-get (ref struct-generics) j)))
+                        (vec-push generics-subs (inst Pair
+                            (a name)
+                            (b type)))
+                        (set j = (+ j 1))))
+                    (let subs = (ref (new-vec (deref struct-map).A)))
+                    (replace-generics type generics-subs subs)
+                    (vec-push fields (gcc-jit-context-new-field context (null) (ast-type-to-gcc-jit-type context type struct-map) name)) // TODO: location
+                    (set i = (+ i 1))))
+                (gcc-jit-struct-set-fields struct-gcc-jit (null) (vec-slice fields))
+                (let monomorphism = (vec-find (ref (deref struct-pair).b.monomorphisms) matches-types struct-generics))
+                (set (deref monomorphism).b.fields = (deref fields))
+                monomorphism)))))
+    ((== (deref type).type (TYPE_TYPE_SLICE)) (seq
+        (let struct-pair = (vec-get struct-map 0))
+        (let struct = (deref struct-pair).b)
+        (let struct-generics = (ref (new-vec (deref struct-map).A)))
+        (vec-push struct-generics (deref (deref type).boxed))
+        (let struct-generics = (deref struct-generics))
+        (let found = (vec-find (ref struct.monomorphisms) matches-types struct-generics))
+        (cond
+            ((: u64 (cast found))
+                found)
+            (:else (seq
+                (let struct-gcc-jit = (gcc-jit-context-new-opaque-struct context (null) "slice")) // TODO: location
+                (let fields = (ref (new-vec (deref struct-map).A)))
+                (let monomorphisms = (ref struct.monomorphisms))
+                (vec-push monomorphisms (inst Pair
+                    (a struct-generics)
+                    (b (inst StructMonomorphism
+                        (struct struct-gcc-jit)
+                        (fields (deref fields))))))
+                (set (deref struct-pair).b.monomorphisms = (deref monomorphisms))
+                (vec-push fields (gcc-jit-context-new-field context (null) (gcc-jit-context-get-type context (GCC_JIT_TYPE_UINT64)) "len/cap")) // TODO: location
+                (vec-push fields (gcc-jit-context-new-field context (null) (gcc-jit-type-get-pointer (ast-type-to-gcc-jit-type context (deref type).boxed struct-map)) "ptr")) // TODO: location
+                (gcc-jit-struct-set-fields struct-gcc-jit (null) (vec-slice fields))
+                (let monomorphism = (vec-find (ref (deref struct-pair).b.monomorphisms) matches-types struct-generics))
+                (set (deref monomorphism).b.fields = (deref fields))
+                monomorphism)))))
+    (:else
+        (null))))
 
 (defun ast-type-to-gcc-jit-type
     (context (* GccJitContext))
@@ -3935,8 +4002,21 @@
 (cond
     ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
         (null))
-    ((== (deref type).type (TYPE_TYPE_INT))
-        (gcc-jit-context-get-type context (GCC_JIT_TYPE_INT)))
+    ((== (deref type).type (TYPE_TYPE_INT)) (seq
+        (let signed = (* (cast (deref type).signed-mutable) 5))
+        (cond
+            ((<= (deref type).type-var-width 8)
+                (gcc-jit-context-get-type context (+ (GCC_JIT_TYPE_UINT8) signed)))
+            ((<= (deref type).type-var-width 16)
+                (gcc-jit-context-get-type context (+ (GCC_JIT_TYPE_UINT16) signed)))
+            ((<= (deref type).type-var-width 32)
+                (gcc-jit-context-get-type context (+ (GCC_JIT_TYPE_UINT32) signed)))
+            ((<= (deref type).type-var-width 64)
+                (gcc-jit-context-get-type context (+ (GCC_JIT_TYPE_UINT64) signed)))
+            ((<= (deref type).type-var-width 128)
+                (gcc-jit-context-get-type context (+ (GCC_JIT_TYPE_UINT128) signed)))
+            (:else
+                (null)))))
     ((== (deref type).type (TYPE_TYPE_FUNCTION)) (seq
         (let return-type = (ast-type-to-gcc-jit-type context (deref type).boxed struct-map))
         (cond
@@ -3952,13 +4032,13 @@
             (vec-push params arg)
             (set i = (+ i 1))))
         (gcc-jit-context-new-function-ptr-type context (null) return-type (vec-slice params) false)))
-
+    ((== (deref type).type (TYPE_TYPE_POINTER)) (seq
+        (let type = (deref type).boxed)
+        (let type = (ast-type-to-gcc-jit-type context type struct-map))
+        (gcc-jit-type-get-pointer type)))
     ((== (deref type).type (TYPE_TYPE_STRUCT)) (seq
-        (let name = (deref type).name)
-        (let generics = (deref type).subtypes)
-        (let struct = (instantiate-struct-monomorphism context struct-map name generics))
+        (let struct = (instantiate-struct-monomorphism context struct-map type))
         (gcc-jit-struct-as-type (deref struct).b.struct)))
-
     (:else
         (gcc-jit-context-get-type context (GCC_JIT_TYPE_VOID)))))
 
@@ -3979,6 +4059,61 @@
     ((or (== (deref ast).type (AST_NODE_TYPE_INT)) (== (deref ast).type (AST_NODE_TYPE_BOOL))) (seq
         (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed)  struct-map))
         (gcc-jit-context-new-rvalue-from-long context type (parse-int (deref ast).value))))
+    ((== (deref ast).type (AST_NODE_TYPE_STRING)) (seq
+        (let loc = (loc-to-line-col source (deref ast).loc))
+        (let len = (- (deref ast).value.len 2))
+        (let name = (ref (new-vec (deref ast).children.A)))
+        (vec-push name '_')
+        (vec-push name '_')
+        (vec-push name 'a')
+        (vec-push name 'm')
+        (vec-push name 'y')
+        (vec-push name '_')
+        (vec-push name 's')
+        (vec-push name 't')
+        (vec-push name 'r')
+        (vec-push name 'i')
+        (vec-push name 'n')
+        (vec-push name 'g')
+        (let i = loc.line-start)
+        (while (!= i 0) (seqn
+            (let c = (+ '0' (cast (% i 10))))
+            (vec-push name c)
+            (set i = (/ i 10))))
+        (let i = loc.col-start)
+        (while (!= i 0) (seqn
+            (let c = (+ '0' (cast (% i 10))))
+            (vec-push name c)
+            (set i = (/ i 10))))
+        (let global = (gcc-jit-context-new-global
+            context
+            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+            (GCC_JIT_GLOBAL_INTERNAL)
+            (gcc-jit-context-new-array-type
+                context
+                (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                (gcc-jit-context-get-type context (GCC_JIT_TYPE_UINT8))
+                len)
+            (vec-slice name)))
+        (gcc-jit-global-set-initializer global (subslice (deref ast).value 1 (- (deref ast).value.len 1)))
+        (let struct = (instantiate-struct-monomorphism context struct-map (ref (deref ast).typed)))
+        (let field-fields = (ref (deref struct).b.fields))
+        (let field-values = (ref (new-vec (deref ast).children.A)))
+        (vec-push field-values (gcc-jit-context-new-rvalue-from-long context (gcc-jit-context-get-type context (GCC_JIT_TYPE_UINT64)) len))
+        (vec-push field-values (gcc-jit-context-new-cast
+            context 
+            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+            (gcc-jit-lvalue-get-address
+                global
+                (gcc-jit-context-new-location context filename loc.line-start loc.col-start))
+            (gcc-jit-type-get-pointer (gcc-jit-context-get-type context (GCC_JIT_TYPE_UINT8)))))
+        (gcc-jit-context-new-struct-constructor
+            context
+            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+            (gcc-jit-struct-as-type (deref struct).b.struct)
+            (vec-slice field-fields)
+            (vec-slice field-values))
+        ))
     ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seq
         (let i = (deref var-map).len)
         (while (> i 0) (seqn
@@ -4493,9 +4628,8 @@
                     ((str-equals symbol "inst") (seq
                         (let type = (deref ast).typed)
                         (let name = type.name)
-                        (let generics = type.subtypes)
                         (let raw = (vec-find struct-map matches-key name))
-                        (let struct = (instantiate-struct-monomorphism context struct-map name generics))
+                        (let struct = (instantiate-struct-monomorphism context struct-map (ref type)))
                         (let field-names = (ref (deref raw).b.fields))
                         (let fields = (ref (deref struct).b.fields))
                         (let field-fields = (ref (new-vec (deref ast).children.A)))
@@ -4552,7 +4686,6 @@
                 (exit 1)
                 (null))))))
 
-    // TODO: slices
     ((== (deref ast).type (AST_NODE_TYPE_ATTR)) (seq
         (let value = (vec-get (ref (deref ast).children) 0))
         (let type = (deref value).typed)
@@ -4560,28 +4693,45 @@
         (let loc = (loc-to-line-col source (deref ast).loc))
         (let attr = (vec-get (ref (deref ast).children) 1))
         (let attr = (deref attr).value)
-        (let raw = (vec-find struct-map matches-key type.name))
-        (let struct = (instantiate-struct-monomorphism context struct-map type.name type.subtypes))
-        (let field-names = (ref (deref raw).b.fields))
-        (let fields = (ref (deref struct).b.fields))
-        (let j = 0)
-        (let index =
-            (while (< j (deref field-names).len) (seqn
-                (let name = (deref (vec-get field-names j)).a)
-                (cond
-                    ((str-equals attr name)
-                        (break j)))
-                (set j = (+ j 1)))
-            :else (- 0 1)))
-        (let attr = (cond
-            ((< j (deref fields).len)
-                (deref (vec-get fields j)))
+        (cond
+            ((== type.type (TYPE_TYPE_STRUCT)) (seq
+                (let raw = (vec-find struct-map matches-key type.name))
+                (let struct = (instantiate-struct-monomorphism context struct-map (ref type)))
+                (let field-names = (ref (deref raw).b.fields))
+                (let fields = (ref (deref struct).b.fields))
+                (let j = 0)
+                (let index =
+                    (while (< j (deref field-names).len) (seqn
+                        (let name = (deref (vec-get field-names j)).a)
+                        (cond
+                            ((str-equals attr name)
+                                (break j)))
+                        (set j = (+ j 1)))
+                    :else (- 0 1)))
+                (let attr = (cond
+                    ((< j (deref fields).len)
+                        (deref (vec-get fields j)))
+                    (:else
+                        (null))))
+                (gcc-jit-rvalue-access-field
+                    value
+                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                    attr)))
+            ((== type.type (TYPE_TYPE_SLICE)) (seq
+                (let struct = (instantiate-struct-monomorphism context struct-map (ref type)))
+                (let attr = (cond
+                    ((or (str-equals attr "len") (str-equals attr "cap"))
+                        (deref (vec-get (ref (deref struct).b.fields) 0)))
+                    ((str-equals attr "ptr")
+                        (deref (vec-get (ref (deref struct).b.fields) 1)))
+                    (:else
+                        (null))))
+                (gcc-jit-rvalue-access-field
+                    value
+                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                    attr)))
             (:else
-                (null))))
-        (gcc-jit-rvalue-access-field
-            value
-            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
-            attr)))
+                (null)))))
 
     (:else (seq
         (eprint "todo: unsupported expression ")
@@ -4599,8 +4749,13 @@
     (gcc-jit-context-set-bool-option context (GCC_JIT_BOOL_OPTION_DEBUGINFO) true)
     (gcc-jit-context-set-bool-allow-unreachable-blocks context true)
     (let func-map = (ref (new-vec (deref ast).children.A)))
-    (let struct-map = (ref (new-vec (deref ast).children.A)))
     (: (* (Vec (Pair (@ u8) (Vec (Pair Type (Pair (* GccJitFunction) (Vec (* GccJitParam)))))))) func-map)
+    (let struct-map = (ref (new-vec (deref ast).children.A)))
+    (vec-push struct-map (inst Pair
+        (a "")
+        (b (inst StructBack
+            (fields (new-vec (deref ast).children.A))
+            (monomorphisms (new-vec (deref ast).children.A))))))
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
         (let ast = (vec-get (ref (deref ast).children) i))

@@ -14,6 +14,10 @@
 .extern gcc_jit_function_new_local
 .global gcc_jit_context_new_field_wrapper
 .extern gcc_jit_context_new_field
+.global gcc_jit_global_set_initializer_wrapper
+.extern gcc_jit_global_set_initializer
+.global gcc_jit_context_new_struct_constructor_wrapper
+.extern gcc_jit_context_new_struct_constructor
 
 .intel_syntax
 
@@ -69,4 +73,12 @@ gcc_jit_function_new_local_wrapper:
 
 gcc_jit_context_new_field_wrapper:
     call gcc_jit_context_new_field
+    ret
+
+gcc_jit_global_set_initializer_wrapper:
+    call gcc_jit_global_set_initializer
+    ret
+
+gcc_jit_context_new_struct_constructor_wrapper:
+    call gcc_jit_context_new_struct_constructor
     ret
