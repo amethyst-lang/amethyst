@@ -4,6 +4,17 @@
 // ==================================================================================================
 //
 
+(defext syscall
+    (call u64)
+    (a u64)
+    (b u64)
+    (c u64)
+    (d u64)
+    (e u64)
+    (f u64)
+    : u64
+    "syscall_")
+
 // Loops while a condition is true.
 (defmacro
     while condy
@@ -3304,27 +3315,6 @@
                 (set (deref (deref t).boxed) = (deref u))
                 (deref t)))
             (index (- 0 1))))))
-    (vec-push map (inst Pair
-        (a "syscall")
-        (b (inst Signature
-            (arg-types (seq
-                (let v = (ref (new-vec A)))
-                (let i = 0)
-                (while (< i 7) (seqn
-                    (let t = (ref (empty-type A)))
-                    (set (deref t).type = (TYPE_TYPE_INT))
-                    (set (deref t).type-var-width = 64)
-                    (set (deref t).signed-mutable = false)
-                    (vec-push v (deref t))
-                    (set i = (+ i 1))))
-                (deref v)))
-            (ret-type (seq
-                (let t = (ref (empty-type A)))
-                (set (deref t).type = (TYPE_TYPE_INT))
-                (set (deref t).type-var-width = 64)
-                (set (deref t).signed-mutable = false)
-                (deref t)))
-            (index (- 0 1))))))
     (deref map)))
 
 
@@ -3656,6 +3646,14 @@
     (type (* GccJitType))
     : (* GccJitRValue)
     "gcc_jit_context_new_cast")
+
+(defext gcc-jit-context-new-bitcast
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (rvalue (* GccJitRValue))
+    (type (* GccJitType))
+    : (* GccJitRValue)
+    "gcc_jit_context_new_bitcast")
 
 (defext gcc-jit-context-new-call-raw
     (context (* GccJitContext))
@@ -4036,7 +4034,7 @@
         (let type = (deref type).boxed)
         (let type = (ast-type-to-gcc-jit-type context type struct-map))
         (gcc-jit-type-get-pointer type)))
-    ((== (deref type).type (TYPE_TYPE_STRUCT)) (seq
+    ((or (== (deref type).type (TYPE_TYPE_STRUCT)) (== (deref type).type (TYPE_TYPE_SLICE))) (seq
         (let struct = (instantiate-struct-monomorphism context struct-map type))
         (gcc-jit-struct-as-type (deref struct).b.struct)))
     (:else
@@ -4170,6 +4168,26 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             callee
                             (vec-slice args))))
+
+                    ((str-equals symbol "cast") (seq
+                        (let value = (vec-get (ref (deref ast).children) 1))
+                        (let from = (deref value).typed)
+                        (let value = (compile-helper value filename source context func block break-block break-lvalue var-map func-map struct-map))
+                        (let into = (deref ast).typed)
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (cond
+                            ((or (and (== from.type (TYPE_TYPE_POINTER)) (== into.type (TYPE_TYPE_INT))) (and (== from.type (TYPE_TYPE_INT)) (== into.type (TYPE_TYPE_POINTER)))) (seq
+                                (gcc-jit-context-new-bitcast
+                                    context
+                                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                                    value
+                                    (ast-type-to-gcc-jit-type context (ref into) struct-map))))
+                            (:else
+                                (gcc-jit-context-new-cast
+                                    context
+                                    (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                                    value
+                                    (ast-type-to-gcc-jit-type context (ref into) struct-map))))))
 
                     ((str-equals symbol "*") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
@@ -4679,6 +4697,7 @@
                         (eprint "\n")
                         (exit 1)
                         (null))))))
+
             (:else (seq
                 (eprint "todo: unsupported sexpr function ")
                 (eprint-int (deref func-ast).type)
@@ -4819,6 +4838,7 @@
                     (vec-push params param)
                     (set j = (+ j 1))))
 
+                (let name-original = name)
                 (cond
                     ((str-equals v.value "defext") (seqn
                         (set name = (deref (vec-get (ref (deref ast).children) (- (deref ast).children.len 1))).value)
@@ -4894,7 +4914,7 @@
                                 (a func-code)
                                 (b (deref params))))))
                         (vec-push func-map (inst Pair
-                            (a name)
+                            (a name-original)
                             (b (deref morphisms))))))))))
         (set i = (+ i 1))))
     (let i = 0)

@@ -1057,24 +1057,6 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
             linkage: SignatureLinkage::Builtin,
         },
     );
-    map.insert(
-        "syscall",
-        Signature {
-            arg_types: vec![
-                Type::Int(false, 64),
-                Type::Int(false, 64),
-                Type::Int(false, 64),
-                Type::Int(false, 64),
-                Type::Int(false, 64),
-                Type::Int(false, 64),
-                Type::Int(false, 64),
-            ],
-            ret_type: Type::Int(false, 64),
-            index: None,
-            linkage: SignatureLinkage::External,
-        },
-    );
-
     map
 }
 

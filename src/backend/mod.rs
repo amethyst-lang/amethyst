@@ -488,33 +488,6 @@ impl Generator {
                         }
                     }
 
-                    SExpr::Symbol {
-                        value: "syscall", ..
-                    } => {
-                        let mut syscall_sig = Signature::new(CallConv::SystemV);
-                        syscall_sig.params.extend(
-                            [AbiParam::new(Self::convert_type_to_type(
-                                &SExprType::Int(false, 64),
-                                structs,
-                            )[0]); 7],
-                        );
-                        syscall_sig
-                            .returns
-                            .push(AbiParam::new(Self::convert_type_to_type(
-                                &SExprType::Int(false, 64),
-                                structs,
-                            )[0]));
-                        let syscall = module
-                            .declare_function("syscall_", Linkage::Import, &syscall_sig)
-                            .unwrap();
-                        let syscall = module.declare_func_in_func(syscall, builder.func);
-
-                        let call = builder
-                            .ins()
-                            .call(syscall, &values.into_iter().flatten().collect::<Vec<_>>());
-                        builder.inst_results(call).to_vec()
-                    }
-
                     SExpr::Symbol { value: "cast", .. } => {
                         let t = Self::convert_type_to_type(&meta.type_, structs)[0];
                         match (&meta.type_, &args[0].meta().type_) {
