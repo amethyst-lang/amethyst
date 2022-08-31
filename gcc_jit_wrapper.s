@@ -18,6 +18,8 @@
 .extern gcc_jit_global_set_initializer
 .global gcc_jit_context_new_struct_constructor_wrapper
 .extern gcc_jit_context_new_struct_constructor
+.global gcc_jit_block_add_assignment_wrapper
+.extern gcc_jit_block_add_assignment
 
 .intel_syntax
 
@@ -81,4 +83,8 @@ gcc_jit_global_set_initializer_wrapper:
 
 gcc_jit_context_new_struct_constructor_wrapper:
     call gcc_jit_context_new_struct_constructor
+    ret
+
+gcc_jit_block_add_assignment_wrapper:
+    call gcc_jit_block_add_assignment
     ret

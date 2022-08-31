@@ -3611,7 +3611,7 @@
     (location (* GccJitLocation))
     (lvalue (* GccJitLValue))
     (rvalue (* GccJitRValue))
-    "gcc_jit_block_add_assignment")
+    "gcc_jit_block_add_assignment_wrapper")
 
 (defmacro GCC_JIT_COMPARISON_EQ 0)
 (defmacro GCC_JIT_COMPARISON_NE 1)
@@ -3856,6 +3856,15 @@
     (location (* GccJitLocation))
     : (* GccJitRValue)
     "gcc_jit_lvalue_get_address")
+
+(defext gcc-jit-context-new-array-constructor
+    (context (* GccJitContext))
+    (location (* GccJitLocation))
+    (type (* GccJitType))
+    (value-count u64)
+    (value-list (* (* GccJitRValue)))
+    : (* GccJitRValue)
+    "gcc_jit_context_new_array_constructor")
 
 
 
@@ -4169,6 +4178,9 @@
                             callee
                             (vec-slice args))))
 
+                    ((str-equals symbol ":")
+                        (compile-helper (vec-get (ref (deref ast).children) 2) filename source context func block break-block break-lvalue var-map func-map struct-map))
+
                     ((str-equals symbol "cast") (seq
                         (let value = (vec-get (ref (deref ast).children) 1))
                         (let from = (deref value).typed)
@@ -4188,6 +4200,33 @@
                                     (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                                     value
                                     (ast-type-to-gcc-jit-type context (ref into) struct-map))))))
+
+                    ((str-equals symbol "alloca") (seq
+                        (let loc = (loc-to-line-col source (deref ast).loc))
+                        (let array-type = (gcc-jit-context-new-array-type
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            (gcc-jit-context-get-type context (GCC_JIT_TYPE_UINT8))
+                            512))
+                        (let array = (gcc-jit-context-new-array-constructor
+                            context
+                            (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
+                            array-type
+                            0
+                            (null)))
+                        (let local = (gcc-jit-function-new-local func (null) array-type "alloca"))
+                        (gcc-jit-block-add-assignment (deref block) (null) local array)
+                        (let struct = (instantiate-struct-monomorphism context struct-map (ref (deref ast).typed)))
+                        (let len = (compile-helper (vec-get (ref (deref ast).children) 1) filename source context func block break-block break-lvalue var-map func-map struct-map))
+                        (let ptr = (gcc-jit-lvalue-get-address local (gcc-jit-context-new-location context filename loc.line-start loc.col-start)))
+                        (let ptr-type = (gcc-jit-type-get-pointer (ast-type-to-gcc-jit-type context (deref ast).typed.boxed struct-map)))
+                        (let ptr = (gcc-jit-context-new-cast context (null) ptr ptr-type))
+
+                        (let values = (ref (new-vec (deref ast).children.A)))
+                        (vec-push values len)
+                        (vec-push values ptr)
+
+                        (gcc-jit-context-new-struct-constructor context (null) (gcc-jit-struct-as-type (deref struct).b.struct) (vec-slice (ref (deref struct).b.fields)) (vec-slice values))))
 
                     ((str-equals symbol "*") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
