@@ -3866,6 +3866,12 @@
     : (* GccJitRValue)
     "gcc_jit_context_new_array_constructor")
 
+(defext gcc-jit-rvalue-dereference
+    (rvalue (* GccJitRValue))
+    (location (* GccJitLocation))
+    : (* GccJitRValue)
+    "gcc_jit_rvalue_dereference")
+
 
 
 //
@@ -4227,6 +4233,16 @@
                         (vec-push values ptr)
 
                         (gcc-jit-context-new-struct-constructor context (null) (gcc-jit-struct-as-type (deref struct).b.struct) (vec-slice (ref (deref struct).b.fields)) (vec-slice values))))
+
+                    ((str-equals symbol "ref") (seq
+                        (let v = (compile-helper (vec-get (ref (deref ast).children) 1) filename source context func block break-block break-lvalue var-map func-map struct-map))
+                        (let local = (gcc-jit-function-new-local func (null) (ast-type-to-gcc-jit-type context (deref ast).typed.boxed struct-map) "ref"))
+                        (gcc-jit-block-add-assignment (deref block) (null) local v)
+                        (gcc-jit-lvalue-get-address local (null))))
+
+                    ((str-equals symbol "deref") (seq
+                        (let v = (compile-helper (vec-get (ref (deref ast).children) 1) filename source context func block break-block break-lvalue var-map func-map struct-map))
+                        (gcc-jit-rvalue-dereference v (null))))
 
                     ((str-equals symbol "*") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
