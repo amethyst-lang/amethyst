@@ -2311,14 +2311,17 @@
             ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "sizeof"))
                 (cond
                     ((== (deref ast).children.len 2) (seqn
-                        (parse-type (vec-get (ref (deref ast).children) 1) errors)
-                        (let type = (ref (empty-type (deref errors).A)))
-                        (set (deref type).type = (TYPE_TYPE_TYPE_VARIABLE))
-                        (set (deref type).type-var-width = (deref substitutions).len)
+                        (let type-ast = (vec-get (ref (deref ast).children) 1))
+                        (let type = (ref (parse-type type-ast errors)))
+                        //(replace-generics)
+                        (set (deref type-ast).typed = (deref type))
+                        (let int-type = (ref (empty-type (deref errors).A)))
+                        (set (deref int-type).type = (TYPE_TYPE_TYPE_VARIABLE))
+                        (set (deref int-type).type-var-width = (deref substitutions).len)
                         (vec-push substitutions (inst Pair
-                            (a (deref type))
+                            (a (deref int-type))
                             (b (COERCION_TYPE_INT))))
-                        (set (deref ast).typed = (deref type))))
+                        (set (deref ast).typed = (deref int-type))))
                     (:else
                         (vec-push errors (type-error (deref ast).loc "sizeof takes one argument")))))
 
@@ -4152,6 +4155,119 @@
     (:else
         (null))))
 
+(defun calculate-type-alignment
+    (type (* Type))
+    (struct-map (* (Vec (Pair (@ u8) StructBack))))
+    : u64
+(cond
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 8))
+        1)
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 16))
+        2)
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 32))
+        4)
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 64))
+        8)
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 128))
+        16)
+    ((== (deref type).type (TYPE_TYPE_F32))
+        4)
+    ((== (deref type).type (TYPE_TYPE_F64))
+        8)
+    ((== (deref type).type (TYPE_TYPE_FUNCTION))
+        8)
+    ((== (deref type).type (TYPE_TYPE_POINTER))
+        8)
+    ((== (deref type).type (TYPE_TYPE_SLICE))
+        8)
+    ((== (deref type).type (TYPE_TYPE_STRUCT)) (seq
+        (let struct = (vec-find struct-map matches-key (deref type).name))
+        (let generics-raw = (ref (new-vec (deref struct-map).A)))
+        (let i = 0)
+        (while (< i (deref struct).b.fields.len) (seqn
+            (let field = (vec-get (ref (deref struct).b.fields) i))
+            (let type = (ref (type-clone (ref (deref field).b))))
+            (find-generics type generics-raw)
+            (set i = (+ i 1))))
+        (let generics = (ref (new-vec (deref struct-map).A)))
+        (let i = 0)
+        (while (< i (deref generics-raw).len) (seqn
+            (vec-push generics (inst Pair
+                (a (deref (vec-get generics-raw i)))
+                (b (deref (vec-get (ref (deref struct).b.fields) i)).b)))
+            (set i = (+ i 1))))
+        (let align = 0)
+        (let subs = (ref (new-vec (deref struct-map).A)))
+        (let i = 0)
+        (while (< i (deref struct).b.fields.len) (seqn
+            (let field = (vec-get (ref (deref struct).b.fields) i))
+            (let type = (ref (type-clone (ref (deref field).b))))
+            (replace-generics type generics subs)
+            (let new = (calculate-type-alignment type struct-map))
+            (cond
+                ((< align new) (seqn
+                    (set align = new))))
+            (set i = (+ i 1))))
+        align))
+    (:else
+        0)))
+
+(defun calculate-type-size
+    (type (* Type))
+    (struct-map (* (Vec (Pair (@ u8) StructBack))))
+    : u64
+(cond
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 8))
+        1)
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 16))
+        2)
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 32))
+        4)
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 64))
+        8)
+    ((and (== (deref type).type (TYPE_TYPE_INT)) (< (deref type).type-var-width 128))
+        16)
+    ((== (deref type).type (TYPE_TYPE_F32))
+        4)
+    ((== (deref type).type (TYPE_TYPE_F64))
+        8)
+    ((== (deref type).type (TYPE_TYPE_FUNCTION))
+        8)
+    ((== (deref type).type (TYPE_TYPE_POINTER))
+        8)
+    ((== (deref type).type (TYPE_TYPE_SLICE))
+        16)
+    ((== (deref type).type (TYPE_TYPE_STRUCT)) (seq
+        (let struct = (vec-find struct-map matches-key (deref type).name))
+        (let generics-raw = (ref (new-vec (deref struct-map).A)))
+        (let i = 0)
+        (while (< i (deref struct).b.fields.len) (seqn
+            (let field = (vec-get (ref (deref struct).b.fields) i))
+            (let type = (ref (type-clone (ref (deref field).b))))
+            (find-generics type generics-raw)
+            (set i = (+ i 1))))
+        (let generics = (ref (new-vec (deref struct-map).A)))
+        (let i = 0)
+        (while (< i (deref generics-raw).len) (seqn
+            (vec-push generics (inst Pair
+                (a (deref (vec-get generics-raw i)))
+                (b (deref (vec-get (ref (deref struct).b.fields) i)).b)))
+            (set i = (+ i 1))))
+        (let subs = (ref (new-vec (deref struct-map).A)))
+        (let sum = 0)
+        (let i = 0)
+        (while (< i (deref struct).b.fields.len) (seqn
+            (let field = (vec-get (ref (deref struct).b.fields) i))
+            (let type = (ref (type-clone (ref (deref field).b))))
+            (replace-generics type generics subs)
+            (let align = (calculate-type-alignment type struct-map))
+            (set sum = (+ sum (- 0 (% (- 0 sum) align))))
+            (set sum = (+ sum (calculate-type-size type struct-map)))
+            (set i = (+ i 1))))
+        sum))
+    (:else
+        0)))
+
 (defun compile-helper
     (ast (* Ast))
     (filename (@ u8))
@@ -4348,9 +4464,9 @@
                                     (ast-type-to-gcc-jit-type context (ref into) struct-map))))))
 
                     ((str-equals symbol "sizeof") (seq
-                        // TODO: sizeof
-                        (let type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
-                        (gcc-jit-context-new-rvalue-from-long context type 0)))
+                        (let int-type = (ast-type-to-gcc-jit-type context (ref (deref ast).typed) struct-map))
+                        (let type = (ref (deref (vec-get (ref (deref ast).children) 1)).typed))
+                        (gcc-jit-context-new-rvalue-from-long context int-type (calculate-type-size type struct-map))))
 
                     ((str-equals symbol "alloca") (seq
                         (let loc = (loc-to-line-col source (deref ast).loc))
