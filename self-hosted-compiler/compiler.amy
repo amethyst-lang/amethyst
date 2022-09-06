@@ -140,7 +140,6 @@
                 (set i = (/ i 10))))
             (file-write file (subslice p start (- p.len 1)))))))
 
-
 // Closes a previously opened file.
 (defun file-close (file File)
     (seqn
@@ -1777,6 +1776,24 @@
                 (replace-generics (vec-get (ref (deref type).subtypes) i) generics substitutions)
                 (set i = (+ i 1))))))))
 
+(defun find-generic-matches
+    (monomorphised (* Type))
+    (genericed (* Type))
+    (matches (* (Vec (Pair (@ u8) Type))))
+(cond
+    ((and (== (deref genericed).type (TYPE_TYPE_GENERIC)) (not (: u64 (cast (vec-find matches matches-key (deref genericed).name)))))
+        (vec-push matches (inst Pair
+            (a (deref genericed).name)
+            (b (deref monomorphised)))))
+    ((== (deref monomorphised).type (deref genericed).type) (seqn
+        (cond
+            ((: u64 (cast (deref monomorphised).boxed))
+                (find-generic-matches (deref monomorphised).boxed (deref genericed).boxed matches)))
+        (let i = 0)
+        (while (< i (deref monomorphised).subtypes.len) (seqn
+            (find-generic-matches (vec-get (ref (deref monomorphised).subtypes) i) (vec-get (ref (deref monomorphised).subtypes) i) matches)
+            (set i = (+ i 1))))))))
+
 (defun print-type (type (* Type))
     (cond
         ((== (deref type).type (TYPE_TYPE_UNKNOWN))
@@ -2312,8 +2329,11 @@
                 (cond
                     ((== (deref ast).children.len 2) (seqn
                         (let type-ast = (vec-get (ref (deref ast).children) 1))
-                        (let type = (ref (parse-type type-ast errors)))
-                        //(replace-generics)
+                        (let type = (cond
+                            ((!= (deref type-ast).typed.type (TYPE_TYPE_UNKNOWN))
+                                (ref (deref type-ast).typed))
+                            (:else
+                                (ref (parse-type type-ast errors)))))
                         (set (deref type-ast).typed = (deref type))
                         (let int-type = (ref (empty-type (deref errors).A)))
                         (set (deref int-type).type = (TYPE_TYPE_TYPE_VARIABLE))
@@ -2677,6 +2697,22 @@
         (apply-substitutions (vec-get (ref (deref ast).children) i) errors substitutions)
         (set i = (+ i 1))))))
 
+(defun replace-sizeof-generics
+    (ast (* Ast))
+    (generics (* (Vec (Pair (@ u8) Type))))
+(cond
+    ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (and (== (deref ast).children.len 2) (str-equals (deref (vec-get (ref (deref ast).children) 0)).value "sizeof"))) (seqn
+        (let type-ast = (vec-get (ref (deref ast).children) 1))
+        (let type = (ref (parse-type type-ast (ref (new-vec (deref ast).children.A)))))
+        (replace-generics type generics (ref (new-vec (deref ast).children.A)))
+        (set (deref type-ast).typed = (deref type))))
+    (:else (seqn
+        (let i = 0)
+        (while (< i (deref ast).children.len) (seqn
+            (let ast = (vec-get (ref (deref ast).children) i))
+            (replace-sizeof-generics ast generics)
+            (set i = (+ i 1))))))))
+
 (defun check
     (ast (* Ast))
     (errors (* (Vec TypeError)))
@@ -2766,9 +2802,13 @@
                             (let ast = (vec-get asts (deref monomorphism).b))
                             (cond
                                 ((: u64 (cast ast)) (seqn
+                                    (let genericed = (ref (deref ast).typed))
                                     (let ast = (ref (ast-clone (deref ast))))
                                     (let typed = (ref (type-clone (ref (deref monomorphism).a))))
                                     (flatten-substitution typed errors (deref ast).loc substitutions)
+                                    (let generics = (ref (new-vec (deref ast).children.A)))
+                                    (find-generic-matches typed genericed generics)
+                                    (replace-sizeof-generics ast generics)
                                     (set (deref ast).typed = (deref typed))
                                     (vec-push done (deref ast).typed)
                                     (vec-push asts (deref ast))))))))
@@ -4030,7 +4070,7 @@
                         (struct struct-gcc-jit)
                         (fields (deref fields))))))
                 (set (deref struct-pair).b.monomorphisms = (deref monomorphisms))
-                (vec-push fields (gcc-jit-context-new-field context (null) (gcc-jit-context-get-type context (GCC_JIT_TYPE_UINT64)) "len/cap")) // TODO: location
+                (vec-push fields (gcc-jit-context-new-field context (null) (gcc-jit-context-get-type context (GCC_JIT_TYPE_UINT64)) "len")) // TODO: location
                 (vec-push fields (gcc-jit-context-new-field context (null) (gcc-jit-type-get-pointer (ast-type-to-gcc-jit-type context (deref type).boxed struct-map)) "ptr")) // TODO: location
                 (gcc-jit-struct-set-fields struct-gcc-jit (null) (vec-slice fields))
                 (let monomorphism = (vec-find (ref (deref struct-pair).b.monomorphisms) matches-types struct-generics))
@@ -4210,7 +4250,7 @@
             (set i = (+ i 1))))
         align))
     (:else
-        0)))
+        1)))
 
 (defun calculate-type-size
     (type (* Type))
@@ -4287,7 +4327,6 @@
         (gcc-jit-context-new-rvalue-from-long context type (parse-int (deref ast).value))))
     ((== (deref ast).type (AST_NODE_TYPE_STRING)) (seq
         (let loc = (loc-to-line-col source (deref ast).loc))
-        (let len = (- (deref ast).value.len 2))
         (let name = (ref (new-vec (deref ast).children.A)))
         (vec-push name '_')
         (vec-push name '_')
@@ -4311,6 +4350,35 @@
             (let c = (+ '0' (cast (% i 10))))
             (vec-push name c)
             (set i = (/ i 10))))
+        (let value = (ref (new-vec (deref ast).children.A)))
+        (vec-push value 0)
+        (vec-pop value)
+        (let i = 1)
+        (while (< i (- (deref ast).value.len 1)) (seqn
+            (let c = (get (deref ast).value i))
+            (cond
+                ((== c '\\') (seqn
+                    (set i = (+ i 1))
+                    (let c = (get (deref ast).value i))
+                    (cond
+                        ((== c 'n')
+                            (vec-push value '\n'))
+                        ((== c 'r')
+                            (vec-push value '\r'))
+                        ((== c 't')
+                            (vec-push value '\t'))
+                        ((== c '0')
+                            (vec-push value '\0'))
+                        ((== c '\\')
+                            (vec-push value '\\'))
+                        ((== c '\'')
+                            (vec-push value '\''))
+                        ((== c '\"')
+                            (vec-push value '\"')))))
+                (:else
+                    (vec-push value c)))
+            (set i = (+ i 1))))
+        (let len = (deref value).len)
         (let global = (gcc-jit-context-new-global
             context
             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
@@ -4321,7 +4389,7 @@
                 (gcc-jit-context-get-type context (GCC_JIT_TYPE_UINT8))
                 len)
             (vec-slice name)))
-        (gcc-jit-global-set-initializer global (subslice (deref ast).value 1 (- (deref ast).value.len 1)))
+        (gcc-jit-global-set-initializer global (vec-slice value))
         (let struct = (instantiate-struct-monomorphism context struct-map (ref (deref ast).typed)))
         (let field-fields = (ref (deref struct).b.fields))
         (let field-values = (ref (new-vec (deref ast).children.A)))
@@ -4766,11 +4834,11 @@
                             (let loc = (loc-to-line-col source (deref node).loc))
                             (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map struct-map))
                             (cond
-                                ((: u64 (cast node))
+                                ((: u64 (cast last))
                                     (gcc-jit-block-add-eval
                                         (deref block)
                                         (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
-                                        node)))
+                                        last)))
                             (set last = node)
                             (set i = (+ i 1))))
                         (vec-pop var-map)
@@ -4972,7 +5040,7 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             lvalue
                             rvalue)
-                        rvalue))
+                        (gcc-jit-lvalue-as-rvalue lvalue)))
 
                     ((str-equals symbol "set") (seq
                         (let var = (vec-get (ref (deref ast).children) 1))
@@ -4985,7 +5053,7 @@
                             (gcc-jit-context-new-location context filename loc.line-start loc.col-start)
                             lvalue
                             rvalue)
-                        rvalue))
+                        (gcc-jit-lvalue-as-rvalue lvalue)))
 
                     ((str-equals symbol "inst") (seq
                         (let type = (deref ast).typed)
