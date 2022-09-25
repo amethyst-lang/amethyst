@@ -1866,8 +1866,18 @@
         ((== (deref type).type (TYPE_TYPE_TYPE_VARIABLE)) (seqn
             (print "$")
             (print-int (deref type).type-var-width)))
-        (:else
-            (print "UNKNOWN"))))
+        (:else (seqn
+            (print "(UNKNOWN: ")
+            (print-int (deref type).type)
+            (print " ")
+            (cond
+                ((deref type).signed-mutable
+                    (print "true"))
+                (:else
+                    (print "false")))
+            (print " ")
+            (print-int (deref type).type-var-width)
+            (print ")")))))
 
 (defun print-signatures (func-map (* (Vec (Pair (@ u8) Signature)))) (seqn
     (let i = 0)
@@ -4234,7 +4244,7 @@
         (while (< i (deref generics-raw).len) (seqn
             (vec-push generics (inst Pair
                 (a (deref (vec-get generics-raw i)))
-                (b (deref (vec-get (ref (deref struct).b.fields) i)).b)))
+                (b (deref (vec-get (ref (deref type).subtypes) i)))))
             (set i = (+ i 1))))
         (let align = 0)
         (let subs = (ref (new-vec (deref struct-map).A)))
@@ -4250,7 +4260,7 @@
             (set i = (+ i 1))))
         align))
     (:else
-        1)))
+        0)))
 
 (defun calculate-type-size
     (type (* Type))
@@ -4291,7 +4301,7 @@
         (while (< i (deref generics-raw).len) (seqn
             (vec-push generics (inst Pair
                 (a (deref (vec-get generics-raw i)))
-                (b (deref (vec-get (ref (deref struct).b.fields) i)).b)))
+                (b (deref (vec-get (ref (deref type).subtypes) i)))))
             (set i = (+ i 1))))
         (let subs = (ref (new-vec (deref struct-map).A)))
         (let sum = 0)
@@ -4832,13 +4842,13 @@
                         (while (< i (deref ast).children.len) (seqn
                             (let node = (vec-get (ref (deref ast).children) i))
                             (let loc = (loc-to-line-col source (deref node).loc))
-                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map struct-map))
                             (cond
                                 ((: u64 (cast last))
                                     (gcc-jit-block-add-eval
                                         (deref block)
                                         (gcc-jit-context-new-location context filename loc.line-end loc.col-end)
                                         last)))
+                            (let node = (compile-helper node filename source context func block break-block break-lvalue var-map func-map struct-map))
                             (set last = node)
                             (set i = (+ i 1))))
                         (vec-pop var-map)
@@ -5066,8 +5076,7 @@
                         (let field-values = (ref (new-vec (deref ast).children.A)))
                         (let j = 0)
                         (while (< j (deref fields).len) (seqn
-                            (let pair = (vec-get (ref (deref ast).children) (+ j 2)))
-                            (let field-name = (deref (vec-get (ref (deref pair).children) 0)).value)
+                            (let field-name = (deref (vec-get field-names j)).a)
                             (let k = 0)
                             (let index =
                                 (while (< k (deref field-names).len) (seqn
@@ -5079,6 +5088,7 @@
                                 :else (- 0 1)))
                             (cond
                                 ((< k (deref field-names).len) (seqn
+                                    (let pair = (vec-get (ref (deref ast).children) (+ index 2)))
                                     (vec-push field-fields (deref (vec-get fields k)))
                                     (let value = (compile-helper
                                         (vec-get (ref (deref pair).children) 1)
