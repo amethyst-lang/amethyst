@@ -1,9 +1,20 @@
-.global LLVMCreateBuilderWrapper
-.extern LLVMCreateBuilder
+.global LLVMCreateBuilderInContextWrapper
+.extern LLVMCreateBuilderInContext
+.global LLVMDumpModuleWrapper
+.extern LLVMDumpModule
+.global LLVMFunctionTypeWrapper
+.extern LLVMFunctionType
 
 .intel_syntax
 
-LLVMCreateBuilderWrapper:
-    call LLVMCreateBuilder
+LLVMCreateBuilderInContextWrapper:
+    call LLVMCreateBuilderInContext
     ret
 
+LLVMDumpModuleWrapper:
+    call LLVMDumpModule
+    ret
+
+LLVMFunctionTypeWrapper:
+    call LLVMFunctionType
+    ret

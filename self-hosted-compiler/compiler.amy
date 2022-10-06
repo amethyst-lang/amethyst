@@ -3378,14 +3378,22 @@
 // ==================================================================================================
 //
 
+(defstruct LlvmContext)
+
+(defext llvm-context-create
+    : (* LlvmContext)
+    "LLVMContextCreate")
+
 (defstruct LlvmModule)
 
-(defext llvm-module-create-with-name-raw
+(defext llvm-module-create-with-name-in-context-raw
     (name (* u8))
+    (context (* LlvmContext))
     : (* LlvmModule)
-    "LLVMModuleCreateWithName")
-(defun llvm-module-create-with-name
+    "LLVMModuleCreateWithNameInContext")
+(defun llvm-module-create-with-name-in-context
     (name (@ u8))
+    (context (* LlvmContext))
     : (* LlvmModule)
 (seq
     (let null-term = (alloca (+ name.len 1)))
@@ -3395,13 +3403,62 @@
             (set (get null-term i) = (get name i))
             (set i = (+ i 1))))
     (set (get null-term i) = '\0')
-    (llvm-module-create-with-name-raw null-term.ptr)))
+    (llvm-module-create-with-name-in-context-raw null-term.ptr context)))
 
 (defstruct LlvmBuilder)
 
-(defext llvm-create-builder
+(defext llvm-create-builder-in-context
+    (context (* LlvmContext))
     : (* LlvmBuilder)
-    "LLVMCreateBuilderWrapper")
+    "LLVMCreateBuilderInContextWrapper")
+
+(defext llvm-dump-module
+    (module (* LlvmModule))
+    "LLVMDumpModuleWrapper")
+
+(defstruct LlvmType)
+(defstruct LlvmValue)
+
+(defext llvm-add-function-raw
+    (module (* LlvmModule))
+    (name (* u8))
+    (type (* LlvmType))
+    : (* LlvmValue)
+    "LLVMAddFunction")
+(defun llvm-add-function
+    (module (* LlvmModule))
+    (name (@ u8))
+    (type (* LlvmType))
+    : (* LlvmValue)
+(seq
+    (let null-term = (alloca (+ name.len 1)))
+    (let i = 0)
+    (while (< i name.len)
+        (seqn
+            (set (get null-term i) = (get name i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (llvm-add-function-raw module null-term.ptr type)))
+
+(defext llvm-function-type-raw
+    (return-type (* LlvmType))
+    (param-types (* (* LlvmType)))
+    (param-count u64)
+    (variadic u1)
+    : (* LlvmType)
+    "LLVMFunctionTypeWrapper")
+(defun llvm-function-type
+    (return-type (* LlvmType))
+    (param-types (@ (* LlvmType)))
+    (variadic u1)
+    : (* LlvmType)
+    (llvm-function-type-raw return-type param-types.ptr param-types.len variadic))
+
+(defext llvm-int-type-in-context
+    (context (* LlvmContext))
+    (bitwidth u64)
+    : (* LlvmType)
+    "LLVMIntTypeInContext")
 
 
 
@@ -3416,9 +3473,25 @@
     (filename (@ u8))
     (contents (@ u8))
 (seqn
-    (let module = (llvm-module-create-with-name "uwu"))
-    (let builder = (llvm-create-builder))
-    ()))
+    (let context = (llvm-context-create))
+    (let module = (llvm-module-create-with-name-in-context "uwu" context))
+    (let builder = (llvm-create-builder-in-context context))
+
+    (let i = 0)
+    (while (< i (deref ast).children.len) (seqn
+        (let ast = (vec-get (ref (deref ast).children) i))
+        (cond
+            ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (and (str-equals v.value "defun") (not (has-generic (ref (deref ast).typed))))) (seqn
+                (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
+                (let ret-type = (llvm-int-type-in-context context 32))
+                (let param-types = (alloca 0))
+                (let signature = (llvm-function-type ret-type param-types false))
+                (let function = (llvm-add-function module name signature))
+                )))
+        (set i = (+ i 1))))
+
+    (llvm-dump-module module)
+    ))
 
 
 
