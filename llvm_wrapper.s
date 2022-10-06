@@ -4,6 +4,8 @@
 .extern LLVMDumpModule
 .global LLVMFunctionTypeWrapper
 .extern LLVMFunctionType
+.global LLVMConstIntWrapper
+.extern LLVMConstInt
 
 .intel_syntax
 
@@ -17,4 +19,8 @@ LLVMDumpModuleWrapper:
 
 LLVMFunctionTypeWrapper:
     call LLVMFunctionType
+    ret
+
+LLVMConstIntWrapper:
+    call LLVMConstInt
     ret

@@ -3460,6 +3460,47 @@
     : (* LlvmType)
     "LLVMIntTypeInContext")
 
+(defstruct LlvmBasicBlock)
+
+(defext llvm-append-basic-block-in-context-raw
+    (context (* LlvmContext))
+    (function (* LlvmValue))
+    (name (* u8))
+    : (* LlvmBasicBlock)
+    "LLVMAppendBasicBlockInContext")
+(defun llvm-append-basic-block-in-context
+    (context (* LlvmContext))
+    (function (* LlvmValue))
+    (name (@ u8))
+    : (* LlvmBasicBlock)
+(seq
+    (let null-term = (alloca (+ name.len 1)))
+    (let i = 0)
+    (while (< i name.len)
+        (seqn
+            (set (get null-term i) = (get name i))
+            (set i = (+ i 1))))
+    (set (get null-term i) = '\0')
+    (llvm-append-basic-block-in-context-raw context function null-term.ptr)))
+
+(defext llvm-position-builder-at-end
+    (builder (* LlvmBuilder))
+    (block (* LlvmBasicBlock))
+    "LLVMPositionBuilderAtEnd")
+
+(defext llvm-build-ret
+    (builder (* LlvmBuilder))
+    (value (* LlvmValue))
+    : (* LlvmValue)
+    "LLVMBuildRet")
+
+(defext llvm-const-int
+    (type (* LlvmType))
+    (v u64)
+    (sign-extend u1)
+    : (* LlvmValue)
+    "LLVMConstIntWrapper")
+
 
 
 //
@@ -3467,6 +3508,79 @@
 // CODE GENERATION
 // ==================================================================================================
 //
+
+(defun ast-type-to-llvm-type
+    (context (* LlvmContext))
+    (type (* Type))
+    : (* LlvmType)
+(cond
+    ((== (deref type).type (TYPE_TYPE_INT))
+        (llvm-int-type-in-context context (deref type).type-var-width))
+    ((== (deref type).type (TYPE_TYPE_FUNCTION)) (seq
+        (let return-type = (ast-type-to-llvm-type context (deref type).boxed))
+        (let params = (ref (new-vec (deref type).subtypes.A)))
+        (let i = 0)
+        (while (< i (deref type).subtypes.len) (seqn
+            (let arg = (vec-get (ref (deref type).subtypes) i))
+            (let arg = (ast-type-to-llvm-type context arg))
+            (vec-push params arg)
+            (set i = (+ i 1))))
+        (llvm-function-type return-type (vec-slice params) false)))
+    (:else
+        (null))))
+
+(defun parse-int
+    (str (@ u8))
+    : u64
+(cond
+    ((str-equals str "true")
+        1)
+    ((str-equals str "false")
+        0)
+    (:else (seq
+        (let i = 0)
+        (let n = 0)
+        (while (< i str.len) (seqn
+            (let c = (get str i))
+            (cond
+                ((and (<= '0' c) (<= c '9')) (seqn
+                    (set n = (+ (* n 10) (cast (- c '0'))))))
+                (:else (break 0)))
+            (set i = (+ i 1)))
+        :else n)))))
+
+(defun compile-helper
+    (ast (* Ast))
+    (context (* LlvmContext))
+    (module (* LlvmModule))
+    (builder (* LlvmBuilder))
+    (function (* LlvmValue))
+    : (* LlvmValue)
+(cond
+    ((or (== (deref ast).type (AST_NODE_TYPE_INT)) (== (deref ast).type (AST_NODE_TYPE_BOOL))) (seq
+        (let type = (ast-type-to-llvm-type context (ref (deref ast).typed)))
+        (llvm-const-int type (parse-int (deref ast).value) (deref ast).typed.signed-mutable)))
+    ((== (deref ast).type (AST_NODE_TYPE_CHAR)) (cond
+        ((== (deref ast).value.len 3)
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast (get (deref ast).value 1)) false))
+        ((== (get (deref ast).value 2) 'n')
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\n') false))
+        ((== (get (deref ast).value 2) 'r')
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\r') false))
+        ((== (get (deref ast).value 2) 't')
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\t') false))
+        ((== (get (deref ast).value 2) '0')
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\0') false))
+        ((== (get (deref ast).value 2) '\\')
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\\') false))
+        ((== (get (deref ast).value 2) '\'')
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\'') false))
+        ((== (get (deref ast).value 2) '"')
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\"') false))
+        (:else
+            (null))))
+    (:else
+        (null))))
 
 (defun compile-using-llvm
     (ast (* Ast))
@@ -3487,11 +3601,13 @@
                 (let param-types = (alloca 0))
                 (let signature = (llvm-function-type ret-type param-types false))
                 (let function = (llvm-add-function module name signature))
-                )))
+                (let entry-block = (llvm-append-basic-block-in-context context function "entry"))
+                (llvm-position-builder-at-end builder entry-block)
+                (let expr = (compile-helper (vec-get (ref (deref ast).children) (- (deref ast).children.len 1)) context module builder function))
+                (llvm-build-ret builder expr))))
         (set i = (+ i 1))))
 
-    (llvm-dump-module module)
-    ))
+    (llvm-dump-module module)))
 
 
 
