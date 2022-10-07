@@ -3501,6 +3501,52 @@
     : (* LlvmValue)
     "LLVMConstIntWrapper")
 
+(defext llvm-initialize-all-target-infos
+    "LLVMInitializeX86TargetInfo")
+(defext llvm-initialize-all-targets
+    "LLVMInitializeX86Target")
+(defext llvm-initialize-all-target-mcs
+    "LLVMInitializeX86TargetMCWrapper")
+(defext llvm-initialize-all-asm-parsers
+    "LLVMInitializeX86AsmParser")
+(defext llvm-initialize-all-asm-printers
+    "LLVMInitializeX86AsmPrinter")
+
+(defext llvm-get-default-target-triple
+    : (* u8)
+    "LLVMGetDefaultTargetTriple")
+
+(defstruct LlvmTarget)
+
+(defext llvm-get-target-from-triple
+    (triple (* u8))
+    (target (* (* LlvmTarget)))
+    (error-msg (* (* u8)))
+    : u1
+    "LLVMGetTargetFromTriple")
+
+(defstruct LlvmTargetMachine)
+
+(defext llvm-create-target-machine
+    (target (* LlvmTarget))
+    (triple (* u8))
+    (cpu (* u8))
+    (features (* u8))
+    (opt-level u64)
+    (reloc-mode u64)
+    (code-model u64)
+    : (* LlvmTargetMachine)
+    "LLVMCreateTargetMachineWrapper")
+
+(defext llvm-target-machine-emit-to-file
+    (target (* LlvmTargetMachine))
+    (module (* LlvmModule))
+    (filename (* u8))
+    (emit-object u1)
+    (error-msg (* (* u8)))
+    : u1
+    "LLVMTargetMachineEmitToFileWrapper")
+
 
 
 //
@@ -3607,7 +3653,20 @@
                 (llvm-build-ret builder expr))))
         (set i = (+ i 1))))
 
-    (llvm-dump-module module)))
+    (llvm-dump-module module)
+
+    (llvm-initialize-all-target-infos)
+    (llvm-initialize-all-targets)
+    (llvm-initialize-all-target-mcs)
+    (llvm-initialize-all-asm-parsers)
+    (llvm-initialize-all-asm-printers)
+
+    (let triple = (llvm-get-default-target-triple))
+    (let target = (ref (ref (inst LlvmTarget))))
+    (llvm-get-target-from-triple triple target (null))
+    (let target = (deref target))
+    (let machine = (llvm-create-target-machine target triple "generic\0".ptr "\0".ptr 0 0 0))
+    (llvm-target-machine-emit-to-file machine module "a.out.o\0".ptr true (null))))
 
 
 
