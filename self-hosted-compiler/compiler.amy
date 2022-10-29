@@ -3547,6 +3547,46 @@
     : u1
     "LLVMTargetMachineEmitToFileWrapper")
 
+(defext llvm-build-mul
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildMulWrapper")
+
+(defext llvm-build-udiv
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildUDivWrapper")
+
+(defext llvm-build-sdiv
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildSDivWrapper")
+
+(defext llvm-build-urem
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildURemWrapper")
+
+(defext llvm-build-srem
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildSRemWrapper")
+
 (defext llvm-build-add
     (builder (* LlvmBuilder))
     (a (* LlvmValue))
@@ -3554,6 +3594,54 @@
     (name (* u8))
     : (* LlvmValue)
     "LLVMBuildAddWrapper")
+
+(defext llvm-build-sub
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildSubWrapper")
+
+(defext llvm-build-shl
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildShlWrapper")
+
+(defext llvm-build-lshr
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildLShrWrapper")
+
+(defext llvm-build-and
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildAndWrapper")
+
+(defext llvm-build-or
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildOrWrapper")
+
+(defext llvm-build-xor
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildXorWrapper")
 
 
 
@@ -3643,6 +3731,46 @@
                 (cond
                     ((str-equals symbol ":")
                         (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function))
+                    ((str-equals symbol "*") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-mul
+                            builder
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)))
+                    ((str-equals symbol "/") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (cond
+                            ((deref ast).typed.signed-mutable
+                                (llvm-build-sdiv
+                                    builder
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr))
+                            (:else
+                                (llvm-build-udiv
+                                    builder
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr)))))
+                    ((str-equals symbol "%") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (cond
+                            ((deref ast).typed.signed-mutable
+                                (llvm-build-srem
+                                    builder
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr))
+                            (:else
+                                (llvm-build-urem
+                                    builder
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr)))))
                     ((str-equals symbol "+") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
@@ -3650,8 +3778,55 @@
                             builder
                             (compile-helper a context module builder function)
                             (compile-helper b context module builder function)
-                            "\0".ptr)
-                        ))
+                            "\0".ptr)))
+                    ((str-equals symbol "-") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-sub
+                            builder
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)))
+                    ((str-equals symbol "<<") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-shl
+                            builder
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)))
+                    ((str-equals symbol ">>") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-lshr
+                            builder
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)))
+                    ((str-equals symbol "&") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-and
+                            builder
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)))
+                    ((str-equals symbol "|") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-or
+                            builder
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)))
+                    ((str-equals symbol "^") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-xor
+                            builder
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)))
                     (:else
                         (null))
                     )

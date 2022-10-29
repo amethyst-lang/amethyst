@@ -12,8 +12,30 @@
 .extern LLVMCreateTargetMachine
 .global LLVMTargetMachineEmitToFileWrapper
 .extern LLVMTargetMachineEmitToFile
+.global LLVMBuildMulWrapper
+.extern LLVMBuildMul
+.global LLVMBuildUDivWrapper
+.extern LLVMBuildUDiv
+.global LLVMBuildSDivWrapper
+.extern LLVMBuildSDiv
+.global LLVMBuildURemWrapper
+.extern LLVMBuildURem
+.global LLVMBuildSRemWrapper
+.extern LLVMBuildSRem
 .global LLVMBuildAddWrapper
 .extern LLVMBuildAdd
+.global LLVMBuildSubWrapper
+.extern LLVMBuildSub
+.global LLVMBuildShlWrapper
+.extern LLVMBuildShl
+.global LLVMBuildLShrWrapper
+.extern LLVMBuildLShr
+.global LLVMBuildAndWrapper
+.extern LLVMBuildAnd
+.global LLVMBuildOrWrapper
+.extern LLVMBuildOr
+.global LLVMBuildXorWrapper
+.extern LLVMBuildXor
 
 .intel_syntax
 
@@ -51,6 +73,50 @@ LLVMTargetMachineEmitToFileWrapper:
     call LLVMTargetMachineEmitToFile
     ret
 
+LLVMBuildMulWrapper:
+    call LLVMBuildMul
+    ret
+
+LLVMBuildUDivWrapper:
+    call LLVMBuildUDiv
+    ret
+
+LLVMBuildSDivWrapper:
+    call LLVMBuildSDiv
+    ret
+
+LLVMBuildURemWrapper:
+    call LLVMBuildURem
+    ret
+
+LLVMBuildSRemWrapper:
+    call LLVMBuildSRem
+    ret
+
 LLVMBuildAddWrapper:
     call LLVMBuildAdd
+    ret
+
+LLVMBuildSubWrapper:
+    call LLVMBuildSub
+    ret
+
+LLVMBuildShlWrapper:
+    call LLVMBuildShl
+    ret
+
+LLVMBuildLShrWrapper:
+    call LLVMBuildLShr
+    ret
+
+LLVMBuildAndWrapper:
+    call LLVMBuildAnd
+    ret
+
+LLVMBuildOrWrapper:
+    call LLVMBuildOr
+    ret
+
+LLVMBuildXorWrapper:
+    call LLVMBuildXor
     ret
