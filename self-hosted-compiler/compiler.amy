@@ -3643,6 +3643,25 @@
     : (* LlvmValue)
     "LLVMBuildXorWrapper")
 
+(defmacro LLVM_INT_PREDICATE_EQ  32)
+(defmacro LLVM_INT_PREDICATE_NE  33)
+(defmacro LLVM_INT_PREDICATE_UGT 34)
+(defmacro LLVM_INT_PREDICATE_UGE 35)
+(defmacro LLVM_INT_PREDICATE_ULT 36)
+(defmacro LLVM_INT_PREDICATE_ULE 37)
+(defmacro LLVM_INT_PREDICATE_SGT 38)
+(defmacro LLVM_INT_PREDICATE_SGE 39)
+(defmacro LLVM_INT_PREDICATE_SLT 40)
+(defmacro LLVM_INT_PREDICATE_SLE 41)
+(defext llvm-build-icmp
+    (builder (* LlvmBuilder))
+    (op u64)
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildICmpWrapper")
+
 
 
 //
@@ -3827,10 +3846,98 @@
                             (compile-helper a context module builder function)
                             (compile-helper b context module builder function)
                             "\0".ptr)))
+                    ((str-equals symbol "==") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-icmp
+                            builder
+                            (LLVM_INT_PREDICATE_EQ)
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)))
+                    ((str-equals symbol "!=") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-icmp
+                            builder
+                            (LLVM_INT_PREDICATE_NE)
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)))
+                    ((str-equals symbol "<") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (cond
+                            ((deref a).typed.signed-mutable
+                                (llvm-build-icmp
+                                    builder
+                                    (LLVM_INT_PREDICATE_SLT)
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr))
+                            (:else
+                                (llvm-build-icmp
+                                    builder
+                                    (LLVM_INT_PREDICATE_ULT)
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr)))))
+                    ((str-equals symbol "<=") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (cond
+                            ((deref a).typed.signed-mutable
+                                (llvm-build-icmp
+                                    builder
+                                    (LLVM_INT_PREDICATE_SLE)
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr))
+                            (:else
+                                (llvm-build-icmp
+                                    builder
+                                    (LLVM_INT_PREDICATE_ULE)
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr)))))
+                    ((str-equals symbol ">") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (cond
+                            ((deref a).typed.signed-mutable
+                                (llvm-build-icmp
+                                    builder
+                                    (LLVM_INT_PREDICATE_SGT)
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr))
+                            (:else
+                                (llvm-build-icmp
+                                    builder
+                                    (LLVM_INT_PREDICATE_UGT)
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr)))))
+                    ((str-equals symbol ">=") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (cond
+                            ((deref a).typed.signed-mutable
+                                (llvm-build-icmp
+                                    builder
+                                    (LLVM_INT_PREDICATE_SGE)
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr))
+                            (:else
+                                (llvm-build-icmp
+                                    builder
+                                    (LLVM_INT_PREDICATE_UGE)
+                                    (compile-helper a context module builder function)
+                                    (compile-helper b context module builder function)
+                                    "\0".ptr)))))
                     (:else
-                        (null))
-                    )
-                ))
+                        (null)))))
             (:else
                 (null)))))
     (:else

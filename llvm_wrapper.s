@@ -36,6 +36,8 @@
 .extern LLVMBuildOr
 .global LLVMBuildXorWrapper
 .extern LLVMBuildXor
+.global LLVMBuildICmpWrapper
+.extern LLVMBuildICmp
 
 .intel_syntax
 
@@ -119,4 +121,8 @@ LLVMBuildOrWrapper:
 
 LLVMBuildXorWrapper:
     call LLVMBuildXor
+    ret
+
+LLVMBuildICmpWrapper:
+    call LLVMBuildICmp
     ret
