@@ -3936,6 +3936,21 @@
                                     (compile-helper a context module builder function)
                                     (compile-helper b context module builder function)
                                     "\0".ptr)))))
+                    ((str-equals symbol "seq") (seq
+                        (let i = 1)
+                        (let last = (null))
+                        (while (< i (deref ast).children.len) (seqn
+                            (let node = (vec-get (ref (deref ast).children) i))
+                            (set last = (compile-helper node context module builder function))
+                            (set i = (+ i 1))))
+                        last))
+                    ((str-equals symbol "seqn") (seq
+                        (let i = 1)
+                        (while (< i (deref ast).children.len) (seqn
+                            (let node = (vec-get (ref (deref ast).children) i))
+                            (compile-helper node context module builder function)
+                            (set i = (+ i 1))))
+                        (null)))
                     (:else
                         (null)))))
             (:else
