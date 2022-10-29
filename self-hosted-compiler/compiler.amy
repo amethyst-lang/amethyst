@@ -3547,6 +3547,14 @@
     : u1
     "LLVMTargetMachineEmitToFileWrapper")
 
+(defext llvm-build-add
+    (builder (* LlvmBuilder))
+    (a (* LlvmValue))
+    (b (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildAddWrapper")
+
 
 
 //
@@ -3625,6 +3633,31 @@
             (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\"') false))
         (:else
             (null))))
+    ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0))
+        (null))
+    ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
+        (let func-ast = (vec-get (ref (deref ast).children) 0))
+        (cond
+            ((== (deref func-ast).type (AST_NODE_TYPE_SYMBOL)) (seq
+                (let symbol = (deref func-ast).value)
+                (cond
+                    ((str-equals symbol ":")
+                        (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function))
+                    ((str-equals symbol "+") (seq
+                        (let a = (vec-get (ref (deref ast).children) 1))
+                        (let b = (vec-get (ref (deref ast).children) 2))
+                        (llvm-build-add
+                            builder
+                            (compile-helper a context module builder function)
+                            (compile-helper b context module builder function)
+                            "\0".ptr)
+                        ))
+                    (:else
+                        (null))
+                    )
+                ))
+            (:else
+                (null)))))
     (:else
         (null))))
 

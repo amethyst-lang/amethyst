@@ -12,6 +12,8 @@
 .extern LLVMCreateTargetMachine
 .global LLVMTargetMachineEmitToFileWrapper
 .extern LLVMTargetMachineEmitToFile
+.global LLVMBuildAddWrapper
+.extern LLVMBuildAdd
 
 .intel_syntax
 
@@ -47,4 +49,8 @@ LLVMCreateTargetMachineWrapper:
 
 LLVMTargetMachineEmitToFileWrapper:
     call LLVMTargetMachineEmitToFile
+    ret
+
+LLVMBuildAddWrapper:
+    call LLVMBuildAdd
     ret
