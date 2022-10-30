@@ -4050,6 +4050,18 @@
                                 (llvm-add-incoming phi (vec-slice phi-values).ptr (vec-slice phi-blocks).ptr (deref phi-values).len)
                                 phi)))))
 
+                    ((str-equals symbol "loop") (seq
+                        (let loop-block = (llvm-append-basic-block-in-context context function "loop"))
+                        (let break-block = (llvm-append-basic-block-in-context context function "loop-end"))
+                        (llvm-build-br builder loop-block)
+                        //(let break-type = (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map))
+                        (llvm-position-builder-at-end builder loop-block)
+                        (let node = (vec-get (ref (deref ast).children) 1))
+                        (let node = (compile-helper node context module builder function))
+                        (llvm-build-br builder loop-block)
+                        (llvm-position-builder-at-end builder break-block)
+                        (null)))
+
                     (:else
                         (null)))))
             (:else
