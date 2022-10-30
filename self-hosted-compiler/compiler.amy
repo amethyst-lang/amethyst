@@ -3662,6 +3662,34 @@
     : (* LlvmValue)
     "LLVMBuildICmpWrapper")
 
+(defext llvm-build-br
+    (builder (* LlvmBuilder))
+    (dest (* LlvmBasicBlock))
+    : (* LlvmValue)
+    "LLVMBuildBr")
+
+(defext llvm-build-cond-br
+    (builder (* LlvmBuilder))
+    (if (* LlvmValue))
+    (then (* LlvmBasicBlock))
+    (else (* LlvmBasicBlock))
+    : (* LlvmValue)
+    "LLVMBuildCondBr")
+
+(defext llvm-build-phi
+    (builder (* LlvmBuilder))
+    (type (* LlvmType))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildPhi")
+
+(defext llvm-add-incoming
+    (phi (* LlvmValue))
+    (values (* (* LlvmValue)))
+    (blocks (* (* LlvmBasicBlock)))
+    (count u64)
+    "LLVMAddIncoming")
+
 
 
 //
@@ -3951,6 +3979,77 @@
                             (compile-helper node context module builder function)
                             (set i = (+ i 1))))
                         (null)))
+
+                    ((str-equals symbol "cond") (seq
+                        (let conds = (ref (new-vec (deref ast).children.A)))
+                        (let thens = (ref (new-vec (deref ast).children.A)))
+
+                        (let i = 1)
+                        (while (< i (deref ast).children.len) (seqn
+                            (let pair = (vec-get (ref (deref ast).children) i))
+                            (let condy = (vec-get (ref (deref pair).children) 0))
+                            (cond
+                                ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
+                                    (let then = (llvm-append-basic-block-in-context context function "then"))
+                                    (vec-push thens then)
+                                    (cond
+                                        ((< i (- (deref ast).children.len 1)) (seqn
+                                            (let condy = (llvm-append-basic-block-in-context context function "cond"))
+                                            (vec-push conds condy)))))))
+                            (set i = (+ i 1))))
+
+                        (let last-block = (llvm-append-basic-block-in-context context function "cond-end"))
+
+                        (let i = 1)
+                        (let phi-blocks = (ref (new-vec (deref ast).children.A)))
+                        (let phi-values = (ref (new-vec (deref ast).children.A)))
+                        (let block = (null))
+                        (while (< i (deref ast).children.len) (seqn
+                            (let pair = (vec-get (ref (deref ast).children) i))
+                            (let condy = (vec-get (ref (deref pair).children) 0))
+                            (let then = (vec-get (ref (deref pair).children) 1))
+
+                            (cond
+                                ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
+                                    (let condy-ast = condy)
+                                    (let condy = (compile-helper condy context module builder function))
+                                    (let next-cond-block = (deref (vec-get conds (- i 1))))
+                                    (let then-block = (deref (vec-get thens (- i 1))))
+                                    (llvm-build-cond-br
+                                        builder
+                                        condy
+                                        then-block
+                                        next-cond-block)
+
+                                    (llvm-position-builder-at-end builder then-block)
+                                    (let then = (compile-helper then context module builder function))
+                                    (vec-push phi-blocks then-block)
+                                    (vec-push phi-values then)
+                                    (llvm-build-br
+                                        builder
+                                        last-block)
+
+                                    (set block = next-cond-block)
+                                    (llvm-position-builder-at-end builder next-cond-block)))
+                                (:else (seqn
+                                    (let else = (compile-helper then context module builder function))
+                                    (vec-push phi-blocks block)
+                                    (vec-push phi-values else)
+                                    (llvm-build-br
+                                        builder
+                                        last-block))))
+                            (set i = (+ i 1))))
+
+                        (llvm-position-builder-at-end builder last-block)
+
+                        (cond
+                            ((and (== (deref ast).typed.type (TYPE_TYPE_TUPLE)) (== (deref ast).typed.subtypes.len 0))
+                                (null))
+                            (:else (seq
+                                (let phi = (llvm-build-phi builder (ast-type-to-llvm-type context (ref (deref ast).typed)) "\0".ptr))
+                                (llvm-add-incoming phi (vec-slice phi-values).ptr (vec-slice phi-blocks).ptr (deref phi-values).len)
+                                phi)))))
+
                     (:else
                         (null)))))
             (:else
