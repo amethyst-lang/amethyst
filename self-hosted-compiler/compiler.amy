@@ -3726,6 +3726,12 @@
     : (* LlvmValue)
     "LLVMGetParam")
 
+(defext llvm-pointer-type
+    (subtype (* LlvmType))
+    (address-space u64)
+    : (* LlvmType)
+    "LLVMPointerType")
+
 
 
 //
@@ -3750,7 +3756,7 @@
             (let arg = (ast-type-to-llvm-type context arg))
             (vec-push params arg)
             (set i = (+ i 1))))
-        (llvm-function-type return-type (vec-slice params) false)))
+        (llvm-pointer-type (llvm-function-type return-type (vec-slice params) false) 0)))
     ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
         (llvm-void-type-in-context context))
     (:else
@@ -4193,6 +4199,8 @@
         (cond
             ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (and (str-equals v.value "defun") (not (has-generic (ref (deref ast).typed))))) (seqn
                 (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
+                (print name)
+                (print "\n")
                 (let type = (ref (deref ast).typed))
                 (let ret-type = (ast-type-to-llvm-type context (deref type).boxed))
                 (let param-count = (deref type).subtypes.len)
