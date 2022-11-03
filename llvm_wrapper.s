@@ -38,6 +38,8 @@
 .extern LLVMBuildXor
 .global LLVMBuildICmpWrapper
 .extern LLVMBuildICmp
+.global LLVMAddFunctionWrapper
+.extern LLVMAddFunction
 
 .intel_syntax
 
@@ -125,4 +127,8 @@ LLVMBuildXorWrapper:
 
 LLVMBuildICmpWrapper:
     call LLVMBuildICmp
+    ret
+
+LLVMAddFunctionWrapper:
+    call LLVMAddFunction
     ret

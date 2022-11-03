@@ -3424,7 +3424,7 @@
     (name (* u8))
     (type (* LlvmType))
     : (* LlvmValue)
-    "LLVMAddFunction")
+    "LLVMAddFunctionWrapper")
 (defun llvm-add-function
     (module (* LlvmModule))
     (name (@ u8))
@@ -3782,6 +3782,9 @@
             (set i = (+ i 1)))
         :else n)))))
 
+(defun matches-type (pair (* (Pair Type 'a))) (type Type) : u1
+    (type-equals (deref pair).a type))
+
 (defun compile-helper
     (ast (* Ast))
     (context (* LlvmContext))
@@ -3790,7 +3793,7 @@
     (function (* LlvmValue))
     (break-block (* LlvmBasicBlock))
     (break-phi (Pair (* (Vec (* LlvmValue))) (* (Vec (* LlvmBasicBlock)))))
-    (func-map (* (Vec (Pair (@ u8) (* LlvmValue)))))
+    (func-map (* (Vec (Pair (@ u8) (Vec (Pair Type (* LlvmValue)))))))
     (var-map (* (Vec (Vec (Pair (@ u8) (* LlvmValue))))))
     : (* LlvmValue)
 (cond
@@ -3829,6 +3832,7 @@
                     (break (deref value).b))))
         :else (cond
             ((: u64 (cast (let func = (vec-find func-map matches-key (deref ast).value)))) (seq
+                (let func = (vec-find (ref (deref func).b) matches-type (deref ast).typed))
                 (deref func).b))
             (:else
                 (null))))))
@@ -4192,15 +4196,16 @@
     (let module = (llvm-module-create-with-name-in-context "uwu" context))
     (let builder = (llvm-create-builder-in-context context))
     (let func-map = (ref (new-vec (deref ast).children.A)))
+    (: (* (Vec (Pair (@ u8) (Vec (Pair Type (* LlvmValue)))))) func-map)
 
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
         (let ast = (vec-get (ref (deref ast).children) i))
+        (let v = (deref (vec-get (ref (deref ast).children) 0)))
+        (let func-type = (deref ast).typed)
         (cond
-            ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (and (str-equals v.value "defun") (not (has-generic (ref (deref ast).typed))))) (seqn
+            ((and (== v.type (AST_NODE_TYPE_SYMBOL)) (and (or (str-equals v.value "defun") (str-equals v.value "defext")) (not (has-generic (ref func-type))))) (seqn
                 (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
-                (print name)
-                (print "\n")
                 (let type = (ref (deref ast).typed))
                 (let ret-type = (ast-type-to-llvm-type context (deref type).boxed))
                 (let param-count = (deref type).subtypes.len)
@@ -4210,11 +4215,77 @@
                     (set (get param-types i) = (ast-type-to-llvm-type context (vec-get (ref (deref type).subtypes) i)))
                     (set i = (+ i 1))))
                 (let signature = (llvm-function-type ret-type param-types false))
-                (let function = (llvm-add-function module name signature))
+                (let name-original = name)
+                (cond
+                    ((str-equals v.value "defext") (seqn
+                        (set name = (deref (vec-get (ref (deref ast).children) (- (deref ast).children.len 1))).value)
+                        (set name = (subslice name 1 (- name.len 1))))))
+                (let name-vec = (ref (new-vec (deref ast).children.A)))
+                (cond
+                    ((str-equals v.value "defext") (seqn
+                        (let i = 0)
+                        (while (< i name.len) (seqn
+                            (vec-push name-vec (get name i))
+                            (set i = (+ i 1))))))
+                    ((str-equals name "main") (seqn
+                        (let i = 0)
+                        (while (< i name.len) (seqn
+                            (vec-push name-vec (get name i))
+                            (set i = (+ i 1))))))
+                    (:else (seqn
+                        (let i = 0)
+                        (vec-push name-vec '_')
+                        (vec-push name-vec 'a')
+                        (vec-push name-vec 'm')
+                        (vec-push name-vec 'y')
+                        (vec-push name-vec '_')
+                        (while (< i name.len) (seqn
+                            (vec-push name-vec (get name i))
+                            (set i = (+ i 1))))
+                        (vec-push name-vec '_')
+                        // TODO: make this based on types
+                        // or maybe not? maybe this is sufficient? who knows
+                        (let monomorphisms = (vec-find func-map matches-key name-original))
+                        (cond
+                            ((: u64 (cast monomorphisms)) (seqn
+                                (let i = (deref monomorphisms).b.len)
+                                (while (!= i 0) (seqn
+                                    (let c = (+ '0' (cast (% i 10))))
+                                    (vec-push name-vec c)
+                                    (set i = (/ i 10))))))
+                            (:else (seqn
+                                (vec-push name-vec '0')))))))
+                (let function = (llvm-add-function module (vec-slice name-vec) signature))
+                (cond
+                    ((: u64 (cast (let monomorphisms = (vec-find func-map matches-key name-original)))) (seqn
+                        (let morphisms = (ref (deref monomorphisms).b))
+                        (vec-push morphisms (inst Pair
+                            (a func-type)
+                            (b function)))
+                        (set (deref monomorphisms).b = (deref morphisms))))
+                    (:else (seqn
+                        (let morphisms = (ref (new-vec (deref ast).children.A)))
+                        (vec-push morphisms (inst Pair
+                            (a func-type)
+                            (b function)))
+                        (vec-push func-map (inst Pair
+                            (a name-original)
+                            (b (deref morphisms))))))))))
+        (set i = (+ i 1))))
+    (let i = 0)
+    (while (< i (deref ast).children.len) (seqn
+        (let ast = (vec-get (ref (deref ast).children) i))
+        (cond
+            ((and (== (let v = (deref (vec-get (ref (deref ast).children) 0))).type (AST_NODE_TYPE_SYMBOL)) (and (str-equals v.value "defun") (not (has-generic (ref (deref ast).typed))))) (seqn
+                (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
+                (let type = (ref (deref ast).typed))
+                (let function = (vec-find func-map matches-key name))
+                (let function = (vec-find (ref (deref function).b) matches-type (deref ast).typed))
+                (let function = (deref function).b)
                 (let var-map = (ref (new-vec (deref ast).children.A)))
                 (let scope = (ref (new-vec (deref ast).children.A)))
                 (let i = 0)
-                (while (< i param-count) (seqn
+                (while (< i (deref type).subtypes.len) (seqn
                     (let var = (vec-get (ref (deref ast).children) (+ i 2)))
                     (let var = (vec-get (ref (deref var).children) 0))
                     (let var = (deref var).value)
@@ -4222,9 +4293,6 @@
                         (a var)
                         (b (llvm-get-param function i))))
                     (set i = (+ i 1))))
-                (vec-push func-map (inst Pair
-                    (a name)
-                    (b function)))
                 (let entry-block = (llvm-append-basic-block-in-context context function "entry"))
                 (llvm-position-builder-at-end builder entry-block)
                 (vec-push var-map (deref scope))
