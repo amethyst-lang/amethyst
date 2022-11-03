@@ -3853,13 +3853,18 @@
                             (let arg = (compile-helper arg context module builder function break-block break-phi func-map var-map))
                             (vec-push args arg)
                             (set j = (+ j 1))))
-                        (llvm-build-call
+                        (let call = (llvm-build-call
                             builder
                             (llvm-get-return-type (llvm-type-of func))
                             func
                             (vec-slice args).ptr
                             (deref args).len
-                            "\0".ptr)))
+                            "\0".ptr))
+                        (cond
+                            ((and (== (deref ast).typed.type (TYPE_TYPE_TUPLE)) (== (deref ast).typed.subtypes.len 0))
+                                (null))
+                            (:else
+                                call))))
 
                     ((str-equals symbol ":")
                         (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
@@ -4243,8 +4248,8 @@
                             (vec-push name-vec (get name i))
                             (set i = (+ i 1))))
                         (vec-push name-vec '_')
-                        // TODO: make this based on types
-                        // or maybe not? maybe this is sufficient? who knows
+
+                        // TODO: make this based on types (it is not sufficient)
                         (let monomorphisms = (vec-find func-map matches-key name-original))
                         (cond
                             ((: u64 (cast monomorphisms)) (seqn
