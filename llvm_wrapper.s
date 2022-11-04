@@ -40,6 +40,8 @@
 .extern LLVMBuildICmp
 .global LLVMAddFunctionWrapper
 .extern LLVMAddFunction
+.global LLVMBuildAllocaWrapper
+.extern LLVMBuildAlloca
 
 .intel_syntax
 
@@ -132,3 +134,8 @@ LLVMBuildICmpWrapper:
 LLVMAddFunctionWrapper:
     call LLVMAddFunction
     ret
+
+LLVMBuildAllocaWrapper:
+    call LLVMBuildAlloca
+    ret
+

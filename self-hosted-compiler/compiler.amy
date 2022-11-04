@@ -3732,6 +3732,43 @@
     : (* LlvmType)
     "LLVMPointerType")
 
+(defext llvm-build-alloca
+    (builder (* LlvmBuilder))
+    (type (* LlvmType))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildAllocaWrapper")
+
+(defext llvm-build-load
+    (builder (* LlvmBuilder))
+    (type (* LlvmType))
+    (pointer (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildLoad2")
+
+(defext llvm-build-store
+    (builder (* LlvmBuilder))
+    (value (* LlvmValue))
+    (pointer (* LlvmValue))
+    : (* LlvmValue)
+    "LLVMBuildStore")
+
+(defext llvm-get-first-basic-block
+    (function (* LlvmValue))
+    : (* LlvmBasicBlock)
+    "LLVMGetFirstBasicBlock")
+
+(defext llvm-position-builder-before
+    (builder (* LlvmBuilder))
+    (instruction (* LlvmValue))
+    "LLVMPositionBuilderBefore")
+
+(defext llvm-get-basic-block-terminator
+    (block (* LlvmBasicBlock))
+    : (* LlvmValue)
+    "LLVMGetBasicBlockTerminator")
+
 
 
 //
@@ -3794,7 +3831,7 @@
     (break-block (* LlvmBasicBlock))
     (break-phi (Pair (* (Vec (* LlvmValue))) (* (Vec (* LlvmBasicBlock)))))
     (func-map (* (Vec (Pair (@ u8) (Vec (Pair Type (* LlvmValue)))))))
-    (var-map (* (Vec (Vec (Pair (@ u8) (* LlvmValue))))))
+    (var-map (* (Vec (Vec (Pair (@ u8) (Pair (* LlvmType) (* LlvmValue)))))))
     : (* LlvmValue)
 (cond
     ((or (== (deref ast).type (AST_NODE_TYPE_INT)) (== (deref ast).type (AST_NODE_TYPE_BOOL))) (seq
@@ -3829,7 +3866,7 @@
             (let value = (vec-find scope matches-key (deref ast).value))
             (cond
                 ((: u64 (cast value))
-                    (break (deref value).b))))
+                    (break (llvm-build-load builder (deref value).b.a (deref value).b.b "\0".ptr)))))
         :else (cond
             ((: u64 (cast (let func = (vec-find func-map matches-key (deref ast).value)))) (seq
                 (let func = (vec-find (ref (deref func).b) matches-type (deref ast).typed))
@@ -4185,6 +4222,31 @@
                         (llvm-position-builder-at-end builder (llvm-append-basic-block-in-context context function "break-end"))
                         (null)))
 
+                    ((str-equals symbol "let") (seq
+                        (let var = (vec-get (ref (deref ast).children) 1))
+                        (let var = (deref var).value)
+                        (let expr = (vec-get (ref (deref ast).children) 3))
+                        (let type = (ast-type-to-llvm-type context (ref (deref expr).typed)))
+                        (let expr = (compile-helper expr context module builder function break-block break-phi func-map var-map))
+                        (let current-block = (llvm-get-insert-block builder))
+                        (llvm-position-builder-before builder (llvm-get-basic-block-terminator (llvm-get-first-basic-block function)))
+                        (let alloc = (llvm-build-alloca builder (ast-type-to-llvm-type context (ref (deref ast).typed)) "\0".ptr))
+                        (let top = (vec-get var-map (- (deref var-map).len 1)))
+                        (let value = (vec-find top matches-key var))
+                        (cond
+                            ((: u64 (cast value)) (seqn
+                                (set (deref value).b.a = type)
+                                (set (deref value).b.b = alloc)))
+                            (:else (seqn
+                                (vec-push top (inst Pair
+                                    (a var)
+                                    (b (inst Pair
+                                        (a type)
+                                        (b alloc))))))))
+                        (llvm-position-builder-at-end builder current-block)
+                        (llvm-build-store builder expr alloc)
+                        (llvm-build-load builder type alloc "\0".ptr)))
+
                     (:else
                         (null)))))
             (:else
@@ -4289,6 +4351,7 @@
                 (let function = (deref function).b)
                 (let var-map = (ref (new-vec (deref ast).children.A)))
                 (let scope = (ref (new-vec (deref ast).children.A)))
+                /*
                 (let i = 0)
                 (while (< i (deref type).subtypes.len) (seqn
                     (let var = (vec-get (ref (deref ast).children) (+ i 2)))
@@ -4298,9 +4361,13 @@
                         (a var)
                         (b (llvm-get-param function i))))
                     (set i = (+ i 1))))
+                    */
+                (vec-push var-map (deref scope))
                 (let entry-block = (llvm-append-basic-block-in-context context function "entry"))
                 (llvm-position-builder-at-end builder entry-block)
-                (vec-push var-map (deref scope))
+                (let next-block = (llvm-append-basic-block-in-context context function "next"))
+                (llvm-build-br builder next-block)
+                (llvm-position-builder-at-end builder next-block)
                 (let expr = (compile-helper
                     (vec-get (ref (deref ast).children) (- (deref ast).children.len 1))
                     context
