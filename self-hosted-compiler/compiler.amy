@@ -4351,20 +4351,23 @@
                 (let function = (deref function).b)
                 (let var-map = (ref (new-vec (deref ast).children.A)))
                 (let scope = (ref (new-vec (deref ast).children.A)))
-                /*
+                (let entry-block = (llvm-append-basic-block-in-context context function "entry"))
+                (llvm-position-builder-at-end builder entry-block)
                 (let i = 0)
                 (while (< i (deref type).subtypes.len) (seqn
                     (let var = (vec-get (ref (deref ast).children) (+ i 2)))
                     (let var = (vec-get (ref (deref var).children) 0))
                     (let var = (deref var).value)
+                    (let value = (llvm-get-param function i))
+                    (let alloc = (llvm-build-alloca builder (llvm-type-of value) "\0".ptr))
+                    (llvm-build-store builder value alloc)
                     (vec-push scope (inst Pair
                         (a var)
-                        (b (llvm-get-param function i))))
+                        (b (inst Pair
+                            (a (llvm-type-of value))
+                            (b alloc)))))
                     (set i = (+ i 1))))
-                    */
                 (vec-push var-map (deref scope))
-                (let entry-block = (llvm-append-basic-block-in-context context function "entry"))
-                (llvm-position-builder-at-end builder entry-block)
                 (let next-block = (llvm-append-basic-block-in-context context function "next"))
                 (llvm-build-br builder next-block)
                 (llvm-position-builder-at-end builder next-block)
