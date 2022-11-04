@@ -42,7 +42,13 @@
 .extern LLVMAddFunction
 .global LLVMBuildAllocaWrapper
 .extern LLVMBuildAlloca
-
+.global LLVMStructTypeInContextWrapper
+.extern LLVMStructTypeInContext
+.global LLVMConstStructInContextWrapper
+.extern LLVMConstStructInContext
+.global LLVMBuildGlobalStringPtrWrapper
+.extern LLVMBuildGlobalStringPtr
+    
 .intel_syntax
 
 LLVMCreateBuilderInContextWrapper:
@@ -139,3 +145,14 @@ LLVMBuildAllocaWrapper:
     call LLVMBuildAlloca
     ret
 
+LLVMStructTypeInContextWrapper:
+    call LLVMStructTypeInContext
+    ret
+
+LLVMConstStructInContextWrapper:
+    call LLVMConstStructInContext
+    ret
+
+LLVMBuildGlobalStringPtrWrapper:
+    call LLVMBuildGlobalStringPtr
+    ret

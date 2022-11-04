@@ -3769,6 +3769,99 @@
     : (* LlvmValue)
     "LLVMGetBasicBlockTerminator")
 
+(defext llvm-build-trunc
+    (builder (* LlvmBuilder))
+    (value (* LlvmValue))
+    (type (* LlvmType))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildTrunc")
+
+(defext llvm-build-zext
+    (builder (* LlvmBuilder))
+    (value (* LlvmValue))
+    (type (* LlvmType))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildZExt")
+
+(defext llvm-build-sext
+    (builder (* LlvmBuilder))
+    (value (* LlvmValue))
+    (type (* LlvmType))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildSExt")
+
+(defext llvm-build-ptr-to-int
+    (builder (* LlvmBuilder))
+    (value (* LlvmValue))
+    (type (* LlvmType))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildPtrToInt")
+
+(defext llvm-build-int-to-ptr
+    (builder (* LlvmBuilder))
+    (value (* LlvmValue))
+    (type (* LlvmType))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildIntToPtr")
+
+(defext llvm-build-bitcast
+    (builder (* LlvmBuilder))
+    (value (* LlvmValue))
+    (type (* LlvmType))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildBitCast")
+
+(defext llvm-build-gep
+    (builder (* LlvmBuilder))
+    (type (* LlvmType))
+    (pointer (* LlvmValue))
+    (indexes (* (* LlvmValue)))
+    (index-count u64)
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildGEP2")
+
+(defext llvm-const-null
+    (type (* LlvmType))
+    : (* LlvmValue)
+    "LLVMConstNull")
+
+(defext llvm-build-neg
+    (builder (* LlvmBuilder))
+    (value (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildNeg")
+
+(defext llvm-struct-type-in-context
+    (context (* LlvmContext))
+    (element-types (* (* LlvmType)))
+    (element-count u64)
+    (packed u1)
+    : (* LlvmType)
+    "LLVMStructTypeInContextWrapper")
+
+(defext llvm-build-global-string-ptr
+    (builder (* LlvmBuilder))
+    (string (* u8))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildGlobalStringPtrWrapper")
+
+(defext llvm-const-struct-in-context
+    (context (* LlvmContext))
+    (fields (* (* LlvmValue)))
+    (field-count u64)
+    (packed u1)
+    : (* LlvmValue)
+    "LLVMConstStructInContextWrapper")
+
 
 
 //
@@ -3794,6 +3887,15 @@
             (vec-push params arg)
             (set i = (+ i 1))))
         (llvm-pointer-type (llvm-function-type return-type (vec-slice params) false) 0)))
+    ((== (deref type).type (TYPE_TYPE_POINTER))
+        (llvm-pointer-type (ast-type-to-llvm-type context (deref type).boxed) 0))
+    ((== (deref type).type (TYPE_TYPE_SLICE)) (seq
+        (let pointer = (llvm-pointer-type (ast-type-to-llvm-type context (deref type).boxed) 0))
+        (let size = (llvm-int-type-in-context context 64))
+        (let slice = (alloca 2))
+        (set (get slice 0) = pointer)
+        (set (get slice 1) = size)
+        (llvm-struct-type-in-context context slice.ptr slice.len false)))
     ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
         (llvm-void-type-in-context context))
     (:else
@@ -3874,6 +3976,41 @@
             (:else
                 (null))))))
 
+    ((== (deref ast).type (AST_NODE_TYPE_STRING)) (seq
+        (let value = (ref (new-vec (deref ast).children.A)))
+        (let i = 1)
+        (while (< i (- (deref ast).value.len 1)) (seqn
+            (let c = (get (deref ast).value i))
+            (cond
+                ((== c '\\') (seqn
+                    (set i = (+ i 1))
+                    (let c = (get (deref ast).value i))
+                    (cond
+                        ((== c 'n')
+                            (vec-push value '\n'))
+                        ((== c 'r')
+                            (vec-push value '\r'))
+                        ((== c 't')
+                            (vec-push value '\t'))
+                        ((== c '0')
+                            (vec-push value '\0'))
+                        ((== c '\\')
+                            (vec-push value '\\'))
+                        ((== c '\'')
+                            (vec-push value '\''))
+                        ((== c '\"')
+                            (vec-push value '\"')))))
+                (:else
+                    (vec-push value c)))
+            (set i = (+ i 1))))
+        (vec-push value 0)
+        (let string-ptr = (llvm-build-global-string-ptr builder (vec-slice value).ptr "\0".ptr))
+        (let length = (llvm-const-int (llvm-int-type-in-context context 64) (- (deref value).len 1) false))
+        (let fields = (alloca 2))
+        (set (get fields 0) = string-ptr)
+        (set (get fields 1) = length)
+        (llvm-const-struct-in-context context fields.ptr fields.len false)))
+
     ((and (== (deref ast).type (AST_NODE_TYPE_SEXPR)) (== (deref ast).children.len 0))
         (null))
     ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
@@ -3905,6 +4042,78 @@
 
                     ((str-equals symbol ":")
                         (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
+
+                    ((str-equals symbol "cast") (seq
+                        (let value = (vec-get (ref (deref ast).children) 1))
+                        (let from = (deref value).typed)
+                        (let value = (compile-helper value context module builder function break-block break-phi func-map var-map))
+                        (let into = (deref ast).typed)
+
+                        (cond
+                            ((and (== from.type (TYPE_TYPE_INT)) (== into.type (TYPE_TYPE_INT)))
+                                (cond
+                                    ((and (< from.type-var-width into.type-var-width) into.signed-mutable)
+                                        (llvm-build-zext builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                                    ((< from.type-var-width into.type-var-width)
+                                        (llvm-build-sext builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                                    ((== from.type-var-width into.type-var-width)
+                                        value)
+                                    (:else
+                                        (llvm-build-trunc builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))))
+                            ((and (== from.type (TYPE_TYPE_POINTER)) (== into.type (TYPE_TYPE_POINTER)))
+                                (llvm-build-bitcast builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                            ((and (== from.type (TYPE_TYPE_POINTER)) (== into.type (TYPE_TYPE_INT)))
+                                (llvm-build-ptr-to-int builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                            ((and (== from.type (TYPE_TYPE_INT)) (== into.type (TYPE_TYPE_POINTER)))
+                                (llvm-build-int-to-ptr builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                            (:else
+                                (null)))))
+
+                    ((str-equals symbol "sizeof") (seq
+                        (let int-type = (ast-type-to-llvm-type context (ref (deref ast).typed)))
+                        (let type = (ref (deref (vec-get (ref (deref ast).children) 1)).typed))
+                        (let type = (ast-type-to-llvm-type context type))
+                        (let nully = (llvm-const-null (llvm-pointer-type type 0)))
+                        (let index = (llvm-const-int (llvm-int-type-in-context context 64) 1 true))
+                        (let gep = (llvm-build-gep builder type nully (ref index) 1 "\0".ptr))
+                        (llvm-build-ptr-to-int builder gep int-type "\0".ptr)))
+
+                    ((str-equals symbol "alloca") (seq
+                        (null)))
+
+                    ((str-equals symbol "ref") (seq
+                        (let value = (vec-get (ref (deref ast).children) 1))
+                        (let type = (ast-type-to-llvm-type context (ref (deref value).typed)))
+                        (let value = (compile-helper value context module builder function break-block break-phi func-map var-map))
+                        (let alloc = (llvm-build-alloca builder type "\0".ptr))
+                        (llvm-build-store builder value alloc)
+                        alloc))
+
+                    ((str-equals symbol "deref") (seq
+                        (let value = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
+                        (let type = (ast-type-to-llvm-type context (ref (deref ast).typed)))
+                        (llvm-build-load builder type value "\0".ptr)))
+
+                    ((str-equals symbol "get") (seq
+                        (null)))
+
+                    ((str-equals symbol "ptr-add") (seq
+                        (let pointer = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
+                        (let index = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
+                        (let type = (deref ast).typed.boxed)
+                        (let type = (ast-type-to-llvm-type context type))
+                        (llvm-build-gep builder type pointer (ref index) 1 "\0".ptr)))
+
+                    ((str-equals symbol "ptr-sub") (seq
+                        (let pointer = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
+                        (let index = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
+                        (let index = (llvm-build-neg builder index "\0".ptr))
+                        (let type = (deref ast).typed.boxed)
+                        (let type = (ast-type-to-llvm-type context type))
+                        (llvm-build-gep builder type pointer (ref index) 1 "\0".ptr)))
+
+                    ((str-equals symbol "slice") (seq
+                        (null)))
 
                     ((str-equals symbol "*") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -4247,6 +4456,7 @@
                         (llvm-build-store builder expr alloc)
                         (llvm-build-load builder type alloc "\0".ptr)))
 
+                    // TODO: allow for different lvalues for set
                     ((str-equals symbol "set") (seq
                         (let var = (vec-get (ref (deref ast).children) 1))
                         (let var = (deref var).value)
