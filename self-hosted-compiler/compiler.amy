@@ -4247,6 +4247,24 @@
                         (llvm-build-store builder expr alloc)
                         (llvm-build-load builder type alloc "\0".ptr)))
 
+                    ((str-equals symbol "set") (seq
+                        (let var = (vec-get (ref (deref ast).children) 1))
+                        (let var = (deref var).value)
+                        (let expr = (vec-get (ref (deref ast).children) 3))
+                        (let type = (ast-type-to-llvm-type context (ref (deref expr).typed)))
+                        (let expr = (compile-helper expr context module builder function break-block break-phi func-map var-map))
+                        (let i = (deref var-map).len)
+                        (while (> i 0) (seqn
+                            (set i = (- i 1))
+                            (let scope = (vec-get var-map i))
+                            (let value = (vec-find scope matches-key var))
+                            (cond
+                                ((: u64 (cast value)) (seqn
+                                    (llvm-build-store builder expr (deref value).b.b)
+                                    (break (llvm-build-load builder type (deref value).b.b "\0".ptr))))))
+                        :else
+                            (null))))
+
                     (:else
                         (null)))))
             (:else
