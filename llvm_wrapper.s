@@ -54,6 +54,8 @@
 .extern LLVMBuildGEP2
 .global LLVMAppendBasicBlockInContextWrapper
 .extern LLVMAppendBasicBlockInContext
+.global LLVMBuildPtrToIntWrapper
+.extern LLVMBuildPtrToInt
     
 .intel_syntax
 
@@ -173,4 +175,8 @@ LLVMBuildGEP2Wrapper:
 
 LLVMAppendBasicBlockInContextWrapper:
     call LLVMAppendBasicBlockInContext
+    ret
+
+LLVMBuildPtrToIntWrapper:
+    call LLVMBuildPtrToInt
     ret

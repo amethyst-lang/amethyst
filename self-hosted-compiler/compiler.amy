@@ -3798,7 +3798,7 @@
     (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildPtrToInt")
+    "LLVMBuildPtrToIntWrapper")
 
 (defext llvm-build-int-to-ptr
     (builder (* LlvmBuilder))
@@ -3891,6 +3891,19 @@
     : (* LlvmValue)
     "LLVMBuildExtractValue")
 
+(defext llvm-struct-create-named
+    (context (* LlvmContext))
+    (name (* u8))
+    : (* LlvmType)
+    "LLVMStructCreateNamed")
+
+(defext llvm-struct-set-body
+    (struct (* LlvmType))
+    (elements (* (* LlvmType)))
+    (element-count u64)
+    (packed u1)
+    "LLVMStructSetBody")
+
 
 
 //
@@ -3899,27 +3912,81 @@
 // ==================================================================================================
 //
 
+(defstruct StructBack
+    (fields (Vec (Pair (@ u8) Type)))
+    (monomorphisms (Vec (Pair (Vec Type) (* LlvmType)))))
+
+(defun instantiate-struct-monomorphism
+    (context (* LlvmContext))
+    (struct-map (* (Vec (Pair (@ u8) StructBack))))
+    (type (* Type))
+    : (* (Pair (Vec Type) (* LlvmType)))
+(cond
+    ((== (deref type).type (TYPE_TYPE_STRUCT)) (seq
+        (let struct-name = (deref type).name)
+        (let struct-generics = (deref type).subtypes)
+        (let struct-pair = (vec-find struct-map matches-key struct-name))
+        (let struct = (deref struct-pair).b)
+        (let found = (vec-find (ref struct.monomorphisms) matches-types struct-generics))
+        (cond
+            ((: u64 (cast found))
+                found)
+            (:else (seq
+                (let struct-llvm = (llvm-struct-create-named context "\0".ptr))
+                (let fields = (ref (new-vec (deref struct-map).A)))
+                (let monomorphisms = (ref struct.monomorphisms))
+                (vec-push monomorphisms (inst Pair
+                    (a struct-generics)
+                    (b struct-llvm)))
+                (set (deref struct-pair).b.monomorphisms = (deref monomorphisms))
+                (let i = 0)
+                (let j = 0)
+                (let generics-subs = (ref (new-vec (deref struct-map).A)))
+                (let generics = (ref (new-vec (deref struct-map).A)))
+                (while (< i struct.fields.len) (seqn
+                    (let field = (vec-get (ref struct.fields) i))
+                    (let name = (deref field).a)
+                    (let type = (ref (type-clone (ref (deref field).b))))
+                    (find-generics type generics)
+                    (while (< j (deref generics).len) (seqn
+                        (let name = (deref (vec-get generics j)))
+                        (let type = (deref (vec-get (ref struct-generics) j)))
+                        (vec-push generics-subs (inst Pair
+                            (a name)
+                            (b type)))
+                        (set j = (+ j 1))))
+                    (let subs = (ref (new-vec (deref struct-map).A)))
+                    (replace-generics type generics-subs subs)
+                    (vec-push fields (ast-type-to-llvm-type context type struct-map))
+                    (set i = (+ i 1))))
+                (llvm-struct-set-body struct-llvm (vec-slice fields).ptr (deref fields).len false)
+                (let monomorphism = (vec-find (ref (deref struct-pair).b.monomorphisms) matches-types struct-generics))
+                monomorphism)))))
+    (:else
+        (null))))
+
 (defun ast-type-to-llvm-type
     (context (* LlvmContext))
     (type (* Type))
+    (struct-map (* (Vec (Pair (@ u8) StructBack))))
     : (* LlvmType)
 (cond
     ((== (deref type).type (TYPE_TYPE_INT))
         (llvm-int-type-in-context context (deref type).type-var-width))
     ((== (deref type).type (TYPE_TYPE_FUNCTION)) (seq
-        (let return-type = (ast-type-to-llvm-type context (deref type).boxed))
+        (let return-type = (ast-type-to-llvm-type context (deref type).boxed struct-map))
         (let params = (ref (new-vec (deref type).subtypes.A)))
         (let i = 0)
         (while (< i (deref type).subtypes.len) (seqn
             (let arg = (vec-get (ref (deref type).subtypes) i))
-            (let arg = (ast-type-to-llvm-type context arg))
+            (let arg = (ast-type-to-llvm-type context arg struct-map))
             (vec-push params arg)
             (set i = (+ i 1))))
         (llvm-pointer-type (llvm-function-type return-type (vec-slice params) false) 0)))
     ((== (deref type).type (TYPE_TYPE_POINTER))
-        (llvm-pointer-type (ast-type-to-llvm-type context (deref type).boxed) 0))
+        (llvm-pointer-type (ast-type-to-llvm-type context (deref type).boxed struct-map) 0))
     ((== (deref type).type (TYPE_TYPE_SLICE)) (seq
-        (let pointer = (llvm-pointer-type (ast-type-to-llvm-type context (deref type).boxed) 0))
+        (let pointer = (llvm-pointer-type (ast-type-to-llvm-type context (deref type).boxed struct-map) 0))
         (let size = (llvm-int-type-in-context context 64))
         (let slice = (alloca 2))
         (set (get slice 0) = pointer)
@@ -3927,6 +3994,9 @@
         (llvm-struct-type-in-context context slice.ptr slice.len false)))
     ((and (== (deref type).type (TYPE_TYPE_TUPLE)) (== (deref type).subtypes.len 0))
         (llvm-void-type-in-context context))
+    ((== (deref type).type (TYPE_TYPE_STRUCT)) (seq
+        (let struct = (instantiate-struct-monomorphism context struct-map type))
+        (deref struct).b))
     (:else
         (null))))
 
@@ -3953,6 +4023,26 @@
 (defun matches-type (pair (* (Pair Type 'a))) (type Type) : u1
     (type-equals (deref pair).a type))
 
+(defun matches-types
+    (pair (* (Pair (Vec Type) 'a)))
+    (types (Vec Type))
+    : u1
+(cond
+    ((== (deref pair).a.len types.len) (seq
+        (let i = 0)
+        (while (< i types.len) (seqn
+            (let a = (vec-get (ref (deref pair).a) i))
+            (let b = (vec-get (ref types) i))
+            (cond
+                ((type-equals (deref a) (deref b))
+                    ())
+                (:else
+                    (break false)))
+            (set i = (+ i 1)))
+        :else true)))
+    (:else
+        false)))
+
 (defun compile-helper
     (ast (* Ast))
     (context (* LlvmContext))
@@ -3963,28 +4053,29 @@
     (break-phi (Pair (* (Vec (* LlvmValue))) (* (Vec (* LlvmBasicBlock)))))
     (func-map (* (Vec (Pair (@ u8) (Vec (Pair Type (* LlvmValue)))))))
     (var-map (* (Vec (Vec (Pair (@ u8) (Pair (* LlvmType) (* LlvmValue)))))))
+    (struct-map (* (Vec (Pair (@ u8) StructBack))))
     : (* LlvmValue)
 (cond
     ((or (== (deref ast).type (AST_NODE_TYPE_INT)) (== (deref ast).type (AST_NODE_TYPE_BOOL))) (seq
-        (let type = (ast-type-to-llvm-type context (ref (deref ast).typed)))
+        (let type = (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map))
         (llvm-const-int type (parse-int (deref ast).value) (deref ast).typed.signed-mutable)))
     ((== (deref ast).type (AST_NODE_TYPE_CHAR)) (cond
         ((== (deref ast).value.len 3)
-            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast (get (deref ast).value 1)) false))
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) (cast (get (deref ast).value 1)) false))
         ((== (get (deref ast).value 2) 'n')
-            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\n') false))
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) (cast '\n') false))
         ((== (get (deref ast).value 2) 'r')
-            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\r') false))
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) (cast '\r') false))
         ((== (get (deref ast).value 2) 't')
-            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\t') false))
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) (cast '\t') false))
         ((== (get (deref ast).value 2) '0')
-            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\0') false))
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) (cast '\0') false))
         ((== (get (deref ast).value 2) '\\')
-            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\\') false))
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) (cast '\\') false))
         ((== (get (deref ast).value 2) '\'')
-            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\'') false))
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) (cast '\'') false))
         ((== (get (deref ast).value 2) '"')
-            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed)) (cast '\"') false))
+            (llvm-const-int (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) (cast '\"') false))
         (:else
             (null))))
 
@@ -4048,12 +4139,12 @@
             ((== (deref func-ast).type (AST_NODE_TYPE_SYMBOL)) (seq
                 (let symbol = (deref func-ast).value)
                 (cond
-                    ((: u64 (cast (let func = (compile-helper func-ast context module builder function break-block break-phi func-map var-map)))) (seq
+                    ((: u64 (cast (let func = (compile-helper func-ast context module builder function break-block break-phi func-map var-map struct-map)))) (seq
                         (let args = (ref (new-vec (deref ast).children.A)))
                         (let j = 1)
                         (while (< j (deref ast).children.len) (seqn
                             (let arg = (vec-get (ref (deref ast).children) j))
-                            (let arg = (compile-helper arg context module builder function break-block break-phi func-map var-map))
+                            (let arg = (compile-helper arg context module builder function break-block break-phi func-map var-map struct-map))
                             (vec-push args arg)
                             (set j = (+ j 1))))
                         (let call = (llvm-build-call
@@ -4070,92 +4161,92 @@
                                 call))))
 
                     ((str-equals symbol ":")
-                        (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
+                        (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map struct-map))
 
                     ((str-equals symbol "cast") (seq
                         (let value = (vec-get (ref (deref ast).children) 1))
                         (let from = (deref value).typed)
-                        (let value = (compile-helper value context module builder function break-block break-phi func-map var-map))
+                        (let value = (compile-helper value context module builder function break-block break-phi func-map var-map struct-map))
                         (let into = (deref ast).typed)
 
                         (cond
                             ((and (== from.type (TYPE_TYPE_INT)) (== into.type (TYPE_TYPE_INT)))
                                 (cond
                                     ((and (< from.type-var-width into.type-var-width) into.signed-mutable)
-                                        (llvm-build-zext builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                                        (llvm-build-zext builder value (ast-type-to-llvm-type context (ref into) struct-map) "\0".ptr))
                                     ((< from.type-var-width into.type-var-width)
-                                        (llvm-build-sext builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                                        (llvm-build-sext builder value (ast-type-to-llvm-type context (ref into) struct-map) "\0".ptr))
                                     ((== from.type-var-width into.type-var-width)
                                         value)
                                     (:else
-                                        (llvm-build-trunc builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))))
+                                        (llvm-build-trunc builder value (ast-type-to-llvm-type context (ref into) struct-map) "\0".ptr))))
                             ((and (== from.type (TYPE_TYPE_POINTER)) (== into.type (TYPE_TYPE_POINTER)))
-                                (llvm-build-bitcast builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                                (llvm-build-bitcast builder value (ast-type-to-llvm-type context (ref into) struct-map) "\0".ptr))
                             ((and (== from.type (TYPE_TYPE_POINTER)) (== into.type (TYPE_TYPE_INT)))
-                                (llvm-build-ptr-to-int builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                                (llvm-build-ptr-to-int builder value (ast-type-to-llvm-type context (ref into) struct-map) "\0".ptr))
                             ((and (== from.type (TYPE_TYPE_INT)) (== into.type (TYPE_TYPE_POINTER)))
-                                (llvm-build-int-to-ptr builder value (ast-type-to-llvm-type context (ref into)) "\0".ptr))
+                                (llvm-build-int-to-ptr builder value (ast-type-to-llvm-type context (ref into) struct-map) "\0".ptr))
                             (:else
                                 (null)))))
 
                     ((str-equals symbol "sizeof") (seq
-                        (let int-type = (ast-type-to-llvm-type context (ref (deref ast).typed)))
+                        (let int-type = (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map))
                         (let type = (ref (deref (vec-get (ref (deref ast).children) 1)).typed))
-                        (let type = (ast-type-to-llvm-type context type))
+                        (let type = (ast-type-to-llvm-type context type struct-map))
                         (let nully = (llvm-const-null (llvm-pointer-type type 0)))
                         (let index = (llvm-const-int (llvm-int-type-in-context context 64) 1 true))
                         (let gep = (llvm-build-gep builder type nully (ref index) 1 "\0".ptr))
                         (llvm-build-ptr-to-int builder gep int-type "\0".ptr)))
 
                     ((str-equals symbol "alloca") (seq
-                        (let length = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
-                        (let ptr = (llvm-build-array-alloca builder (ast-type-to-llvm-type context (deref ast).typed.boxed) length "\0".ptr))
-                        (let slice = (llvm-get-undef (ast-type-to-llvm-type context (ref (deref ast).typed))))
+                        (let length = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map struct-map))
+                        (let ptr = (llvm-build-array-alloca builder (ast-type-to-llvm-type context (deref ast).typed.boxed struct-map) length "\0".ptr))
+                        (let slice = (llvm-get-undef (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map)))
                         (let slice = (llvm-build-insert-value builder slice ptr 0 "\0".ptr))
                         (llvm-build-insert-value builder slice length 1 "\0".ptr)))
 
                     ((str-equals symbol "ref") (seq
                         (let value = (vec-get (ref (deref ast).children) 1))
-                        (let type = (ast-type-to-llvm-type context (ref (deref value).typed)))
-                        (let value = (compile-helper value context module builder function break-block break-phi func-map var-map))
+                        (let type = (ast-type-to-llvm-type context (ref (deref value).typed) struct-map))
+                        (let value = (compile-helper value context module builder function break-block break-phi func-map var-map struct-map))
                         (let alloc = (llvm-build-alloca builder type "\0".ptr))
                         (llvm-build-store builder value alloc)
                         alloc))
 
                     ((str-equals symbol "deref") (seq
-                        (let value = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
-                        (let type = (ast-type-to-llvm-type context (ref (deref ast).typed)))
+                        (let value = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map struct-map))
+                        (let type = (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map))
                         (llvm-build-load builder type value "\0".ptr)))
 
                     ((str-equals symbol "get") (seq
-                        (let slice = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
-                        (let index = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
+                        (let slice = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map struct-map))
+                        (let index = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map struct-map))
                         (let ptr = (llvm-build-extract-value builder slice 0 "\0".ptr))
                         (let indexes = (alloca 1))
                         (set (get indexes 0) = index)
-                        (let type = (ast-type-to-llvm-type context (ref (deref ast).typed)))
+                        (let type = (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map))
                         (let ptr = (llvm-build-gep builder type ptr indexes.ptr indexes.len "\0".ptr))
                         (llvm-build-load builder type ptr "\0".ptr)))
 
                     ((str-equals symbol "ptr-add") (seq
-                        (let pointer = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
-                        (let index = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
+                        (let pointer = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map struct-map))
+                        (let index = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map struct-map))
                         (let type = (deref ast).typed.boxed)
-                        (let type = (ast-type-to-llvm-type context type))
+                        (let type = (ast-type-to-llvm-type context type struct-map))
                         (llvm-build-gep builder type pointer (ref index) 1 "\0".ptr)))
 
                     ((str-equals symbol "ptr-sub") (seq
-                        (let pointer = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
-                        (let index = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
+                        (let pointer = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map struct-map))
+                        (let index = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map struct-map))
                         (let index = (llvm-build-neg builder index "\0".ptr))
                         (let type = (deref ast).typed.boxed)
-                        (let type = (ast-type-to-llvm-type context type))
+                        (let type = (ast-type-to-llvm-type context type struct-map))
                         (llvm-build-gep builder type pointer (ref index) 1 "\0".ptr)))
 
                     ((str-equals symbol "slice") (seq
-                        (let length = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
-                        (let ptr = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
-                        (let slice = (llvm-get-undef (ast-type-to-llvm-type context (ref (deref ast).typed))))
+                        (let length = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map struct-map))
+                        (let ptr = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map struct-map))
+                        (let slice = (llvm-get-undef (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map)))
                         (let slice = (llvm-build-insert-value builder slice ptr 0 "\0".ptr))
                         (llvm-build-insert-value builder slice length 1 "\0".ptr)))
 
@@ -4164,8 +4255,8 @@
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (llvm-build-mul
                             builder
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol "/") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -4174,14 +4265,14 @@
                             ((deref ast).typed.signed-mutable
                                 (llvm-build-sdiv
                                     builder
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr))
                             (:else
                                 (llvm-build-udiv
                                     builder
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr)))))
                     ((str-equals symbol "%") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -4190,70 +4281,70 @@
                             ((deref ast).typed.signed-mutable
                                 (llvm-build-srem
                                     builder
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr))
                             (:else
                                 (llvm-build-urem
                                     builder
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr)))))
                     ((str-equals symbol "+") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (llvm-build-add
                             builder
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol "-") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (llvm-build-sub
                             builder
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol "<<") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (llvm-build-shl
                             builder
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol ">>") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (llvm-build-lshr
                             builder
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol "&") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (llvm-build-and
                             builder
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol "|") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (llvm-build-or
                             builder
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol "^") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
                         (let b = (vec-get (ref (deref ast).children) 2))
                         (llvm-build-xor
                             builder
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol "==") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -4261,8 +4352,8 @@
                         (llvm-build-icmp
                             builder
                             (LLVM_INT_PREDICATE_EQ)
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol "!=") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -4270,8 +4361,8 @@
                         (llvm-build-icmp
                             builder
                             (LLVM_INT_PREDICATE_NE)
-                            (compile-helper a context module builder function break-block break-phi func-map var-map)
-                            (compile-helper b context module builder function break-block break-phi func-map var-map)
+                            (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                            (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                             "\0".ptr)))
                     ((str-equals symbol "<") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -4281,15 +4372,15 @@
                                 (llvm-build-icmp
                                     builder
                                     (LLVM_INT_PREDICATE_SLT)
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr))
                             (:else
                                 (llvm-build-icmp
                                     builder
                                     (LLVM_INT_PREDICATE_ULT)
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr)))))
                     ((str-equals symbol "<=") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -4299,15 +4390,15 @@
                                 (llvm-build-icmp
                                     builder
                                     (LLVM_INT_PREDICATE_SLE)
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr))
                             (:else
                                 (llvm-build-icmp
                                     builder
                                     (LLVM_INT_PREDICATE_ULE)
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr)))))
                     ((str-equals symbol ">") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -4317,15 +4408,15 @@
                                 (llvm-build-icmp
                                     builder
                                     (LLVM_INT_PREDICATE_SGT)
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr))
                             (:else
                                 (llvm-build-icmp
                                     builder
                                     (LLVM_INT_PREDICATE_UGT)
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr)))))
                     ((str-equals symbol ">=") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))
@@ -4335,15 +4426,15 @@
                                 (llvm-build-icmp
                                     builder
                                     (LLVM_INT_PREDICATE_SGE)
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr))
                             (:else
                                 (llvm-build-icmp
                                     builder
                                     (LLVM_INT_PREDICATE_UGE)
-                                    (compile-helper a context module builder function break-block break-phi func-map var-map)
-                                    (compile-helper b context module builder function break-block break-phi func-map var-map)
+                                    (compile-helper a context module builder function break-block break-phi func-map var-map struct-map)
+                                    (compile-helper b context module builder function break-block break-phi func-map var-map struct-map)
                                     "\0".ptr)))))
                     ((str-equals symbol "seq") (seq
                         (vec-push var-map (new-vec (deref ast).children.A))
@@ -4351,7 +4442,7 @@
                         (let last = (null))
                         (while (< i (deref ast).children.len) (seqn
                             (let node = (vec-get (ref (deref ast).children) i))
-                            (set last = (compile-helper node context module builder function break-block break-phi func-map var-map))
+                            (set last = (compile-helper node context module builder function break-block break-phi func-map var-map struct-map))
                             (set i = (+ i 1))))
                         (vec-pop var-map)
                         last))
@@ -4360,7 +4451,7 @@
                         (let i = 1)
                         (while (< i (deref ast).children.len) (seqn
                             (let node = (vec-get (ref (deref ast).children) i))
-                            (compile-helper node context module builder function break-block break-phi func-map var-map)
+                            (compile-helper node context module builder function break-block break-phi func-map var-map struct-map)
                             (set i = (+ i 1))))
                         (vec-pop var-map)
                         (null)))
@@ -4397,7 +4488,7 @@
                             (cond
                                 ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
                                     (let condy-ast = condy)
-                                    (let condy = (compile-helper condy context module builder function break-block break-phi func-map var-map))
+                                    (let condy = (compile-helper condy context module builder function break-block break-phi func-map var-map struct-map))
                                     (let next-cond-block = (deref (vec-get conds (- i 1))))
                                     (let then-block = (deref (vec-get thens (- i 1))))
                                     (llvm-build-cond-br
@@ -4407,7 +4498,7 @@
                                         next-cond-block)
 
                                     (llvm-position-builder-at-end builder then-block)
-                                    (let then = (compile-helper then context module builder function break-block break-phi func-map var-map))
+                                    (let then = (compile-helper then context module builder function break-block break-phi func-map var-map struct-map))
                                     (vec-push phi-blocks then-block)
                                     (vec-push phi-values then)
                                     (llvm-build-br
@@ -4416,7 +4507,7 @@
 
                                     (llvm-position-builder-at-end builder next-cond-block)))
                                 (:else (seqn
-                                    (let else = (compile-helper then context module builder function break-block break-phi func-map var-map))
+                                    (let else = (compile-helper then context module builder function break-block break-phi func-map var-map struct-map))
                                     (vec-push phi-blocks (llvm-get-insert-block builder))
                                     (vec-push phi-values else)
                                     (llvm-build-br
@@ -4431,7 +4522,7 @@
                             ((and (== (deref ast).typed.type (TYPE_TYPE_TUPLE)) (== (deref ast).typed.subtypes.len 0))
                                 (null))
                             (:else (seq
-                                (let phi = (llvm-build-phi builder (ast-type-to-llvm-type context (ref (deref ast).typed)) "\0".ptr))
+                                (let phi = (llvm-build-phi builder (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) "\0".ptr))
                                 (llvm-add-incoming phi (vec-slice phi-values).ptr (vec-slice phi-blocks).ptr (deref phi-values).len)
                                 phi)))))
 
@@ -4455,21 +4546,22 @@
                                 (a phi-values)
                                 (b phi-blocks))
                             func-map
-                            var-map))
+                            var-map
+                            struct-map))
                         (llvm-build-br builder loop-block)
                         (llvm-position-builder-at-end builder break-block)
                         (cond
                             ((and (== (deref ast).typed.type (TYPE_TYPE_TUPLE)) (== (deref ast).typed.subtypes.len 0))
                                 (null))
                             (:else (seq
-                                (let phi = (llvm-build-phi builder (ast-type-to-llvm-type context (ref (deref ast).typed)) "\0".ptr))
+                                (let phi = (llvm-build-phi builder (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) "\0".ptr))
                                 (llvm-add-incoming phi (vec-slice phi-values).ptr (vec-slice phi-blocks).ptr (deref phi-values).len)
                                 phi)))))
                     ((str-equals symbol "break") (seq
                         (let break-value = (cond
                             ((> (deref ast).children.len 1) (seq
                                 (let node = (vec-get (ref (deref ast).children) 1))
-                                (compile-helper node context module builder function break-block break-phi func-map var-map)))
+                                (compile-helper node context module builder function break-block break-phi func-map var-map struct-map)))
                             (:else
                                 (null))))
                         (cond
@@ -4487,11 +4579,11 @@
                         (let var = (vec-get (ref (deref ast).children) 1))
                         (let var = (deref var).value)
                         (let expr = (vec-get (ref (deref ast).children) 3))
-                        (let type = (ast-type-to-llvm-type context (ref (deref expr).typed)))
-                        (let expr = (compile-helper expr context module builder function break-block break-phi func-map var-map))
+                        (let type = (ast-type-to-llvm-type context (ref (deref expr).typed) struct-map))
+                        (let expr = (compile-helper expr context module builder function break-block break-phi func-map var-map struct-map))
                         (let current-block = (llvm-get-insert-block builder))
                         (llvm-position-builder-before builder (llvm-get-basic-block-terminator (llvm-get-first-basic-block function)))
-                        (let alloc = (llvm-build-alloca builder (ast-type-to-llvm-type context (ref (deref ast).typed)) "\0".ptr))
+                        (let alloc = (llvm-build-alloca builder (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map) "\0".ptr))
                         (let top = (vec-get var-map (- (deref var-map).len 1)))
                         (let value = (vec-find top matches-key var))
                         (cond
@@ -4510,12 +4602,36 @@
 
                     ((str-equals symbol "set") (seq
                         (let lvalue = (vec-get (ref (deref ast).children) 1))
-                        (let lvalue = (compile-lvalue lvalue context module builder function break-block break-phi func-map var-map))
+                        (let lvalue = (compile-lvalue lvalue context module builder function break-block break-phi func-map var-map struct-map))
                         (let expr = (vec-get (ref (deref ast).children) 3))
-                        (let type = (ast-type-to-llvm-type context (ref (deref expr).typed)))
-                        (let expr = (compile-helper expr context module builder function break-block break-phi func-map var-map))
+                        (let type = (ast-type-to-llvm-type context (ref (deref expr).typed) struct-map))
+                        (let expr = (compile-helper expr context module builder function break-block break-phi func-map var-map struct-map))
                         (llvm-build-store builder expr lvalue)
                         (llvm-build-load builder type lvalue "\0".ptr)))
+
+                    ((str-equals symbol "inst") (seq
+                        (let struct-value = (llvm-get-undef (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map)))
+                        (let name = (vec-get (ref (deref ast).children) 1))
+                        (let name = (deref name).value)
+                        (let raw = (vec-find struct-map matches-key name))
+                        (let i = 2)
+                        (while (< i (deref ast).children.len) (seqn
+                            (let pair = (vec-get (ref (deref ast).children) i))
+                            (let name = (vec-get (ref (deref pair).children) 0))
+                            (let name = (deref name).value)
+                            (let value = (vec-get (ref (deref pair).children) 1))
+                            (let value = (compile-helper value context module builder function break-block break-phi func-map var-map struct-map))
+                            (let j = 0)
+                            (while (< j (deref raw).b.fields.len) (seqn
+                                (let field = (vec-get (ref (deref raw).b.fields) j))
+                                (let field = (deref field).a)
+                                (cond
+                                    ((str-equals name field)
+                                        (break)))
+                                (set j = (+ j 1))))
+                            (set struct-value = (llvm-build-insert-value builder struct-value value j "\0".ptr))
+                            (set i = (+ i 1))))
+                        struct-value))
 
                     (:else
                         (null)))))
@@ -4525,7 +4641,7 @@
     ((== (deref ast).type (AST_NODE_TYPE_ATTR)) (seq
         (let value = (vec-get (ref (deref ast).children) 0))
         (let type = (deref value).typed)
-        (let value = (compile-helper value context module builder function break-block break-phi func-map var-map))
+        (let value = (compile-helper value context module builder function break-block break-phi func-map var-map struct-map))
         (let attr = (deref (vec-get (ref (deref ast).children) 1)).value)
         (cond
             ((== type.type (TYPE_TYPE_SLICE)) (cond
@@ -4551,6 +4667,7 @@
     (break-phi (Pair (* (Vec (* LlvmValue))) (* (Vec (* LlvmBasicBlock)))))
     (func-map (* (Vec (Pair (@ u8) (Vec (Pair Type (* LlvmValue)))))))
     (var-map (* (Vec (Vec (Pair (@ u8) (Pair (* LlvmType) (* LlvmValue)))))))
+    (struct-map (* (Vec (Pair (@ u8) StructBack))))
     : (* LlvmValue)
 (cond
     ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seq
@@ -4571,21 +4688,20 @@
         (cond
             ((str-equals func-name "deref") (seq
                 (let v = (vec-get (ref (deref ast).children) 1))
-                (compile-helper v context module builder function break-block break-phi func-map var-map)))
+                (compile-helper v context module builder function break-block break-phi func-map var-map struct-map)))
             ((str-equals func-name "get") (seq
                 (let v = (vec-get (ref (deref ast).children) 1))
                 (let type = (deref v).typed.boxed)
-                (let v = (compile-helper v context module builder function break-block break-phi func-map var-map))
+                (let v = (compile-helper v context module builder function break-block break-phi func-map var-map struct-map))
                 (let i = (vec-get (ref (deref ast).children) 2))
-                (let i = (compile-helper i context module builder function break-block break-phi func-map var-map))
-                (llvm-build-gep builder (ast-type-to-llvm-type context type) v (ref i) 1 "\0".ptr)))
+                (let i = (compile-helper i context module builder function break-block break-phi func-map var-map struct-map))
+                (llvm-build-gep builder (ast-type-to-llvm-type context type struct-map) v (ref i) 1 "\0".ptr)))
             (:else
                 (null)))))
 
     // TODO: attributes
     (:else
-        (null))
-    ))
+        (null))))
 
 (defun compile-using-llvm
     (ast (* Ast))
@@ -4598,6 +4714,34 @@
     (let func-map = (ref (new-vec (deref ast).children.A)))
     (: (* (Vec (Pair (@ u8) (Vec (Pair Type (* LlvmValue)))))) func-map)
 
+    (let struct-map = (ref (new-vec (deref ast).children.A)))
+    (let i = 0)
+    (while (< i (deref ast).children.len) (seqn
+        (let ast = (vec-get (ref (deref ast).children) i))
+        (let v = (deref (vec-get (ref (deref ast).children) 0)))
+        (cond
+            ((and (== v.type (AST_NODE_TYPE_SYMBOL)) (str-equals v.value "defstruct")) (seqn
+                (let name = (vec-get (ref (deref ast).children) 1))
+                (let name = (deref name).value)
+                (let fields = (ref (new-vec (deref ast).children.A)))
+                (let j = 2)
+                (while (< j (deref ast).children.len) (seqn
+                    (let field = (vec-get (ref (deref ast).children) j))
+                    (let name = (vec-get (ref (deref field).children) 0))
+                    (let name = (deref name).value)
+                    (let type = (vec-get (ref (deref field).children) 1))
+                    (let type = (deref type).typed)
+                    (vec-push fields (inst Pair
+                        (a name)
+                        (b type)))
+                    (set j = (+ j 1))))
+                (vec-push struct-map (inst Pair
+                    (a name)
+                    (b (inst StructBack
+                        (fields (deref fields))
+                        (monomorphisms (new-vec (deref ast).children.A)))))))))
+        (set i = (+ i 1))))
+
     (let i = 0)
     (while (< i (deref ast).children.len) (seqn
         (let ast = (vec-get (ref (deref ast).children) i))
@@ -4607,12 +4751,12 @@
             ((and (== v.type (AST_NODE_TYPE_SYMBOL)) (and (or (str-equals v.value "defun") (str-equals v.value "defext")) (not (has-generic (ref func-type))))) (seqn
                 (let name = (deref (vec-get (ref (deref ast).children) 1)).value)
                 (let type = (ref (deref ast).typed))
-                (let ret-type = (ast-type-to-llvm-type context (deref type).boxed))
+                (let ret-type = (ast-type-to-llvm-type context (deref type).boxed struct-map))
                 (let param-count = (deref type).subtypes.len)
                 (let param-types = (alloca param-count))
                 (let i = 0)
                 (while (< i param-count) (seqn
-                    (set (get param-types i) = (ast-type-to-llvm-type context (vec-get (ref (deref type).subtypes) i)))
+                    (set (get param-types i) = (ast-type-to-llvm-type context (vec-get (ref (deref type).subtypes) i) struct-map))
                     (set i = (+ i 1))))
                 (let signature = (llvm-function-type ret-type param-types false))
                 (let name-original = name)
@@ -4642,7 +4786,7 @@
                         (while (< i name.len) (seqn
                             (vec-push name-vec (get name i))
                             (set i = (+ i 1))))
-                        (vec-push name-vec '_')
+                        (vec-push name-vec '.')
 
                         // TODO: make this based on types (it is not sufficient)
                         (let monomorphisms = (vec-find func-map matches-key name-original))
@@ -4715,7 +4859,8 @@
                         (a (null))
                         (b (null)))
                     func-map
-                    var-map))
+                    var-map
+                    struct-map))
                 (llvm-build-ret builder expr))))
         (set i = (+ i 1))))
 
