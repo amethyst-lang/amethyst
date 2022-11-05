@@ -1077,8 +1077,7 @@
                                 (end attr.ast.loc.end)))
                             (typed (empty-type (deref lexer).tokens.A))
                             (value "")
-                            (children (deref children))))
-                        ))
+                            (children (deref children))))))
                     (:else
                         (break attr))))
         :else (parse-success top))))
@@ -4347,19 +4346,23 @@
                                     (compile-helper b context module builder function break-block break-phi func-map var-map)
                                     "\0".ptr)))))
                     ((str-equals symbol "seq") (seq
+                        (vec-push var-map (new-vec (deref ast).children.A))
                         (let i = 1)
                         (let last = (null))
                         (while (< i (deref ast).children.len) (seqn
                             (let node = (vec-get (ref (deref ast).children) i))
                             (set last = (compile-helper node context module builder function break-block break-phi func-map var-map))
                             (set i = (+ i 1))))
+                        (vec-pop var-map)
                         last))
                     ((str-equals symbol "seqn") (seq
+                        (vec-push var-map (new-vec (deref ast).children.A))
                         (let i = 1)
                         (while (< i (deref ast).children.len) (seqn
                             (let node = (vec-get (ref (deref ast).children) i))
                             (compile-helper node context module builder function break-block break-phi func-map var-map)
                             (set i = (+ i 1))))
+                        (vec-pop var-map)
                         (null)))
 
                     ((str-equals symbol "cond") (seq
@@ -4386,6 +4389,7 @@
                         (let phi-blocks = (ref (new-vec (deref ast).children.A)))
                         (let phi-values = (ref (new-vec (deref ast).children.A)))
                         (while (< i (deref ast).children.len) (seqn
+                            (vec-push var-map (new-vec (deref ast).children.A))
                             (let pair = (vec-get (ref (deref ast).children) i))
                             (let condy = (vec-get (ref (deref pair).children) 0))
                             (let then = (vec-get (ref (deref pair).children) 1))
@@ -4418,6 +4422,7 @@
                                     (llvm-build-br
                                         builder
                                         last-block))))
+                            (vec-pop var-map)
                             (set i = (+ i 1))))
 
                         (llvm-position-builder-at-end builder last-block)
@@ -4431,6 +4436,7 @@
                                 phi)))))
 
                     ((str-equals symbol "loop") (seq
+                        (vec-push var-map (new-vec (deref ast).children.A))
                         (let loop-block = (llvm-append-basic-block-in-context context function "loop"))
                         (let break-block = (llvm-append-basic-block-in-context context function "loop-end"))
                         (let phi-values = (ref (new-vec (deref ast).children.A)))
@@ -4474,6 +4480,7 @@
                             builder
                             break-block)
                         (llvm-position-builder-at-end builder (llvm-append-basic-block-in-context context function "break-end"))
+                        (vec-pop var-map)
                         (null)))
 
                     ((str-equals symbol "let") (seq
@@ -4524,6 +4531,23 @@
                         (null)))))
             (:else
                 (null)))))
+
+    ((== (deref ast).type (AST_NODE_TYPE_ATTR)) (seq
+        (let value = (vec-get (ref (deref ast).children) 0))
+        (let type = (deref value).typed)
+        (let value = (compile-helper value context module builder function break-block break-phi func-map var-map))
+        (let attr = (deref (vec-get (ref (deref ast).children) 1)).value)
+        (cond
+            ((== type.type (TYPE_TYPE_SLICE)) (cond
+                ((str-equals attr "ptr")
+                    (llvm-build-extract-value builder value 0 "\0".ptr))
+                ((or (str-equals attr "len") (str-equals attr "cap"))
+                    (llvm-build-extract-value builder value 1 "\0".ptr))
+                (:else
+                    (null))))
+            (:else
+                (null)))))
+
     (:else
         (null))))
 
