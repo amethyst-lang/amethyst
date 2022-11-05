@@ -48,6 +48,8 @@
 .extern LLVMConstStructInContext
 .global LLVMBuildGlobalStringPtrWrapper
 .extern LLVMBuildGlobalStringPtr
+.global LLVMBuildInsertValueWrapper
+.extern LLVMBuildInsertValue
     
 .intel_syntax
 
@@ -155,4 +157,8 @@ LLVMConstStructInContextWrapper:
 
 LLVMBuildGlobalStringPtrWrapper:
     call LLVMBuildGlobalStringPtr
+    ret
+
+LLVMBuildInsertValueWrapper:
+    call LLVMBuildInsertValue
     ret

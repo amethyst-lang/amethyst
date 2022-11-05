@@ -3862,6 +3862,36 @@
     : (* LlvmValue)
     "LLVMConstStructInContextWrapper")
 
+(defext llvm-build-array-alloca
+    (builder (* LlvmBuilder))
+    (type (* LlvmType))
+    (length (* LlvmValue))
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildArrayAlloca")
+
+(defext llvm-get-undef
+    (type (* LlvmType))
+    : (* LlvmValue)
+    "LLVMGetUndef")
+
+(defext llvm-build-insert-value
+    (builder (* LlvmBuilder))
+    (aggregate (* LlvmValue))
+    (field (* LlvmValue))
+    (index u64)
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildInsertValueWrapper")
+
+(defext llvm-build-extract-value
+    (builder (* LlvmBuilder))
+    (aggregate (* LlvmValue))
+    (index u64)
+    (name (* u8))
+    : (* LlvmValue)
+    "LLVMBuildExtractValue")
+
 
 
 //
@@ -4079,7 +4109,11 @@
                         (llvm-build-ptr-to-int builder gep int-type "\0".ptr)))
 
                     ((str-equals symbol "alloca") (seq
-                        (null)))
+                        (let length = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
+                        (let ptr = (llvm-build-array-alloca builder (ast-type-to-llvm-type context (deref ast).typed.boxed) length "\0".ptr))
+                        (let slice = (llvm-get-undef (ast-type-to-llvm-type context (ref (deref ast).typed))))
+                        (let slice = (llvm-build-insert-value builder slice ptr 0 "\0".ptr))
+                        (llvm-build-insert-value builder slice length 1 "\0".ptr)))
 
                     ((str-equals symbol "ref") (seq
                         (let value = (vec-get (ref (deref ast).children) 1))
