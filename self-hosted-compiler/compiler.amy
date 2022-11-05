@@ -4710,7 +4710,26 @@
             (:else
                 (null)))))
 
-    // TODO: attributes
+    ((== (deref ast).type (AST_NODE_TYPE_ATTR)) (seq
+        (let lvalue = (vec-get (ref (deref ast).children) 0))
+        (let type = (deref lvalue).typed)
+        (let lvalue = (compile-lvalue lvalue context module builder function break-block break-phi func-map var-map struct-map))
+        (let attr = (vec-get (ref (deref ast).children) 1))
+        (let attr = (deref attr).value)
+        (let raw = (vec-find struct-map matches-key type.name))
+        (let i = 0)
+        (while (< i (deref raw).b.fields.len) (seqn
+            (let field = (vec-get (ref (deref raw).b.fields) i))
+            (let field = (deref field).a)
+            (cond
+                ((str-equals attr field)
+                    (break)))
+            (set i = (+ i 1))))
+        (let indexes = (alloca 2))
+        (set (get indexes 0) = (llvm-const-int (llvm-int-type-in-context context 64) 0 true))
+        (set (get indexes 1) = (llvm-const-int (llvm-int-type-in-context context 32) i true))
+        (llvm-build-gep builder (ast-type-to-llvm-type context (ref type) struct-map) lvalue indexes.ptr indexes.len "\0".ptr)))
+
     (:else
         (null))))
 
