@@ -3466,7 +3466,7 @@
     (function (* LlvmValue))
     (name (* u8))
     : (* LlvmBasicBlock)
-    "LLVMAppendBasicBlockInContext")
+    "LLVMAppendBasicBlockInContextWrapper")
 (defun llvm-append-basic-block-in-context
     (context (* LlvmContext))
     (function (* LlvmValue))
@@ -4508,24 +4508,14 @@
                         (llvm-build-store builder expr alloc)
                         (llvm-build-load builder type alloc "\0".ptr)))
 
-                    // TODO: allow for different lvalues for set
                     ((str-equals symbol "set") (seq
-                        (let var = (vec-get (ref (deref ast).children) 1))
-                        (let var = (deref var).value)
+                        (let lvalue = (vec-get (ref (deref ast).children) 1))
+                        (let lvalue = (compile-lvalue lvalue context module builder function break-block break-phi func-map var-map))
                         (let expr = (vec-get (ref (deref ast).children) 3))
                         (let type = (ast-type-to-llvm-type context (ref (deref expr).typed)))
                         (let expr = (compile-helper expr context module builder function break-block break-phi func-map var-map))
-                        (let i = (deref var-map).len)
-                        (while (> i 0) (seqn
-                            (set i = (- i 1))
-                            (let scope = (vec-get var-map i))
-                            (let value = (vec-find scope matches-key var))
-                            (cond
-                                ((: u64 (cast value)) (seqn
-                                    (llvm-build-store builder expr (deref value).b.b)
-                                    (break (llvm-build-load builder type (deref value).b.b "\0".ptr))))))
-                        :else
-                            (null))))
+                        (llvm-build-store builder expr lvalue)
+                        (llvm-build-load builder type lvalue "\0".ptr)))
 
                     (:else
                         (null)))))
@@ -4550,6 +4540,52 @@
 
     (:else
         (null))))
+
+(defun compile-lvalue
+    (ast (* Ast))
+    (context (* LlvmContext))
+    (module (* LlvmModule))
+    (builder (* LlvmBuilder))
+    (function (* LlvmValue))
+    (break-block (* LlvmBasicBlock))
+    (break-phi (Pair (* (Vec (* LlvmValue))) (* (Vec (* LlvmBasicBlock)))))
+    (func-map (* (Vec (Pair (@ u8) (Vec (Pair Type (* LlvmValue)))))))
+    (var-map (* (Vec (Vec (Pair (@ u8) (Pair (* LlvmType) (* LlvmValue)))))))
+    : (* LlvmValue)
+(cond
+    ((== (deref ast).type (AST_NODE_TYPE_SYMBOL)) (seq
+        (let i = (deref var-map).len)
+        (while (> i 0) (seqn
+            (set i = (- i 1))
+            (let scope = (vec-get var-map i))
+            (let j = 0)
+            (let value = (vec-find scope matches-key (deref ast).value))
+            (cond
+                ((: u64 (cast value))
+                    (break (deref value).b.b))))
+        :else
+            (null))))
+    ((== (deref ast).type (AST_NODE_TYPE_SEXPR)) (seq
+        (let func-name = (vec-get (ref (deref ast).children) 0))
+        (let func-name = (deref func-name).value)
+        (cond
+            ((str-equals func-name "deref") (seq
+                (let v = (vec-get (ref (deref ast).children) 1))
+                (compile-helper v context module builder function break-block break-phi func-map var-map)))
+            ((str-equals func-name "get") (seq
+                (let v = (vec-get (ref (deref ast).children) 1))
+                (let type = (deref v).typed.boxed)
+                (let v = (compile-helper v context module builder function break-block break-phi func-map var-map))
+                (let i = (vec-get (ref (deref ast).children) 2))
+                (let i = (compile-helper i context module builder function break-block break-phi func-map var-map))
+                (llvm-build-gep builder (ast-type-to-llvm-type context type) v (ref i) 1 "\0".ptr)))
+            (:else
+                (null)))))
+
+    // TODO: attributes
+    (:else
+        (null))
+    ))
 
 (defun compile-using-llvm
     (ast (* Ast))

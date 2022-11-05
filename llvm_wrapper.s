@@ -52,6 +52,8 @@
 .extern LLVMBuildInsertValue
 .global LLVMBuildGEP2Wrapper
 .extern LLVMBuildGEP2
+.global LLVMAppendBasicBlockInContextWrapper
+.extern LLVMAppendBasicBlockInContext
     
 .intel_syntax
 
@@ -167,4 +169,8 @@ LLVMBuildInsertValueWrapper:
 
 LLVMBuildGEP2Wrapper:
     call LLVMBuildGEP2
+    ret
+
+LLVMAppendBasicBlockInContextWrapper:
+    call LLVMAppendBasicBlockInContext
     ret
