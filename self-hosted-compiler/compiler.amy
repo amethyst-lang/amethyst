@@ -3825,7 +3825,7 @@
     (index-count u64)
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildGEP2")
+    "LLVMBuildGEP2Wrapper")
 
 (defext llvm-const-null
     (type (* LlvmType))
@@ -4129,7 +4129,14 @@
                         (llvm-build-load builder type value "\0".ptr)))
 
                     ((str-equals symbol "get") (seq
-                        (null)))
+                        (let slice = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
+                        (let index = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
+                        (let ptr = (llvm-build-extract-value builder slice 0 "\0".ptr))
+                        (let indexes = (alloca 1))
+                        (set (get indexes 0) = index)
+                        (let type = (ast-type-to-llvm-type context (ref (deref ast).typed)))
+                        (let ptr = (llvm-build-gep builder type ptr indexes.ptr indexes.len "\0".ptr))
+                        (llvm-build-load builder type ptr "\0".ptr)))
 
                     ((str-equals symbol "ptr-add") (seq
                         (let pointer = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
@@ -4147,7 +4154,11 @@
                         (llvm-build-gep builder type pointer (ref index) 1 "\0".ptr)))
 
                     ((str-equals symbol "slice") (seq
-                        (null)))
+                        (let length = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map))
+                        (let ptr = (compile-helper (vec-get (ref (deref ast).children) 2) context module builder function break-block break-phi func-map var-map))
+                        (let slice = (llvm-get-undef (ast-type-to-llvm-type context (ref (deref ast).typed))))
+                        (let slice = (llvm-build-insert-value builder slice ptr 0 "\0".ptr))
+                        (llvm-build-insert-value builder slice length 1 "\0".ptr)))
 
                     ((str-equals symbol "*") (seq
                         (let a = (vec-get (ref (deref ast).children) 1))

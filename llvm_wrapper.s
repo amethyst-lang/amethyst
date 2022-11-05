@@ -50,6 +50,8 @@
 .extern LLVMBuildGlobalStringPtr
 .global LLVMBuildInsertValueWrapper
 .extern LLVMBuildInsertValue
+.global LLVMBuildGEP2Wrapper
+.extern LLVMBuildGEP2
     
 .intel_syntax
 
@@ -161,4 +163,8 @@ LLVMBuildGlobalStringPtrWrapper:
 
 LLVMBuildInsertValueWrapper:
     call LLVMBuildInsertValue
+    ret
+
+LLVMBuildGEP2Wrapper:
+    call LLVMBuildGEP2
     ret
