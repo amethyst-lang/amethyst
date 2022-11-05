@@ -4651,6 +4651,17 @@
                     (llvm-build-extract-value builder value 1 "\0".ptr))
                 (:else
                     (null))))
+            ((== type.type (TYPE_TYPE_STRUCT)) (seq
+                (let raw = (vec-find struct-map matches-key type.name))
+                (let j = 0)
+                (while (< j (deref raw).b.fields.len) (seqn
+                    (let field = (vec-get (ref (deref raw).b.fields) j))
+                    (let field = (deref field).a)
+                    (cond
+                        ((str-equals attr field)
+                            (break)))
+                    (set j = (+ j 1))))
+                (llvm-build-extract-value builder value j "\0".ptr)))
             (:else
                 (null)))))
 
