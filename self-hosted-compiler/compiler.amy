@@ -3774,7 +3774,7 @@
     (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildTrunc")
+    "LLVMBuildTruncWrapper")
 
 (defext llvm-build-zext
     (builder (* LlvmBuilder))
@@ -3782,7 +3782,7 @@
     (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildZExt")
+    "LLVMBuildZExtWrapper")
 
 (defext llvm-build-sext
     (builder (* LlvmBuilder))
@@ -3790,7 +3790,7 @@
     (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildSExt")
+    "LLVMBuildSExtWrapper")
 
 (defext llvm-build-ptr-to-int
     (builder (* LlvmBuilder))
@@ -3903,6 +3903,13 @@
     (element-count u64)
     (packed u1)
     "LLVMStructSetBody")
+
+(defext llvm-verify-module
+    (module (* LlvmModule))
+    (action u64)
+    (msg (* (* u8)))
+    : u1
+    "LLVMVerifyModuleWrapper")
 
 
 
@@ -4084,7 +4091,6 @@
         (while (> i 0) (seqn
             (set i = (- i 1))
             (let scope = (vec-get var-map i))
-            (let j = 0)
             (let value = (vec-find scope matches-key (deref ast).value))
             (cond
                 ((: u64 (cast value))
@@ -4173,9 +4179,9 @@
                             ((and (== from.type (TYPE_TYPE_INT)) (== into.type (TYPE_TYPE_INT)))
                                 (cond
                                     ((and (< from.type-var-width into.type-var-width) into.signed-mutable)
-                                        (llvm-build-zext builder value (ast-type-to-llvm-type context (ref into) struct-map) "\0".ptr))
-                                    ((< from.type-var-width into.type-var-width)
                                         (llvm-build-sext builder value (ast-type-to-llvm-type context (ref into) struct-map) "\0".ptr))
+                                    ((< from.type-var-width into.type-var-width)
+                                        (llvm-build-zext builder value (ast-type-to-llvm-type context (ref into) struct-map) "\0".ptr))
                                     ((== from.type-var-width into.type-var-width)
                                         value)
                                     (:else
@@ -4475,6 +4481,7 @@
                             (set i = (+ i 1))))
 
                         (let last-block = (llvm-append-basic-block-in-context context function "cond-end"))
+                        (vec-push conds last-block)
 
                         (let i = 1)
                         (let phi-blocks = (ref (new-vec (deref ast).children.A)))
@@ -4572,7 +4579,6 @@
                             builder
                             break-block)
                         (llvm-position-builder-at-end builder (llvm-append-basic-block-in-context context function "break-end"))
-                        (vec-pop var-map)
                         (null)))
 
                     ((str-equals symbol "let") (seq
@@ -4686,7 +4692,6 @@
         (while (> i 0) (seqn
             (set i = (- i 1))
             (let scope = (vec-get var-map i))
-            (let j = 0)
             (let value = (vec-find scope matches-key (deref ast).value))
             (cond
                 ((: u64 (cast value))
@@ -4895,6 +4900,7 @@
         (set i = (+ i 1))))
 
     (llvm-dump-module module)
+    (llvm-verify-module module 0 (null))
 
     (llvm-initialize-all-target-infos)
     (llvm-initialize-all-targets)
@@ -4960,4 +4966,3 @@
     (lexer-drop lexer)
     (vec-drop (ref contents) empty-dealloc)
     0))
-

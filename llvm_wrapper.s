@@ -56,6 +56,14 @@
 .extern LLVMAppendBasicBlockInContext
 .global LLVMBuildPtrToIntWrapper
 .extern LLVMBuildPtrToInt
+.global LLVMBuildSExtWrapper
+.extern LLVMBuildSExt
+.global LLVMBuildZExtWrapper
+.extern LLVMBuildZExt
+.global LLVMBuildTruncWrapper
+.extern LLVMBuildTrunc
+.global LLVMVerifyModuleWrapper
+.extern LLVMVerifyModule
     
 .intel_syntax
 
@@ -179,4 +187,20 @@ LLVMAppendBasicBlockInContextWrapper:
 
 LLVMBuildPtrToIntWrapper:
     call LLVMBuildPtrToInt
+    ret
+
+LLVMBuildSExtWrapper:
+    call LLVMBuildSExt
+    ret
+
+LLVMBuildZExtWrapper:
+    call LLVMBuildZExt
+    ret
+
+LLVMBuildTruncWrapper:
+    call LLVMBuildTrunc
+    ret
+
+LLVMVerifyModuleWrapper:
+    call LLVMVerifyModule
     ret
