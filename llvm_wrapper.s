@@ -64,6 +64,8 @@
 .extern LLVMBuildTrunc
 .global LLVMVerifyModuleWrapper
 .extern LLVMVerifyModule
+.global LLVMVerifyFunctionWrapper
+.extern LLVMVerifyFunction
     
 .intel_syntax
 
@@ -203,4 +205,8 @@ LLVMBuildTruncWrapper:
 
 LLVMVerifyModuleWrapper:
     call LLVMVerifyModule
+    ret
+
+LLVMVerifyFunctionWrapper:
+    call LLVMVerifyFunction
     ret

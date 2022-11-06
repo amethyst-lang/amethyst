@@ -3911,6 +3911,12 @@
     : u1
     "LLVMVerifyModuleWrapper")
 
+(defext llvm-verify-function
+    (function (* LlvmValue))
+    (action u64)
+    : u1
+    "LLVMVerifyFunctionWrapper")
+
 
 
 //
@@ -4496,6 +4502,12 @@
                                 ((!= (deref condy).type (AST_NODE_TYPE_KEY)) (seqn
                                     (let condy-ast = condy)
                                     (let condy = (compile-helper condy context module builder function break-block break-phi func-map var-map struct-map))
+                                    (let condy = (llvm-build-icmp
+                                        builder
+                                        (LLVM_INT_PREDICATE_NE)
+                                        condy
+                                        (llvm-const-int (ast-type-to-llvm-type context (ref (deref condy-ast).typed) struct-map) 0 false)
+                                        "\0".ptr))
                                     (let next-cond-block = (deref (vec-get conds (- i 1))))
                                     (let then-block = (deref (vec-get thens (- i 1))))
                                     (llvm-build-cond-br
@@ -4506,7 +4518,7 @@
 
                                     (llvm-position-builder-at-end builder then-block)
                                     (let then = (compile-helper then context module builder function break-block break-phi func-map var-map struct-map))
-                                    (vec-push phi-blocks then-block)
+                                    (vec-push phi-blocks (llvm-get-insert-block builder))
                                     (vec-push phi-values then)
                                     (llvm-build-br
                                         builder
@@ -4709,9 +4721,10 @@
                 (let v = (vec-get (ref (deref ast).children) 1))
                 (let type = (deref v).typed.boxed)
                 (let v = (compile-helper v context module builder function break-block break-phi func-map var-map struct-map))
+                (let ptr = (llvm-build-extract-value builder v 0 "\0".ptr))
                 (let i = (vec-get (ref (deref ast).children) 2))
                 (let i = (compile-helper i context module builder function break-block break-phi func-map var-map struct-map))
-                (llvm-build-gep builder (ast-type-to-llvm-type context type struct-map) v (ref i) 1 "\0".ptr)))
+                (llvm-build-gep builder (ast-type-to-llvm-type context type struct-map) ptr (ref i) 1 "\0".ptr)))
             (:else
                 (null)))))
 
@@ -4899,7 +4912,7 @@
                 (llvm-build-ret builder expr))))
         (set i = (+ i 1))))
 
-    (llvm-dump-module module)
+    //(llvm-dump-module module)
     (llvm-verify-module module 0 (null))
 
     (llvm-initialize-all-target-infos)
