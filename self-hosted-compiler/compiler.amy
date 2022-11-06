@@ -3917,6 +3917,34 @@
     : u1
     "LLVMVerifyFunctionWrapper")
 
+(defmacro LLVM_LINKAGE_EXTERNAL 0)
+(defext llvm-set-linkage
+    (value (* LlvmValue))
+    (linkage u64)
+    "LLVMSetLinkage")
+
+(defstruct LlvmPassManager)
+
+(defext llvm-create-function-pass-manager-for-module
+    (module (* LlvmModule))
+    : (* LlvmPassManager)
+    "LLVMCreateFunctionPassManagerForModule")
+
+(defext llvm-run-function-pass-manager
+    (manager (* LlvmPassManager))
+    (function (* LlvmValue))
+    : u1
+    "LLVMRunFunctionPassManagerWrapper")
+
+(defext llvm-finalize-function-pass-manager
+    (manager (* LlvmPassManager))
+    : u1
+    "LLVMFinalizeFunctionPassManager")
+
+(defext llvm-add-demote-memory-to-register-pass
+    (manager (* LlvmPassManager))
+    "LLVMAddDemoteMemoryToRegisterPass")
+
 
 
 //
@@ -4759,6 +4787,9 @@
     (let context = (llvm-context-create))
     (let module = (llvm-module-create-with-name-in-context "uwu" context))
     (let builder = (llvm-create-builder-in-context context))
+    (let passes = (llvm-create-function-pass-manager-for-module module))
+    (llvm-add-demote-memory-to-register-pass passes)
+
     (let func-map = (ref (new-vec (deref ast).children.A)))
     (: (* (Vec (Pair (@ u8) (Vec (Pair Type (* LlvmValue)))))) func-map)
 
@@ -4849,6 +4880,9 @@
                                 (vec-push name-vec '0')))))))
                 (let function = (llvm-add-function module (vec-slice name-vec) signature))
                 (cond
+                    ((str-equals v.value "defext")
+                        (llvm-set-linkage function (LLVM_LINKAGE_EXTERNAL))))
+                (cond
                     ((: u64 (cast (let monomorphisms = (vec-find func-map matches-key name-original)))) (seqn
                         (let morphisms = (ref (deref monomorphisms).b))
                         (vec-push morphisms (inst Pair
@@ -4909,10 +4943,12 @@
                     func-map
                     var-map
                     struct-map))
-                (llvm-build-ret builder expr))))
+                (llvm-build-ret builder expr)
+                (llvm-run-function-pass-manager passes function))))
         (set i = (+ i 1))))
 
     //(llvm-dump-module module)
+    (llvm-finalize-function-pass-manager passes)
     (llvm-verify-module module 0 (null))
 
     (llvm-initialize-all-target-infos)

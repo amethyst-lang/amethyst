@@ -66,6 +66,8 @@
 .extern LLVMVerifyModule
 .global LLVMVerifyFunctionWrapper
 .extern LLVMVerifyFunction
+.global LLVMRunFunctionPassManagerWrapper
+.extern LLVMRunFunctionPassManager
     
 .intel_syntax
 
@@ -209,4 +211,8 @@ LLVMVerifyModuleWrapper:
 
 LLVMVerifyFunctionWrapper:
     call LLVMVerifyFunction
+    ret
+
+LLVMRunFunctionPassManagerWrapper:
+    call LLVMRunFunctionPassManager
     ret
