@@ -3941,9 +3941,14 @@
     : u1
     "LLVMFinalizeFunctionPassManager")
 
-(defext llvm-add-demote-memory-to-register-pass
+(defext llvm-add-promote-memory-to-register-pass
     (manager (* LlvmPassManager))
-    "LLVMAddDemoteMemoryToRegisterPass")
+    "LLVMAddPromoteMemoryToRegisterPass")
+
+(defext llvm-is-constant
+    (value (* LlvmValue))
+    : u1
+    "LLVMIsConstant")
 
 
 
@@ -3973,7 +3978,22 @@
             ((: u64 (cast found))
                 found)
             (:else (seq
-                (let struct-llvm = (llvm-struct-create-named context "\0".ptr))
+                (let struct-name-null-term = (ref (new-vec (deref type).subtypes.A)))
+                (let i = 0)
+                (while (< i struct-name.len) (seqn
+                    (vec-push struct-name-null-term (get struct-name i))
+                    (set i = (+ i 1))))
+
+                (vec-push struct-name-null-term '.')
+
+                // TODO: make this based on types (it is not sufficient)
+                (let i = struct.monomorphisms.len)
+                (while (!= i 0) (seqn
+                    (let c = (+ '0' (cast (% i 10))))
+                    (vec-push struct-name-null-term c)
+                    (set i = (/ i 10))))
+                (vec-push struct-name-null-term '\0')
+                (let struct-llvm = (llvm-struct-create-named context (vec-slice struct-name-null-term).ptr))
                 (let fields = (ref (new-vec (deref struct-map).A)))
                 (let monomorphisms = (ref struct.monomorphisms))
                 (vec-push monomorphisms (inst Pair
@@ -4240,7 +4260,15 @@
 
                     ((str-equals symbol "alloca") (seq
                         (let length = (compile-helper (vec-get (ref (deref ast).children) 1) context module builder function break-block break-phi func-map var-map struct-map))
+                        (let current-block = (llvm-get-insert-block builder))
+                        (llvm-position-builder-before builder (llvm-get-basic-block-terminator (llvm-get-first-basic-block function)))
+                        (set length = (cond
+                            ((llvm-is-constant length)
+                                length)
+                            (:else
+                                (llvm-const-int (llvm-int-type-in-context context 64) 512 true))))
                         (let ptr = (llvm-build-array-alloca builder (ast-type-to-llvm-type context (deref ast).typed.boxed struct-map) length "\0".ptr))
+                        (llvm-position-builder-at-end builder current-block)
                         (let slice = (llvm-get-undef (ast-type-to-llvm-type context (ref (deref ast).typed) struct-map)))
                         (let slice = (llvm-build-insert-value builder slice ptr 0 "\0".ptr))
                         (llvm-build-insert-value builder slice length 1 "\0".ptr)))
@@ -4249,7 +4277,10 @@
                         (let value = (vec-get (ref (deref ast).children) 1))
                         (let type = (ast-type-to-llvm-type context (ref (deref value).typed) struct-map))
                         (let value = (compile-helper value context module builder function break-block break-phi func-map var-map struct-map))
+                        (let current-block = (llvm-get-insert-block builder))
+                        (llvm-position-builder-before builder (llvm-get-basic-block-terminator (llvm-get-first-basic-block function)))
                         (let alloc = (llvm-build-alloca builder type "\0".ptr))
+                        (llvm-position-builder-at-end builder current-block)
                         (llvm-build-store builder value alloc)
                         alloc))
 
@@ -4597,6 +4628,7 @@
                             struct-map))
                         (llvm-build-br builder loop-block)
                         (llvm-position-builder-at-end builder break-block)
+                        (vec-pop var-map)
                         (cond
                             ((and (== (deref ast).typed.type (TYPE_TYPE_TUPLE)) (== (deref ast).typed.subtypes.len 0))
                                 (null))
@@ -4788,7 +4820,7 @@
     (let module = (llvm-module-create-with-name-in-context "uwu" context))
     (let builder = (llvm-create-builder-in-context context))
     (let passes = (llvm-create-function-pass-manager-for-module module))
-    (llvm-add-demote-memory-to-register-pass passes)
+    (llvm-add-promote-memory-to-register-pass passes)
 
     (let func-map = (ref (new-vec (deref ast).children.A)))
     (: (* (Vec (Pair (@ u8) (Vec (Pair Type (* LlvmValue)))))) func-map)
@@ -4944,11 +4976,11 @@
                     var-map
                     struct-map))
                 (llvm-build-ret builder expr)
-                (llvm-run-function-pass-manager passes function))))
+                (llvm-run-function-pass-manager passes function)
+                (llvm-finalize-function-pass-manager passes))))
         (set i = (+ i 1))))
 
-    //(llvm-dump-module module)
-    (llvm-finalize-function-pass-manager passes)
+    (llvm-dump-module module)
     (llvm-verify-module module 0 (null))
 
     (llvm-initialize-all-target-infos)
