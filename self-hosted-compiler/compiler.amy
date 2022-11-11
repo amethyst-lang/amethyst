@@ -4,17 +4,6 @@
 // ==================================================================================================
 //
 
-(defext syscall
-    (call u64)
-    (a u64)
-    (b u64)
-    (c u64)
-    (d u64)
-    (e u64)
-    (f u64)
-    : u64
-    "syscall_")
-
 // Loops while a condition is true.
 (defmacro
     while condy
@@ -46,10 +35,16 @@
         (x 0)
         (:else 1)))
 
+(defext write
+    (fd i32)
+    (data (* u8))
+    (length u64)
+    "write")
+
 // Prints out a string onto stdout.
 (defun print (str (@ u8))
     (seqn
-        (syscall 1 1 (cast str.ptr) str.len 0 0 0)))
+        (write 1 str.ptr str.len)))
 
 // Helper function for printing out an integer
 (defun print-int-helper (i u64) (printer (fn ((@ u8))))
@@ -76,12 +71,12 @@
 // Prints out a string onto stderr.
 (defun eprint (str (@ u8))
     (seqn
-        (syscall 1 2 (cast str.ptr) str.len 0 0 0)))
+        (write 2 str.ptr str.len)))
 
 // Exits the program
-(defun exit (code i32)
-    (seqn
-        (syscall 60 (cast code) 0 0 0 0 0)))
+(defext exit
+    (code i32)
+    "exit")
 
 // Creates a subslice from a given slice and range.
 (defun subslice (s (@ 'a)) (start u64) (end u64) : (@ 'a)
@@ -99,6 +94,13 @@
 (defmacro FILE_OPEN_FLAG_CREATE     64)
 (defmacro FILE_OPEN_FLAG_TRUNCATE  512)
 
+(defext open
+    (filename (* u8))
+    (flags u64)
+    (mode u64)
+    : i32
+    "open")
+
 // Opens a file.
 (defun file-open (path (@ u8)) (flags u64) : File
     (seq
@@ -110,14 +112,20 @@
                 (set i = (+ i 1))))
         (set (get null-term i) = '\0')
         (inst File
-            (descriptor
-                (cast (syscall 2 (cast null-term.ptr) flags 438 0 0 0))))))
+            (descriptor (open null-term.ptr flags 438)))))
+
+(defext read
+    (fd i32)
+    (data (* u8))
+    (length u64)
+    : u64
+    "read")
 
 // Reads a file into a vec of u8s.
 (defun file-read-all (file File) (A (* Allocator)) : (Vec u8) (seq
     (let vec = (ref (new-vec A)))
     (let slice = (alloca 64))
-    (while (let len = (syscall 0 (cast file.descriptor) (cast slice.ptr) slice.len 0 0 0)) (seqn
+    (while (let len = (read file.descriptor slice.ptr slice.len)) (seqn
         (let i = 0)
         (while (< i len) (seqn
             (vec-push vec (get slice i))
@@ -125,7 +133,7 @@
     (deref vec)))
 
 (defun file-write (file File) (str (@ u8)) (seqn
-    (syscall 1 (cast file.descriptor) (cast str.ptr) (cast str.len) 0 0 0)))
+    (write file.descriptor str.ptr str.len)))
 
 (defun file-write-int (file File) (i u64)
     (cond
@@ -140,19 +148,38 @@
                 (set i = (/ i 10))))
             (file-write file (subslice p start (- p.len 1)))))))
 
+(defext close
+    (fd i32)
+    "close")
+
 // Closes a previously opened file.
 (defun file-close (file File)
     (seqn
-        (syscall 3 (cast file.descriptor) 0 0 0 0 0)))
+        (close file.descriptor)))
+
+(defext mmap-raw
+    (addr (* u8))
+    (length u64)
+    (prot i32)
+    (flags i32)
+    (fd i32)
+    (offset u64)
+    : (* u8)
+    "mmap")
 
 // Maps memory for the program.
 (defun mmap (len u64) : (* 'a)
-    (cast (syscall 9 0 len 3 34 (- 0 1) 0)))
+    (cast (mmap-raw (null) len 3 34 (- 0 1) 0)))
+
+(defext munmap-raw
+    (addr (* u8))
+    (len u64)
+    "munmap")
 
 // Unmaps memory previously mapped by mmap.
 (defun munmap (addr (* 'a)) (len u64)
     (seqn
-        (syscall 11 (cast addr) len 0 0 0 0)))
+        (munmap-raw (cast addr) len)))
 
 // Creates a null constant.
 (defun null : (* 'a)
@@ -5004,7 +5031,7 @@
 // ==================================================================================================
 //
 
-(defun main (argv (* (* u8))) (argc u64) : i32
+(defun main (argc u64) (argv (* (* u8))) : i32
 (seq
     (let filename = (get-argv argv 1))
     (cond
