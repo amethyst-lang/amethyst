@@ -3409,11 +3409,11 @@
 (defext llvm-create-builder-in-context
     (context (* LlvmContext))
     : (* LlvmBuilder)
-    "LLVMCreateBuilderInContextWrapper")
+    "LLVMCreateBuilderInContext")
 
 (defext llvm-dump-module
     (module (* LlvmModule))
-    "LLVMDumpModuleWrapper")
+    "LLVMDumpModule")
 
 (defstruct LlvmType)
 (defstruct LlvmValue)
@@ -3423,7 +3423,7 @@
     (name (* u8))
     (type (* LlvmType))
     : (* LlvmValue)
-    "LLVMAddFunctionWrapper")
+    "LLVMAddFunction")
 (defun llvm-add-function
     (module (* LlvmModule))
     (name (@ u8))
@@ -3445,7 +3445,7 @@
     (param-count u64)
     (variadic u1)
     : (* LlvmType)
-    "LLVMFunctionTypeWrapper")
+    "LLVMFunctionType")
 (defun llvm-function-type
     (return-type (* LlvmType))
     (param-types (@ (* LlvmType)))
@@ -3466,7 +3466,7 @@
     (function (* LlvmValue))
     (name (* u8))
     : (* LlvmBasicBlock)
-    "LLVMAppendBasicBlockInContextWrapper")
+    "LLVMAppendBasicBlockInContext")
 (defun llvm-append-basic-block-in-context
     (context (* LlvmContext))
     (function (* LlvmValue))
@@ -3498,14 +3498,14 @@
     (v u64)
     (sign-extend u1)
     : (* LlvmValue)
-    "LLVMConstIntWrapper")
+    "LLVMConstInt")
 
 (defext llvm-initialize-all-target-infos
     "LLVMInitializeX86TargetInfo")
 (defext llvm-initialize-all-targets
     "LLVMInitializeX86Target")
 (defext llvm-initialize-all-target-mcs
-    "LLVMInitializeX86TargetMCWrapper")
+    "LLVMInitializeX86TargetMC")
 (defext llvm-initialize-all-asm-parsers
     "LLVMInitializeX86AsmParser")
 (defext llvm-initialize-all-asm-printers
@@ -3535,7 +3535,7 @@
     (reloc-mode u64)
     (code-model u64)
     : (* LlvmTargetMachine)
-    "LLVMCreateTargetMachineWrapper")
+    "LLVMCreateTargetMachine")
 
 (defext llvm-target-machine-emit-to-file
     (target (* LlvmTargetMachine))
@@ -3544,7 +3544,7 @@
     (emit-object u1)
     (error-msg (* (* u8)))
     : u1
-    "LLVMTargetMachineEmitToFileWrapper")
+    "LLVMTargetMachineEmitToFile")
 
 (defext llvm-build-mul
     (builder (* LlvmBuilder))
@@ -3552,7 +3552,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildMulWrapper")
+    "LLVMBuildMul")
 
 (defext llvm-build-udiv
     (builder (* LlvmBuilder))
@@ -3560,7 +3560,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildUDivWrapper")
+    "LLVMBuildUDiv")
 
 (defext llvm-build-sdiv
     (builder (* LlvmBuilder))
@@ -3568,7 +3568,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildSDivWrapper")
+    "LLVMBuildSDiv")
 
 (defext llvm-build-urem
     (builder (* LlvmBuilder))
@@ -3576,7 +3576,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildURemWrapper")
+    "LLVMBuildURem")
 
 (defext llvm-build-srem
     (builder (* LlvmBuilder))
@@ -3584,7 +3584,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildSRemWrapper")
+    "LLVMBuildSRem")
 
 (defext llvm-build-add
     (builder (* LlvmBuilder))
@@ -3592,7 +3592,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildAddWrapper")
+    "LLVMBuildAdd")
 
 (defext llvm-build-sub
     (builder (* LlvmBuilder))
@@ -3600,7 +3600,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildSubWrapper")
+    "LLVMBuildSub")
 
 (defext llvm-build-shl
     (builder (* LlvmBuilder))
@@ -3608,7 +3608,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildShlWrapper")
+    "LLVMBuildShl")
 
 (defext llvm-build-lshr
     (builder (* LlvmBuilder))
@@ -3616,7 +3616,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildLShrWrapper")
+    "LLVMBuildLShr")
 
 (defext llvm-build-and
     (builder (* LlvmBuilder))
@@ -3624,7 +3624,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildAndWrapper")
+    "LLVMBuildAnd")
 
 (defext llvm-build-or
     (builder (* LlvmBuilder))
@@ -3632,7 +3632,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildOrWrapper")
+    "LLVMBuildOr")
 
 (defext llvm-build-xor
     (builder (* LlvmBuilder))
@@ -3640,7 +3640,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildXorWrapper")
+    "LLVMBuildXor")
 
 (defmacro LLVM_INT_PREDICATE_EQ  32)
 (defmacro LLVM_INT_PREDICATE_NE  33)
@@ -3659,7 +3659,7 @@
     (b (* LlvmValue))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildICmpWrapper")
+    "LLVMBuildICmp")
 
 (defext llvm-build-br
     (builder (* LlvmBuilder))
@@ -3736,7 +3736,7 @@
     (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildAllocaWrapper")
+    "LLVMBuildAlloca")
 
 (defext llvm-build-load
     (builder (* LlvmBuilder))
@@ -3774,7 +3774,7 @@
     (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildTruncWrapper")
+    "LLVMBuildTrunc")
 
 (defext llvm-build-zext
     (builder (* LlvmBuilder))
@@ -3782,7 +3782,7 @@
     (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildZExtWrapper")
+    "LLVMBuildZExt")
 
 (defext llvm-build-sext
     (builder (* LlvmBuilder))
@@ -3790,7 +3790,7 @@
     (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildSExtWrapper")
+    "LLVMBuildSExt")
 
 (defext llvm-build-ptr-to-int
     (builder (* LlvmBuilder))
@@ -3798,7 +3798,7 @@
     (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildPtrToIntWrapper")
+    "LLVMBuildPtrToInt")
 
 (defext llvm-build-int-to-ptr
     (builder (* LlvmBuilder))
@@ -3824,7 +3824,7 @@
     (index-count u64)
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildGEP2Wrapper")
+    "LLVMBuildGEP2")
 
 (defext llvm-const-null
     (type (* LlvmType))
@@ -3844,14 +3844,14 @@
     (element-count u64)
     (packed u1)
     : (* LlvmType)
-    "LLVMStructTypeInContextWrapper")
+    "LLVMStructTypeInContext")
 
 (defext llvm-build-global-string-ptr
     (builder (* LlvmBuilder))
     (string (* u8))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildGlobalStringPtrWrapper")
+    "LLVMBuildGlobalStringPtr")
 
 (defext llvm-const-struct-in-context
     (context (* LlvmContext))
@@ -3859,7 +3859,7 @@
     (field-count u64)
     (packed u1)
     : (* LlvmValue)
-    "LLVMConstStructInContextWrapper")
+    "LLVMConstStructInContext")
 
 (defext llvm-build-array-alloca
     (builder (* LlvmBuilder))
@@ -3881,7 +3881,7 @@
     (index u64)
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildInsertValueWrapper")
+    "LLVMBuildInsertValue")
 
 (defext llvm-build-extract-value
     (builder (* LlvmBuilder))
@@ -3909,13 +3909,13 @@
     (action u64)
     (msg (* (* u8)))
     : u1
-    "LLVMVerifyModuleWrapper")
+    "LLVMVerifyModule")
 
 (defext llvm-verify-function
     (function (* LlvmValue))
     (action u64)
     : u1
-    "LLVMVerifyFunctionWrapper")
+    "LLVMVerifyFunction")
 
 (defmacro LLVM_LINKAGE_EXTERNAL 0)
 (defext llvm-set-linkage
@@ -3934,7 +3934,7 @@
     (manager (* LlvmPassManager))
     (function (* LlvmValue))
     : u1
-    "LLVMRunFunctionPassManagerWrapper")
+    "LLVMRunFunctionPassManager")
 
 (defext llvm-finalize-function-pass-manager
     (manager (* LlvmPassManager))

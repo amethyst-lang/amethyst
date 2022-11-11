@@ -29,6 +29,8 @@ section .note.openbsd.ident
 _start:
     pop rsi
     mov rdi, rsp
+	push rsi
+	and rsp, -16
     call main
     mov rdi, rax
     mov rax, SYS_exit
