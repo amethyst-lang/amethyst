@@ -3853,6 +3853,13 @@
     : (* LlvmValue)
     "LLVMBuildGEP2")
 
+(defext llvm-const-in-bounds-gep
+    (pointer (* LlvmValue))
+    (indexes (* (* LlvmValue)))
+    (index-count u64)
+    : (* LlvmValue)
+    "LLVMConstInBoundsGEP")
+
 (defext llvm-const-null
     (type (* LlvmType))
     : (* LlvmValue)
@@ -3873,12 +3880,30 @@
     : (* LlvmType)
     "LLVMStructTypeInContext")
 
-(defext llvm-build-global-string-ptr
-    (builder (* LlvmBuilder))
+(defext llvm-const-string-in-context
+    (context (* LlvmContext))
     (string (* u8))
+    (length u64)
+    (dont-null-terminate u1)
+    : (* LlvmValue)
+    "LLVMConstStringInContext")
+
+(defext llvm-add-global
+    (module (* LlvmModule))
+    (type (* LlvmType))
     (name (* u8))
     : (* LlvmValue)
-    "LLVMBuildGlobalStringPtr")
+    "LLVMAddGlobal")
+
+(defext llvm-set-initializer
+    (global (* LlvmValue))
+    (init (* LlvmValue))
+    "LLVMSetInitializer")
+
+(defext llvm-set-global-constant
+    (global (* LlvmValue))
+    (constant u1)
+    "LLVMSetGlobalConstant")
 
 (defext llvm-const-struct-in-context
     (context (* LlvmContext))
@@ -3945,6 +3970,7 @@
     "LLVMVerifyFunction")
 
 (defmacro LLVM_LINKAGE_EXTERNAL 0)
+(defmacro LLVM_LINKAGE_INTERNAL 0)
 (defext llvm-set-linkage
     (value (* LlvmValue))
     (linkage u64)
@@ -3976,6 +4002,10 @@
     (value (* LlvmValue))
     : u1
     "LLVMIsConstant")
+
+(defext llvm-dump-value
+    (value (* LlvmValue))
+    "LLVMDumpValue")
 
 
 
@@ -4210,8 +4240,16 @@
                 (:else
                     (vec-push value c)))
             (set i = (+ i 1))))
-        (vec-push value 0)
-        (let string-ptr = (llvm-build-global-string-ptr builder (vec-slice value).ptr "\0".ptr))
+        (let string-array = (llvm-const-string-in-context context (vec-slice value).ptr (deref value).len true))
+        (let string-global = (llvm-add-global module (llvm-type-of string-array) "".ptr))
+        (llvm-set-initializer string-global string-array)
+        (llvm-set-global-constant string-global true)
+        (llvm-set-linkage string-global (LLVM_LINKAGE_INTERNAL))
+        (let gep-args = (alloca 2))
+        (set (get gep-args 0) = (llvm-const-int (llvm-int-type-in-context context 32) 0 false))
+        (set (get gep-args 1) = (llvm-const-int (llvm-int-type-in-context context 32) 0 false))
+        (let string-ptr = (llvm-const-in-bounds-gep string-global gep-args.ptr gep-args.len))
+
         (let length = (llvm-const-int (llvm-int-type-in-context context 64) (- (deref value).len 1) false))
         (let fields = (alloca 2))
         (set (get fields 0) = string-ptr)
@@ -4937,6 +4975,7 @@
                                     (set i = (/ i 10))))))
                             (:else (seqn
                                 (vec-push name-vec '0')))))))
+                (vec-push name-vec '\0')
                 (let function = (llvm-add-function module (vec-slice name-vec) signature))
                 (cond
                     ((str-equals v.value "defext")
