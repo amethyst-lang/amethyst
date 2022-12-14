@@ -4250,7 +4250,7 @@
         (set (get gep-args 1) = (llvm-const-int (llvm-int-type-in-context context 32) 0 false))
         (let string-ptr = (llvm-const-in-bounds-gep string-global gep-args.ptr gep-args.len))
 
-        (let length = (llvm-const-int (llvm-int-type-in-context context 64) (- (deref value).len 1) false))
+        (let length = (llvm-const-int (llvm-int-type-in-context context 64) (deref value).len false))
         (let fields = (alloca 2))
         (set (get fields 0) = string-ptr)
         (set (get fields 1) = length)
