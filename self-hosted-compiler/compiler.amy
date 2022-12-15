@@ -3970,7 +3970,6 @@
     "LLVMVerifyFunction")
 
 (defmacro LLVM_LINKAGE_EXTERNAL 0)
-(defmacro LLVM_LINKAGE_INTERNAL 0)
 (defext llvm-set-linkage
     (value (* LlvmValue))
     (linkage u64)
@@ -4244,7 +4243,6 @@
         (let string-global = (llvm-add-global module (llvm-type-of string-array) "".ptr))
         (llvm-set-initializer string-global string-array)
         (llvm-set-global-constant string-global true)
-        (llvm-set-linkage string-global (LLVM_LINKAGE_INTERNAL))
         (let gep-args = (alloca 2))
         (set (get gep-args 0) = (llvm-const-int (llvm-int-type-in-context context 32) 0 false))
         (set (get gep-args 1) = (llvm-const-int (llvm-int-type-in-context context 32) 0 false))
@@ -5046,8 +5044,8 @@
                 (llvm-finalize-function-pass-manager passes))))
         (set i = (+ i 1))))
 
-    (llvm-dump-module module)
     (llvm-verify-module module 0 (null))
+    (llvm-dump-module module)
 
     (llvm-initialize-all-target-infos)
     (llvm-initialize-all-targets)
