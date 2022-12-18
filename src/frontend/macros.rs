@@ -134,10 +134,9 @@ fn replace_macro_args<'input>(
             }
         }
 
-        Ast::Attribute(_, attrs) => {
-            for attr in attrs {
-                replace_macro_args(attr, map, args);
-            }
+        Ast::Attribute(_, top, attr) => {
+            replace_macro_args(top, map, args);
+            replace_macro_args(attr, map, args);
         }
     }
 }
@@ -190,12 +189,11 @@ fn replace_macros_helper<'input>(
             }
         },
 
-        Ast::Attribute(_, attrs) => {
+        Ast::Attribute(_, top, attr) => {
             let mut updated = false;
-            for attr in attrs {
-                if replace_macros_helper(map, attr) {
-                    updated = true;
-                }
+            let did_on_top = replace_macros_helper(map, top);
+            if replace_macros_helper(map, attr) || did_on_top {
+                updated = true;
             }
 
             updated

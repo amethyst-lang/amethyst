@@ -614,41 +614,6 @@ impl Generator {
                         result
                     }
 
-                    SExpr::Symbol { value: "ref", .. } => {
-                        if let SExprType::Pointer(_, t) = &meta.type_ {
-                            let value = &values[0];
-                            let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                                StackSlotKind::ExplicitSlot,
-                                Self::size_of(&**t, structs),
-                            ));
-                            for (&value, (offset, _)) in
-                                value.iter().zip(Self::offsets_and_sizes_of(&**t, structs))
-                            {
-                                builder.ins().stack_store(value, slot, offset);
-                            }
-                            vec![builder.ins().stack_addr(
-                                Self::convert_type_to_type(&meta.type_, structs)[0],
-                                slot,
-                                0,
-                            )]
-                        } else {
-                            unreachable!();
-                        }
-                    }
-
-                    SExpr::Symbol { value: "deref", .. } => {
-                        let ptr = values[0][0];
-                        let mut result = vec![];
-                        let offsets = Self::offsets_and_sizes_of(&meta.type_, structs);
-                        for (t, (offset, _)) in Self::convert_type_to_type(&meta.type_, structs)
-                            .into_iter()
-                            .zip(offsets)
-                        {
-                            result.push(builder.ins().load(t, MemFlags::new(), ptr, offset));
-                        }
-                        result
-                    }
-
                     SExpr::Symbol {
                         value: "&" | "and", ..
                     } => {
@@ -902,7 +867,7 @@ impl Generator {
             }
 
             SExpr::Assign {
-                lvalue: LValue::Attribute(var, attrs),
+                lvalue: LValue::Attribute(var, attr),
                 value,
                 ..
             } if matches!(**var, LValue::Symbol(_)) => {
@@ -925,49 +890,47 @@ impl Generator {
                             let mut t = t.clone();
                             let mut i = 0;
                             let mut v = &val[..];
-                            for attr in attrs.iter() {
-                                if let SExprType::Struct(name, generics) = &t {
-                                    if let Some(struct_) = structs.get(name) {
-                                        let (j, (_, u)) = struct_
-                                            .fields
-                                            .iter()
-                                            .enumerate()
-                                            .find(|(_, (v, _))| v == attr)
-                                            .unwrap();
-                                        let mut map = struct_
-                                            .generics
-                                            .iter()
-                                            .zip(generics)
-                                            .map(|(g, t)| {
-                                                if let &SExprType::Generic(g) = g {
-                                                    (g, t.clone())
-                                                } else {
-                                                    unreachable!();
-                                                }
-                                            })
-                                            .collect();
-                                        let mut tvc = 0;
-                                        let j: usize = struct_
-                                            .fields
-                                            .iter()
-                                            .take(j)
-                                            .map(|(_, t)| {
-                                                let mut t = t.clone();
-                                                t.replace_generics(&mut tvc, &mut map);
-                                                Self::convert_type_to_type(&t, structs).len()
-                                            })
-                                            .sum();
-                                        i += j;
-                                        t = u.clone();
-                                        t.replace_generics(&mut tvc, &mut map);
-                                        v = &val
-                                            [i..i + Self::convert_type_to_type(&t, structs).len()];
-                                    } else {
-                                        unreachable!()
-                                    }
+                            if let SExprType::Struct(name, generics) = &t {
+                                if let Some(struct_) = structs.get(name) {
+                                    let (j, (_, u)) = struct_
+                                        .fields
+                                        .iter()
+                                        .enumerate()
+                                        .find(|(_, (v, _))| v == attr)
+                                        .unwrap();
+                                    let mut map = struct_
+                                        .generics
+                                        .iter()
+                                        .zip(generics)
+                                        .map(|(g, t)| {
+                                            if let &SExprType::Generic(g) = g {
+                                                (g, t.clone())
+                                            } else {
+                                                unreachable!();
+                                            }
+                                        })
+                                        .collect();
+                                    let mut tvc = 0;
+                                    let j: usize = struct_
+                                        .fields
+                                        .iter()
+                                        .take(j)
+                                        .map(|(_, t)| {
+                                            let mut t = t.clone();
+                                            t.replace_generics(&mut tvc, &mut map);
+                                            Self::convert_type_to_type(&t, structs).len()
+                                        })
+                                        .sum();
+                                    i += j;
+                                    t = u.clone();
+                                    t.replace_generics(&mut tvc, &mut map);
+                                    v = &val
+                                        [i..i + Self::convert_type_to_type(&t, structs).len()];
                                 } else {
-                                    unreachable!();
+                                    unreachable!()
                                 }
+                            } else {
+                                unreachable!();
                             }
 
                             for (&var, &val) in v.iter().zip(value.iter()) {
@@ -1022,7 +985,7 @@ impl Generator {
                 values
             }
 
-            SExpr::Attribute { top, attrs, .. } => {
+            SExpr::Attribute { top, attr, .. } => {
                 let val = Self::translate_expr(
                     top,
                     builder,
@@ -1048,7 +1011,7 @@ impl Generator {
                         ptr: 64..127
                     }
                     */
-                    SExprType::Slice(_, _) => match attrs[0] {
+                    SExprType::Slice(_, _) => match *attr {
                         "len" | "cap" => {
                             vec![val[0]]
                         }
@@ -1064,60 +1027,58 @@ impl Generator {
                         let mut v = &val[..];
                         let mut t = top.meta().type_.clone();
                         let mut i = 0;
-                        for attr in attrs.iter() {
-                            if let SExprType::Struct(name, generics) = t {
-                                if let Some(struct_) = structs.get(name) {
-                                    let (j, (_, u)) = struct_
-                                        .fields
-                                        .iter()
-                                        .enumerate()
-                                        .find(|(_, (v, _))| v == attr)
-                                        .unwrap();
-                                    let mut map = struct_
-                                        .generics
-                                        .iter()
-                                        .zip(generics)
-                                        .map(|(g, t)| {
-                                            if let &SExprType::Generic(g) = g {
-                                                (g, t.clone())
-                                            } else {
-                                                unreachable!();
-                                            }
-                                        })
-                                        .collect();
-                                    let mut tvc = 0;
-                                    let j: usize = struct_
-                                        .fields
-                                        .iter()
-                                        .take(j)
-                                        .map(|(_, t)| {
-                                            let mut t = t.clone();
-                                            t.replace_generics(&mut tvc, &mut map);
-                                            Self::convert_type_to_type(&t, structs).len()
-                                        })
-                                        .sum();
-                                    i += j;
-                                    t = u.clone();
-                                    t.replace_generics(&mut tvc, &mut map);
-                                    v = &val[i..i + Self::convert_type_to_type(&t, structs).len()];
-                                } else {
-                                    unreachable!();
-                                }
-                            } else if let SExprType::Slice(_, _) = t {
-                                match *attr {
-                                    "len" | "cap" => {
-                                        return vec![val[i]];
-                                    }
-
-                                    "ptr" => {
-                                        return vec![val[i + 1]];
-                                    }
-
-                                    _ => unreachable!(),
-                                }
+                        if let SExprType::Struct(name, generics) = t {
+                            if let Some(struct_) = structs.get(name) {
+                                let (j, (_, u)) = struct_
+                                    .fields
+                                    .iter()
+                                    .enumerate()
+                                    .find(|(_, (v, _))| v == attr)
+                                    .unwrap();
+                                let mut map = struct_
+                                    .generics
+                                    .iter()
+                                    .zip(generics)
+                                    .map(|(g, t)| {
+                                        if let &SExprType::Generic(g) = g {
+                                            (g, t.clone())
+                                        } else {
+                                            unreachable!();
+                                        }
+                                    })
+                                    .collect();
+                                let mut tvc = 0;
+                                let j: usize = struct_
+                                    .fields
+                                    .iter()
+                                    .take(j)
+                                    .map(|(_, t)| {
+                                        let mut t = t.clone();
+                                        t.replace_generics(&mut tvc, &mut map);
+                                        Self::convert_type_to_type(&t, structs).len()
+                                    })
+                                    .sum();
+                                i += j;
+                                t = u.clone();
+                                t.replace_generics(&mut tvc, &mut map);
+                                v = &val[i..i + Self::convert_type_to_type(&t, structs).len()];
                             } else {
                                 unreachable!();
                             }
+                        } else if let SExprType::Slice(_, _) = t {
+                            match *attr {
+                                "len" | "cap" => {
+                                    return vec![val[i]];
+                                }
+
+                                "ptr" => {
+                                    return vec![val[i + 1]];
+                                }
+
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            unreachable!();
                         }
 
                         v.to_vec()
@@ -1131,6 +1092,52 @@ impl Generator {
                 Self::convert_type_to_type(&meta.type_, structs)[0],
                 Self::size_of(type_, structs) as i64,
             )],
+
+            SExpr::Ref { meta, value } => {
+                if let SExprType::Pointer(_, t) = &meta.type_ {
+                    let value = &values[0];
+                    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        Self::size_of(&**t, structs),
+                    ));
+                    for (&value, (offset, _)) in
+                        value.iter().zip(Self::offsets_and_sizes_of(&**t, structs))
+                    {
+                        builder.ins().stack_store(value, slot, offset);
+                    }
+                    vec![builder.ins().stack_addr(
+                        Self::convert_type_to_type(&meta.type_, structs)[0],
+                        slot,
+                        0,
+                    )]
+                } else {
+                    unreachable!();
+                }
+            }
+
+            SExpr::Deref { meta, value } => {
+                let ptr = Self::translate_expr(
+                    value,
+                    builder,
+                    var_map,
+                    var_index,
+                    break_block,
+                    module,
+                    ctx,
+                    data_ctx,
+                    structs,
+                    externals,
+                    )[0];
+                let mut result = vec![];
+                let offsets = Self::offsets_and_sizes_of(&meta.type_, structs);
+                for (t, (offset, _)) in Self::convert_type_to_type(&meta.type_, structs)
+                    .into_iter()
+                    .zip(offsets)
+                {
+                    result.push(builder.ins().load(t, MemFlags::new(), ptr, offset));
+                }
+                result
+            }
 
             _ => todo!(),
         }
@@ -1163,7 +1170,7 @@ impl Generator {
                 unreachable!("variable was typechecked");
             }
 
-            LValue::Attribute(v, attrs) => {
+            LValue::Attribute(v, attr) => {
                 let (val, mut t) = Self::get_pointer(
                     &**v,
                     builder,
@@ -1177,51 +1184,49 @@ impl Generator {
                     externals,
                 );
                 let mut offset = 0;
-                for attr in attrs.iter() {
-                    if let SExprType::Struct(name, generics) = t {
-                        if let Some(struct_) = structs.get(name) {
-                            let (j, (_, u)) = struct_
-                                .fields
-                                .iter()
-                                .enumerate()
-                                .find(|(_, (v, _))| v == attr)
-                                .unwrap();
-                            let mut map = struct_
-                                .generics
-                                .iter()
-                                .zip(&generics)
-                                .map(|(g, t)| {
-                                    if let &SExprType::Generic(g) = g {
-                                        (g, t.clone())
-                                    } else {
-                                        unreachable!();
-                                    }
-                                })
-                                .collect();
-                            let mut tvc = 0;
-                            let j: usize = struct_
-                                .fields
-                                .iter()
-                                .take(j)
-                                .map(|(_, t)| {
-                                    let mut t = t.clone();
-                                    t.replace_generics(&mut tvc, &mut map);
-                                    Self::convert_type_to_type(&t, structs).len()
-                                })
-                                .sum();
-                            offset += Self::offsets_and_sizes_of(
-                                &SExprType::Struct(name, generics),
-                                structs,
-                            )[j]
-                                .0;
-                            t = u.clone();
-                            t.replace_generics(&mut tvc, &mut map);
-                        } else {
-                            unreachable!()
-                        }
+                if let SExprType::Struct(name, generics) = t {
+                    if let Some(struct_) = structs.get(name) {
+                        let (j, (_, u)) = struct_
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .find(|(_, (v, _))| v == attr)
+                            .unwrap();
+                        let mut map = struct_
+                            .generics
+                            .iter()
+                            .zip(&generics)
+                            .map(|(g, t)| {
+                                if let &SExprType::Generic(g) = g {
+                                    (g, t.clone())
+                                } else {
+                                    unreachable!();
+                                }
+                            })
+                            .collect();
+                        let mut tvc = 0;
+                        let j: usize = struct_
+                            .fields
+                            .iter()
+                            .take(j)
+                            .map(|(_, t)| {
+                                let mut t = t.clone();
+                                t.replace_generics(&mut tvc, &mut map);
+                                Self::convert_type_to_type(&t, structs).len()
+                            })
+                            .sum();
+                        offset += Self::offsets_and_sizes_of(
+                            &SExprType::Struct(name, generics),
+                            structs,
+                        )[j]
+                            .0;
+                        t = u.clone();
+                        t.replace_generics(&mut tvc, &mut map);
                     } else {
-                        unreachable!();
+                        unreachable!()
                     }
+                } else {
+                    unreachable!();
                 }
 
                 (

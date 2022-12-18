@@ -20,7 +20,7 @@ pub enum Ast<'a> {
     Splice(Range<usize>, Box<Ast<'a>>),
 
     SExpr(Range<usize>, Vec<Ast<'a>>),
-    Attribute(Range<usize>, Vec<Ast<'a>>),
+    Attribute(Range<usize>, Box<Ast<'a>>, Box<Ast<'a>>),
 }
 
 impl<'a> Ast<'a> {
@@ -37,7 +37,7 @@ impl<'a> Ast<'a> {
             | Ast::Backtick(s, _)
             | Ast::Splice(s, _)
             | Ast::SExpr(s, _)
-            | Ast::Attribute(s, _) => s.clone(),
+            | Ast::Attribute(s, _, _) => s.clone(),
         }
     }
 }

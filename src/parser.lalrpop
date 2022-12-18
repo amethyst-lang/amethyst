@@ -78,20 +78,17 @@ Key: Ast<'input> =
 SExpr: Ast<'input> =
     <s:@L> "(" <v:Attribute*> ")" <e:@R> => Ast::SExpr(s..e, v);
 
-AttributeElement: Ast<'input> = {
-    <Symbol>,
-    <SExpr>
-};
+// AttributeElement: Ast<'input> = {
+    // <Symbol>,
+    // <SExpr>
+// };
 
-Attribute: Ast<'input> =
-    <s:PrefixOp> <mut a:("." <AttributeElement>)*> => {
-        if a.is_empty() {
-            s
-        } else {
-            a.insert(0, s);
-            Ast::Attribute(a.first().unwrap().span().start..a.last().unwrap().span().end, a)
-        }
-    };
+Attribute: Ast<'input> = {
+    PrefixOp,
+    <s:Attribute> "." <a:Symbol> => {
+        Ast::Attribute(s.span().start..a.span().end, Box::new(s), Box::new(a))
+    }
+};
 
 Value: Ast<'input> = {
     <Int>,

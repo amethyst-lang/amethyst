@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::process::Command;
 
 use amethyst::backend::Generator;
 use amethyst::frontend::{ast_lowering, correctness, macros};
@@ -8,7 +7,7 @@ use amethyst::parser::TopParser;
 fn main() {
     let contents = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
     let output = std::env::args().nth(2).unwrap_or_else(|| String::from("a.out"));
-    let object = output.clone() + ".o";
+    let object = output + ".o";
 
     let mut asts = TopParser::new().parse(&contents).unwrap();
     let mut map = HashMap::new();

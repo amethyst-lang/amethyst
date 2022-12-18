@@ -380,16 +380,12 @@ fn traverse_sexpr<'a>(
             substitute(&mut value.meta_mut().type_, &meta.type_, substitutions, coercions)
         }
 
-        SExpr::Attribute { meta, top, attrs } => {
+        SExpr::Attribute { meta, top, attr } => {
             traverse_sexpr(&mut **top, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
 
             match &top.meta().type_ {
                 Type::Slice(_, t) => {
-                    if attrs.len() != 1 {
-                        todo!("error handling");
-                    }
-
-                    match attrs[0] {
+                    match *attr {
                         "ptr" => {
                             substitute(&mut meta.type_, &Type::Pointer(true, t.clone()), substitutions, coercions)
                         }
@@ -404,53 +400,51 @@ fn traverse_sexpr<'a>(
 
                 Type::Struct(_, _) => {
                     let mut t = top.meta().type_.clone();
-                    for &mut attr in attrs {
-                        while let Type::TypeVariable(i) = t {
-                            if let Some(u) = substitutions.get(&i) {
-                                t = u.clone();
+                    while let Type::TypeVariable(i) = t {
+                        if let Some(u) = substitutions.get(&i) {
+                            t = u.clone();
+                        } else {
+                            todo!("error handling");
+                        }
+                    }
+
+                    match t {
+                        Type::Slice(_, u) => {
+                            match *attr {
+                                "ptr" => {
+                                    t = Type::Pointer(true, u.clone());
+                                }
+
+                                "len" | "cap" => {
+                                    t = Type::Int(false, 64);
+                                }
+
+                                _ => todo!("error handling"),
+                            }
+                        }
+
+                        Type::Struct(name, generics) => {
+                            if let Some(struct_) = struct_map.get(name) {
+                                let mut map = struct_.generics.iter().zip(generics).map(|(key, val)| {
+                                    if let &Type::Generic(key) = key {
+                                        (key, val)
+                                    } else {
+                                        unreachable!();
+                                    }
+                                }).collect();
+
+                                if let Some((_, typ)) = struct_.fields.iter().find(|(v, _)| v == attr) {
+                                    t = typ.clone();
+                                    t.replace_generics(type_var_counter, &mut map);
+                                } else {
+                                    todo!("error handling");
+                                }
                             } else {
                                 todo!("error handling");
                             }
                         }
 
-                        match t {
-                            Type::Slice(_, u) => {
-                                match attr {
-                                    "ptr" => {
-                                        t = Type::Pointer(true, u.clone());
-                                    }
-
-                                    "len" | "cap" => {
-                                        t = Type::Int(false, 64);
-                                    }
-
-                                    _ => todo!("error handling"),
-                                }
-                            }
-
-                            Type::Struct(name, generics) => {
-                                if let Some(struct_) = struct_map.get(name) {
-                                    let mut map = struct_.generics.iter().zip(generics).map(|(key, val)| {
-                                        if let &Type::Generic(key) = key {
-                                            (key, val)
-                                        } else {
-                                            unreachable!();
-                                        }
-                                    }).collect();
-
-                                    if let Some((_, typ)) = struct_.fields.iter().find(|(v, _)| *v == attr) {
-                                        t = typ.clone();
-                                        t.replace_generics(type_var_counter, &mut map);
-                                    } else {
-                                        todo!("error handling");
-                                    }
-                                } else {
-                                    todo!("error handling");
-                                }
-                            }
-
-                            _ => todo!("error handling"),
-                        }
+                        _ => todo!("error handling"),
                     }
 
                     substitute(&mut meta.type_, &t, substitutions, coercions)
@@ -461,6 +455,18 @@ fn traverse_sexpr<'a>(
         }
 
         SExpr::SizeOf { .. } => Ok(()),
+
+        SExpr::Ref { meta, value } => {
+            let t = traverse_lvalue(value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+            let t = Type::Pointer(false, Box::new(t));
+            substitute(&mut meta.type_, &t, substitutions, coercions)
+        }
+
+        SExpr::Deref { meta, value } => {
+            traverse_sexpr(value, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
+            let t = Type::Pointer(false, Box::new(meta.type_.clone()));
+            substitute(&mut value.meta_mut().type_, &t, substitutions, coercions)
+        }
     }
 }
 
@@ -487,39 +493,37 @@ fn traverse_lvalue<'a>(
             todo!("error handling");
         }
 
-        LValue::Attribute(v, attrs) => {
+        LValue::Attribute(v, attr) => {
             let mut t = traverse_lvalue(&mut **v, type_var_counter, substitutions, coercions, func_map, struct_map, monomorphisms, scopes, break_type)?;
-            for &mut attr in attrs {
-                while let Type::TypeVariable(i) = t {
-                    if let Some(u) = substitutions.get(&i) {
-                        t = u.clone();
-                    } else {
-                        todo!("error handling");
-                    }
+            while let Type::TypeVariable(i) = t {
+                if let Some(u) = substitutions.get(&i) {
+                    t = u.clone();
+                } else {
+                    todo!("error handling");
                 }
+            }
 
-                if let Type::Struct(name, generics) = t {
-                    if let Some(struct_) = struct_map.get(name) {
-                        let mut map = struct_.generics.iter().zip(generics).map(|(key, val)| {
-                            if let &Type::Generic(key) = key {
-                                (key, val)
-                            } else {
-                                unreachable!();
-                            }
-                        }).collect();
-
-                        if let Some((_, typ)) = struct_.fields.iter().find(|(v, _)| *v == attr) {
-                            t = typ.clone();
-                            t.replace_generics(type_var_counter, &mut map);
+            if let Type::Struct(name, generics) = t {
+                if let Some(struct_) = struct_map.get(name) {
+                    let mut map = struct_.generics.iter().zip(generics).map(|(key, val)| {
+                        if let &Type::Generic(key) = key {
+                            (key, val)
                         } else {
-                            todo!("error handling for {}", attr);
+                            unreachable!();
                         }
+                    }).collect();
+
+                    if let Some((_, typ)) = struct_.fields.iter().find(|(v, _)| v == attr) {
+                        t = typ.clone();
+                        t.replace_generics(type_var_counter, &mut map);
                     } else {
-                        todo!("error handling");
+                        todo!("error handling for {}", attr);
                     }
                 } else {
                     todo!("error handling");
                 }
+            } else {
+                todo!("error handling");
             }
 
             Ok(t)
@@ -662,6 +666,9 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, T
         SExpr::Attribute { top, .. } => apply_substitutions(&mut **top, substitutions),
 
         SExpr::SizeOf { type_, .. } => flatten_substitution(type_, substitutions),
+
+        SExpr::Ref { value, .. } => apply_lvalue_substitutions(&mut **value, substitutions),
+        SExpr::Deref { value, .. } => apply_substitutions(&mut **value, substitutions),
 
         _ => (),
     }
@@ -839,6 +846,9 @@ fn update_generic_refs<'a>(expr: &mut SExpr<'a>, map: &mut HashMap<&'a str, Type
             type_.replace_generics(&mut tvc, map);
         }
 
+        SExpr::Ref { value, .. } => update_generic_refs_lvalue(&mut **value, map),
+        SExpr::Deref { value, .. } => update_generic_refs(&mut **value, map),
+
         _ => (),
     }
 }
@@ -999,24 +1009,6 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
         Signature {
             arg_types: vec![Type::Int(false, 64)],
             ret_type: Type::Slice(true, Box::new(Type::Generic("a"))),
-            index: None,
-            linkage: SignatureLinkage::Builtin,
-        },
-    );
-    map.insert(
-        "ref",
-        Signature {
-            arg_types: vec![Type::Generic("a")],
-            ret_type: Type::Pointer(true, Box::new(Type::Generic("a"))),
-            index: None,
-            linkage: SignatureLinkage::Builtin,
-        },
-    );
-    map.insert(
-        "deref",
-        Signature {
-            arg_types: vec![Type::Pointer(true, Box::new(Type::Generic("a")))],
-            ret_type: Type::Generic("a"),
             index: None,
             linkage: SignatureLinkage::Builtin,
         },

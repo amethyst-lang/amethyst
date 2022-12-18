@@ -161,7 +161,7 @@ impl<'a> Type<'a> {
 #[derive(Debug, Clone)]
 pub enum LValue<'a> {
     Symbol(&'a str),
-    Attribute(Box<LValue<'a>>, Vec<&'a str>),
+    Attribute(Box<LValue<'a>>, &'a str),
     Deref(Box<LValue<'a>>),
     Get(Box<LValue<'a>>, Box<SExpr<'a>>),
 }
@@ -289,13 +289,23 @@ pub enum SExpr<'a> {
     Attribute {
         meta: Metadata<'a>,
         top: Box<SExpr<'a>>,
-        attrs: Vec<&'a str>,
+        attr: &'a str,
     },
 
     SizeOf {
         meta: Metadata<'a>,
         type_: Type<'a>,
     },
+
+    Ref {
+        meta: Metadata<'a>,
+        value: Box<LValue<'a>>,
+    },
+
+    Deref {
+        meta: Metadata<'a>,
+        value: Box<SExpr<'a>>,
+    }
 }
 
 impl<'a> SExpr<'a> {
@@ -324,7 +334,9 @@ impl<'a> SExpr<'a> {
             | SExpr::Declare { meta, .. }
             | SExpr::Assign { meta, .. }
             | SExpr::Attribute { meta, .. }
-            | SExpr::SizeOf { meta, ..} => meta,
+            | SExpr::SizeOf { meta, .. }
+            | SExpr::Ref { meta, .. }
+            | SExpr::Deref { meta, .. } => meta,
         }
     }
 
@@ -353,7 +365,9 @@ impl<'a> SExpr<'a> {
             | SExpr::Declare { meta, .. }
             | SExpr::Assign { meta, .. }
             | SExpr::Attribute { meta, .. }
-            | SExpr::SizeOf { meta, ..} => meta,
+            | SExpr::SizeOf { meta, .. }
+            | SExpr::Ref { meta, .. }
+            | SExpr::Deref { meta, .. } => meta,
         }
     }
 }
@@ -974,59 +988,41 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
             }
         }
 
-        Ast::Attribute(range, mut attrs_raw) => {
-            let top = attrs_raw.remove(0);
-            let mut top = lower_helper(top, quoting)?;
+        Ast::Attribute(range, value, attr) => {
 
-            let mut attrs = vec![];
-            let mut end;
-
-            for attr in attrs_raw {
-                end = attr.span().end;
-                match attr {
-                    Ast::Symbol(_, v) => attrs.push(v),
-
-                    Ast::SExpr(..) => {
-                        if !attrs.is_empty() {
-                            top = SExpr::Attribute {
-                                meta: Metadata {
-                                    range: range.start..end,
-                                    type_: Type::Unknown,
-                                },
-                                top: Box::new(top),
-                                attrs,
-                            };
-
-                            attrs = vec![];
-                        }
-
-                        let mut parent = lower_helper(attr, quoting)?;
-
-                        match &mut parent {
-                            SExpr::FuncCall { values, .. } => {
-                                values.insert(0, top);
-                                top = parent;
-                            }
-
-                            _ => return Err(LoweringError::InvalidAttribute),
-                        }
+            match *attr {
+                Ast::Symbol(_, "&") => {
+                    SExpr::Ref {
+                        meta: Metadata {
+                            range,
+                            type_: Type::Unknown,
+                        },
+                        value: Box::new(lvalue_creator(*value)?),
                     }
-
-                    _ => unreachable!("parser emits only symbols and s expressions"),
                 }
-            }
 
-            if attrs.is_empty() {
-                top
-            } else {
-                SExpr::Attribute {
-                    meta: Metadata {
-                        range,
-                        type_: Type::Unknown,
-                    },
-                    top: Box::new(top),
-                    attrs,
+                Ast::Symbol(_, "*") => {
+                    SExpr::Deref {
+                        meta: Metadata {
+                            range,
+                            type_: Type::Unknown,
+                        },
+                        value: Box::new(lower_helper(*value, quoting)?),
+                    }
                 }
+
+                Ast::Symbol(_, attr) => {
+                    SExpr::Attribute {
+                        meta: Metadata {
+                            range,
+                            type_: Type::Unknown,
+                        },
+                        top: Box::new(lower_helper(*value, quoting)?),
+                        attr,
+                    }
+                }
+
+                _ => unreachable!("parser emits only symbols"),
             }
         }
     };
@@ -1047,24 +1043,16 @@ fn lvalue_creator(ast: Ast<'_>) -> Result<LValue<'_>, LoweringError> {
                     Ok(LValue::Get(Box::new(slice), Box::new(index)))
                 }
 
-                Ast::Symbol(_, "deref") if v.len() == 1 => {
-                    Ok(LValue::Deref(Box::new(lvalue_creator(v.remove(0))?)))
-                }
-
                 _ => Err(LoweringError::InvalidLvalue),
             }
         }
 
-        Ast::Attribute(_, mut v) => {
-            let top = lvalue_creator(v.remove(0))?;
-            let attrs = v
-                .into_iter()
-                .map(|v| match v {
-                    Ast::Symbol(_, v) => Ok(v),
-                    _ => Err(LoweringError::InvalidLvalue),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(LValue::Attribute(Box::new(top), attrs))
+        Ast::Attribute(_, top, attr) => {
+            match *attr {
+                Ast::Symbol(_, "*") => Ok(LValue::Deref(Box::new(lvalue_creator(*top)?))),
+                Ast::Symbol(_, attr) => Ok(LValue::Attribute(Box::new(lvalue_creator(*top)?), attr)),
+                _ => Err(LoweringError::InvalidAttribute)
+            }
         }
 
         _ => Err(LoweringError::InvalidLvalue),
