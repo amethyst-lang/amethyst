@@ -1,5 +1,4 @@
  # Things to do:
- - Replace ref/deref with `&`/`*`
  - Fix ref (only act on lvalues, which are variables, attributes, dereferences, and array accesses)
     - Fix passing structs to functions
  - Add `array.(index)` syntax
