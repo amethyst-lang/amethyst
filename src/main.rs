@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-//use amethyst::backend::Generator;
-use amethyst::backend::ir::{ModuleBuilder, Type, ToIntegerOperation, Operation, Terminator};
+use amethyst::backend::sexpr_lowering;
 use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
 
@@ -23,21 +22,5 @@ fn main() {
     correctness::extract_structs(&sexprs, &mut struct_map);
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
 
-    /*
-    let mut gen = Generator::default();
-    gen.compile(sexprs, &struct_map);
-    std::fs::write(&object, gen.emit_object()).unwrap();
-    */
-
-    let mut builder = ModuleBuilder::default()
-        .with_name("uwu");
-    let func = builder.new_function("main", &[], &Type::Integer(true, 32));
-    builder.switch_to_function(func);
-    let block = builder.push_block().unwrap();
-    builder.switch_to_block(block);
-    let x = builder.push_instruction(34.to_integer_operation()).unwrap();
-    let y = builder.push_instruction(35.to_integer_operation()).unwrap();
-    let z = builder.push_instruction(Operation::Add(x, y)).unwrap();
-    builder.set_terminator(Terminator::Return(z));
-    print!("{}", builder.build());
+    print!("{}", sexpr_lowering::lower(sexprs));
 }
