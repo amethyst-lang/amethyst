@@ -1,19 +1,31 @@
 #![allow(unused)]
 
-use crate::frontend::ast_lowering::SExpr;
+use std::collections::HashMap;
 
-use super::ir::{Module, ModuleBuilder, Value, ToIntegerOperation, Operation, Type, Terminator, BasicBlockId};
+use crate::frontend::ast_lowering::{SExpr, Type as SExprType, LValue};
+
+use super::ir::{Module, ModuleBuilder, Value, ToIntegerOperation, Operation, Type as IrType, Terminator, BasicBlockId, VariableId};
 
 struct LowerHelperArgs {
     breaks: Vec<Vec<(BasicBlockId, Option<Value>)>>,
+    var_map: Vec<HashMap<String, VariableId>>,
 }
 
 fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelperArgs) -> Option<Value> {
     match sexpr {
         SExpr::Int { meta, value } => builder.push_instruction(value.to_integer_operation()),
+
         SExpr::Float { meta, value } => todo!(),
         SExpr::Str { meta, value } => todo!(),
-        SExpr::Symbol { meta, value } => todo!(),
+
+        SExpr::Symbol { meta, value } => {
+            for scope in args.var_map.iter().rev() {
+                if let Some(var) = scope.get(value) {
+                    return builder.push_instruction(Operation::GetVar(*var));
+                }
+            }
+            None
+        }
 
         SExpr::List { meta, values } => todo!(),
         SExpr::Quote { meta, value } => todo!(),
@@ -23,9 +35,11 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelpe
 
         SExpr::Seq { meta, values } => {
             let mut last = None;
+            args.var_map.push(HashMap::new());
             for value in values {
                 last = lower_helper(builder, value, args);
             }
+            args.var_map.pop();
             last
         }
 
@@ -33,6 +47,7 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelpe
             let mut mapping = Vec::new();
 
             for (cond, then) in values {
+                args.var_map.push(HashMap::new());
                 let cond = lower_helper(builder, cond, args).unwrap();
                 let current_block = builder.get_block().unwrap();
                 let then_block = builder.push_block().unwrap();
@@ -44,10 +59,13 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelpe
                 builder.switch_to_block(current_block);
                 builder.set_terminator(Terminator::Branch(cond, then_block, cont_block));
                 builder.switch_to_block(cont_block);
+                args.var_map.pop();
             }
 
             if let Some(elsy) = elsy {
+                args.var_map.push(HashMap::new());
                 let value = lower_helper(builder, *elsy, args);
+                args.var_map.pop();
                 mapping.push((builder.get_block().unwrap(), value))
             }
 
@@ -68,12 +86,14 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelpe
 
         SExpr::Loop { meta, value } => {
             args.breaks.push(Vec::new());
+            args.var_map.push(HashMap::new());
             let block = builder.push_block().unwrap();
             builder.set_terminator(Terminator::Jump(block));
             builder.switch_to_block(block);
             lower_helper(builder, *value, args);
             builder.set_terminator(Terminator::Jump(block));
 
+            args.var_map.pop();
             if let Some(mappings) = args.breaks.pop() {
                 let final_block = builder.push_block().unwrap();
                 let mappings: Vec<_> = mappings.into_iter().filter_map(|(block, value)| {
@@ -109,7 +129,7 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelpe
 
         SExpr::Type { meta, value } => lower_helper(builder, *value, args),
 
-        SExpr::FuncDef { meta, name, ret_type, args, expr } => todo!(),
+        SExpr::FuncDef { meta, name, ret_type, args, expr } => unreachable!(),
 
         SExpr::FuncCall { meta, func, values } => {
             match *func {
@@ -206,12 +226,53 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelpe
         SExpr::StructDef { meta, name, fields } => todo!(),
 
         SExpr::StructSet { meta, name, values } => todo!(),
-        SExpr::Declare { meta, mutable, variable, value } => todo!(),
+
+        SExpr::Declare { meta, mutable, variable, value } => {
+            if let Some(v) = lower_helper(builder, *value, args) {
+                let var = builder.push_variable(variable, &convert_type(&meta.type_)).unwrap();
+                args.var_map.last_mut().unwrap().insert(variable.to_owned(), var);
+                builder.push_instruction(Operation::SetVar(var, v));
+                builder.push_instruction(Operation::GetVar(var))
+            } else {
+                None
+            }
+        }
+
+        SExpr::Assign { meta, lvalue: LValue::Symbol(variable), value } => {
+            if let Some(v) = lower_helper(builder, *value, args) {
+                for scope in args.var_map.iter().rev() {
+                    if let Some(var) = scope.get(variable) {
+                        builder.push_instruction(Operation::SetVar(*var, v));
+                        return builder.push_instruction(Operation::GetVar(*var));
+                    }
+                }
+            }
+            None
+        }
+
         SExpr::Assign { meta, lvalue, value } => todo!(),
+
         SExpr::Attribute { meta, top, attr } => todo!(),
         SExpr::SizeOf { meta, type_ } => todo!(),
         SExpr::Ref { meta, value } => todo!(),
         SExpr::Deref { meta, value } => todo!(),
+    }
+}
+
+
+fn convert_type(type_: &SExprType) -> IrType {
+    match type_ {
+        SExprType::Int(signed, width) => IrType::Integer(*signed, *width),
+        SExprType::F32 => todo!(),
+        SExprType::F64 => todo!(),
+        SExprType::Tuple(v) if v.is_empty() => IrType::Void,
+        SExprType::Tuple(_) => todo!(),
+        SExprType::Pointer(_, _) => todo!(),
+        SExprType::Slice(_, _) => todo!(),
+        SExprType::Struct(_, _) => todo!(),
+        SExprType::Function(_, _) => todo!(),
+
+        _ => unreachable!(),
     }
 }
 
@@ -220,16 +281,19 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
         .with_name("uwu");
     let mut helper_args = LowerHelperArgs {
         breaks: Vec::new(),
+        var_map: Vec::new(),
     };
 
     for sexpr in sexprs {
         match sexpr {
             SExpr::FuncDef { meta, name, ret_type, args, expr } => {
-                let func = builder.new_function(name, &[], &Type::Integer(true, 32));
+                let func = builder.new_function(name, &[], &IrType::Integer(true, 32));
                 builder.switch_to_function(func);
                 let block = builder.push_block().unwrap();
                 builder.switch_to_block(block);
+                helper_args.var_map.push(HashMap::new());
                 let expr = lower_helper(&mut builder, *expr, &mut helper_args);
+                helper_args.var_map.pop();
                 if let Some(ret) = expr {
                     builder.set_terminator(Terminator::Return(ret));
                 } else {
@@ -245,3 +309,4 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
 
     builder.build()
 }
+

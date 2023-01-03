@@ -36,6 +36,7 @@ struct Function {
     name: String,
     arg_types: Vec<Type>,
     ret_type: Type,
+    variables: Vec<Variable>,
     blocks: Vec<BasicBlock>,
     value_index: usize,
 }
@@ -54,6 +55,10 @@ impl Display for Function {
         }
         writeln!(f, ") {{")?;
 
+        for (i, var) in self.variables.iter().enumerate() {
+            writeln!(f, "    #{} = {} // {}", i, var.type_, var.name)?;
+        }
+
         for (i, block) in self.blocks.iter().enumerate() {
             write!(f, "{}:\n{}", i, block)?;
         }
@@ -67,6 +72,20 @@ pub struct FunctionId(usize);
 impl Display for FunctionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "@{}", self.0)
+    }
+}
+
+struct Variable {
+    name: String,
+    type_: Type,
+}
+
+#[derive(Copy, Clone)]
+pub struct VariableId(usize);
+
+impl Display for VariableId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{}", self.0)
     }
 }
 
@@ -193,6 +212,9 @@ pub enum Operation {
     BitXor(Value, Value),
 
     Phi(Vec<(BasicBlockId, Value)>),
+
+    GetVar(VariableId),
+    SetVar(VariableId, Value),
 }
 
 impl Display for Operation {
@@ -246,6 +268,9 @@ impl Display for Operation {
                 }
                 Ok(())
             }
+
+            Operation::GetVar(var) => write!(f, "get {}", var),
+            Operation::SetVar(var, val) => write!(f, "set {}, {}", var, val),
         }
     }
 }
@@ -302,6 +327,7 @@ impl ModuleBuilder {
             name: name.to_owned(),
             arg_types: arg_types.to_owned(),
             ret_type: ret_type.clone(),
+            variables: Vec::new(),
             blocks: Vec::new(),
             value_index: 0,
         });
@@ -350,6 +376,20 @@ impl ModuleBuilder {
         }
 
         None
+    }
+
+    pub fn push_variable(&mut self, name: &str, type_: &Type) -> Option<VariableId> {
+        if let Some(func_id) = self.current_function {
+            let func = unsafe { self.internal.functions.get_unchecked_mut(func_id) };
+            let id = func.variables.len();
+            func.variables.push(Variable {
+                name: name.to_owned(),
+                type_: type_.clone(),
+            });
+            Some(VariableId(id))
+        } else {
+            None
+        }
     }
 
     pub fn set_terminator(&mut self, terminator: Terminator) {
