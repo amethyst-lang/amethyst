@@ -215,6 +215,9 @@ pub enum Operation {
 
     GetVar(VariableId),
     SetVar(VariableId, Value),
+
+    Call(FunctionId, Vec<Value>),
+    CallIndirect(Value, Vec<Value>),
 }
 
 impl Display for Operation {
@@ -271,6 +274,34 @@ impl Display for Operation {
 
             Operation::GetVar(var) => write!(f, "get {}", var),
             Operation::SetVar(var, val) => write!(f, "set {}, {}", var, val),
+
+            Operation::Call(func, args) => {
+                write!(f, "call {}(", func)?;
+                let mut first = true;
+                for arg in args {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, ")")
+            }
+
+            Operation::CallIndirect(func, args) => {
+                write!(f, "icall {}(", func)?;
+                let mut first = true;
+                for arg in args {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -366,9 +397,25 @@ impl ModuleBuilder {
     pub fn push_instruction(&mut self, instr: Operation) -> Option<Value> {
         if let Some(func_id) = self.current_function {
             if let Some(block_id) = self.current_block {
+                let yielded = match &instr {
+                    Operation::SetVar(_, _) => false,
+                    Operation::Call(f, _) => {
+                        if let Some(f) = self.internal.functions.get(f.0) {
+                            !matches!(f.ret_type, Type::Void)
+                        } else {
+                            false
+                        }
+                    }
+
+                    _ => true,
+                };
                 let func = unsafe { self.internal.functions.get_unchecked_mut(func_id) };
                 let block = unsafe { func.blocks.get_unchecked_mut(block_id) };
-                let yielded = Some(Value(func.value_index));
+                let yielded = if yielded {
+                    Some(Value(func.value_index))
+                } else {
+                    None
+                };
                 func.value_index += 1;
                 block.instructions.push(Instruction {
                     yielded,

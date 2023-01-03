@@ -4,11 +4,12 @@ use std::collections::HashMap;
 
 use crate::frontend::ast_lowering::{SExpr, Type as SExprType, LValue};
 
-use super::ir::{Module, ModuleBuilder, Value, ToIntegerOperation, Operation, Type as IrType, Terminator, BasicBlockId, VariableId};
+use super::ir::{Module, ModuleBuilder, Value, ToIntegerOperation, Operation, Type as IrType, Terminator, BasicBlockId, VariableId, FunctionId};
 
 struct LowerHelperArgs {
     breaks: Vec<Vec<(BasicBlockId, Option<Value>)>>,
     var_map: Vec<HashMap<String, VariableId>>,
+    func_map: HashMap<String, FunctionId>,
 }
 
 fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelperArgs) -> Option<Value> {
@@ -218,7 +219,28 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelpe
                     builder.push_instruction(Operation::BitXor(values[0], values[1]))
                 }
 
-                _ => todo!(),
+                SExpr::Symbol { value, .. } => {
+                    for scope in args.var_map.iter().rev() {
+                        if let Some(var) = scope.get(value) {
+                            let v = builder.push_instruction(Operation::GetVar(*var)).unwrap();
+                            let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v, args)).collect();
+                            return builder.push_instruction(Operation::CallIndirect(v, values))
+                        }
+                    }
+
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v, args)).collect();
+                    if let Some(func) = args.func_map.get(value) {
+                        builder.push_instruction(Operation::Call(*func, values))
+                    } else {
+                        None
+                    }
+                }
+
+                f => {
+                    let f = lower_helper(builder, f, args).unwrap();
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v, args)).collect();
+                    builder.push_instruction(Operation::CallIndirect(f, values))
+                }
             }
         }
 
@@ -282,13 +304,21 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
     let mut helper_args = LowerHelperArgs {
         breaks: Vec::new(),
         var_map: Vec::new(),
+        func_map: HashMap::new(),
     };
+
+    for sexpr in sexprs.iter() {
+        if let SExpr::FuncDef { name, ret_type, args, .. } = sexpr {
+            let args: Vec<_> = args.iter().map(|(n, t)| (*n, convert_type(t))).collect();
+            let func = builder.new_function(name, &args, &convert_type(ret_type));
+            helper_args.func_map.insert((*name).to_owned(), func);
+        }
+    }
 
     for sexpr in sexprs {
         match sexpr {
             SExpr::FuncDef { meta, name, ret_type, args, expr } => {
-                let args: Vec<_> = args.iter().map(|(n, t)| (*n, convert_type(t))).collect();
-                let func = builder.new_function(name, &args, &IrType::Integer(true, 32));
+                let func = *helper_args.func_map.get(name).unwrap();
                 builder.switch_to_function(func);
                 let block = builder.push_block().unwrap();
                 builder.switch_to_block(block);
