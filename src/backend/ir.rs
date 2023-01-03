@@ -70,7 +70,6 @@ impl Display for FunctionId {
     }
 }
 
-
 struct BasicBlock {
     instructions: Vec<Instruction>,
     terminator: Terminator,
@@ -85,6 +84,7 @@ impl Display for BasicBlock {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct BasicBlockId(FunctionId, usize);
 
 impl Display for BasicBlockId {
@@ -174,7 +174,25 @@ impl ToIntegerOperation for u128 {
 
 pub enum Operation {
     Integer(bool, Vec<u8>),
-    Add(Value, Value)
+
+    Add(Value, Value),
+    Sub(Value, Value),
+    Mul(Value, Value),
+    Div(Value, Value),
+    Mod(Value, Value),
+    Bsl(Value, Value),
+    Bsr(Value, Value),
+    Eq(Value, Value),
+    Ne(Value, Value),
+    Lt(Value, Value),
+    Le(Value, Value),
+    Gt(Value, Value),
+    Ge(Value, Value),
+    BitAnd(Value, Value),
+    BitOr(Value, Value),
+    BitXor(Value, Value),
+
+    Phi(Vec<(BasicBlockId, Value)>),
 }
 
 impl Display for Operation {
@@ -197,7 +215,37 @@ impl Display for Operation {
                 }
             }
 
-            Operation::Add(a, b) => write!(f, "addi {}, {}", a, b)
+            Operation::Add(a, b) => write!(f, "addi {}, {}", a, b),
+            Operation::Sub(a, b) => write!(f, "subi {}, {}", a, b),
+            Operation::Mul(a, b) => write!(f, "muli {}, {}", a, b),
+            Operation::Div(a, b) => write!(f, "divi {}, {}", a, b),
+            Operation::Mod(a, b) => write!(f, "mod {}, {}", a, b),
+            Operation::Bsl(a, b) => write!(f, "shiftl {}, {}", a, b),
+            Operation::Bsr(a, b) => write!(f, "shiftr {}, {}", a, b),
+            Operation::Eq(a, b) => write!(f, "eqi {}, {}", a, b),
+            Operation::Ne(a, b) => write!(f, "neqi {}, {}", a, b),
+            Operation::Lt(a, b) => write!(f, "lti {}, {}", a, b),
+            Operation::Le(a, b) => write!(f, "leqi {}, {}", a, b),
+            Operation::Gt(a, b) => write!(f, "gti {}, {}", a, b),
+            Operation::Ge(a, b) => write!(f, "geqi {}, {}", a, b),
+            Operation::BitAnd(a, b) => write!(f, "andi {}, {}", a, b),
+            Operation::BitOr(a, b) => write!(f, "ori {}, {}", a, b),
+            Operation::BitXor(a, b) => write!(f, "xori {}, {}", a, b),
+
+            Operation::Phi(maps) => {
+                write!(f, "phi ")?;
+                let mut first = true;
+                for (block, value) in maps {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+
+                    write!(f, "{} => {}", block, value)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -311,6 +359,18 @@ impl ModuleBuilder {
                 let block = unsafe { func.blocks.get_unchecked_mut(block_id) };
                 block.terminator = terminator;
             }
+        }
+    }
+
+    pub fn get_function(&self) -> Option<FunctionId> {
+        self.current_function.map(FunctionId)
+    }
+
+    pub fn get_block(&self) -> Option<BasicBlockId> {
+        if let Some(f) = self.get_function() {
+            self.current_block.map(|b| BasicBlockId(f, b))
+        } else {
+            None
         }
     }
 }

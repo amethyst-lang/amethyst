@@ -10,16 +10,64 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr) -> Option<Value> {
         SExpr::Float { meta, value } => todo!(),
         SExpr::Str { meta, value } => todo!(),
         SExpr::Symbol { meta, value } => todo!(),
+
         SExpr::List { meta, values } => todo!(),
         SExpr::Quote { meta, value } => todo!(),
         SExpr::Comma { meta, value } => todo!(),
         SExpr::Backtick { meta, value } => todo!(),
         SExpr::Splice { meta, value } => todo!(),
-        SExpr::Seq { meta, values } => todo!(),
-        SExpr::Cond { meta, values, elsy } => todo!(),
+
+        SExpr::Seq { meta, values } => {
+            let mut last = None;
+            for value in values {
+                last = lower_helper(builder, value);
+            }
+            last
+        }
+
+        SExpr::Cond { meta, values, elsy } => {
+            let mut mapping = Vec::new();
+
+            for (cond, then) in values {
+                let cond = lower_helper(builder, cond).unwrap();
+                let current_block = builder.get_block().unwrap();
+                let then_block = builder.push_block().unwrap();
+                builder.switch_to_block(then_block);
+                let then = lower_helper(builder, then);
+                let last_block = builder.get_block().unwrap();
+                mapping.push((last_block, then));
+                let cont_block = builder.push_block().unwrap();
+                builder.switch_to_block(current_block);
+                builder.set_terminator(Terminator::Branch(cond, then_block, cont_block));
+                builder.switch_to_block(cont_block);
+            }
+
+            if let Some(elsy) = elsy {
+                let value = lower_helper(builder, *elsy);
+                mapping.push((builder.get_block().unwrap(), value))
+            }
+
+            let post_block = builder.push_block().unwrap();
+            let mapping: Vec<_> = mapping.into_iter().filter_map(|(block, value)| {
+                builder.switch_to_block(block);
+                builder.set_terminator(Terminator::Jump(post_block));
+                value.map(|v| (block, v))
+            }).collect();
+
+            builder.switch_to_block(post_block);
+            if mapping.is_empty() {
+                None
+            } else {
+                builder.push_instruction(Operation::Phi(mapping))
+            }
+        }
+
         SExpr::Loop { meta, value } => todo!(),
+
         SExpr::Break { meta, value } => todo!(),
+
         SExpr::Nil { meta } => todo!(),
+
         SExpr::Type { meta, value } => todo!(),
         SExpr::FuncDef { meta, name, ret_type, args, expr } => todo!(),
 
@@ -28,6 +76,86 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr) -> Option<Value> {
                 SExpr::Symbol { value: "+", .. } => {
                     let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
                     builder.push_instruction(Operation::Add(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "-", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Sub(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "*", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Mul(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "/", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Div(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "%", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Mod(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "<<", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Bsl(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "%", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Mod(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: ">>", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Bsr(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "==", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Eq(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "!=", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Ne(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "<", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Lt(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "<=", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Le(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: ">", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Gt(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: ">=", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::Ge(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "&", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::BitAnd(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "|", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::BitOr(values[0], values[1]))
+                }
+
+                SExpr::Symbol { value: "^", .. } => {
+                    let values: Vec<_> = values.into_iter().flat_map(|v| lower_helper(builder, v)).collect();
+                    builder.push_instruction(Operation::BitXor(values[0], values[1]))
                 }
 
                 _ => todo!(),
