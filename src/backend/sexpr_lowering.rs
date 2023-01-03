@@ -287,11 +287,12 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
     for sexpr in sexprs {
         match sexpr {
             SExpr::FuncDef { meta, name, ret_type, args, expr } => {
-                let func = builder.new_function(name, &[], &IrType::Integer(true, 32));
+                let args: Vec<_> = args.iter().map(|(n, t)| (*n, convert_type(t))).collect();
+                let func = builder.new_function(name, &args, &IrType::Integer(true, 32));
                 builder.switch_to_function(func);
                 let block = builder.push_block().unwrap();
                 builder.switch_to_block(block);
-                helper_args.var_map.push(HashMap::new());
+                helper_args.var_map.push(args.into_iter().zip(builder.get_function_args(func).unwrap().into_iter()).map(|((n, _), v)| (n.to_owned(), v)).collect());
                 let expr = lower_helper(&mut builder, *expr, &mut helper_args);
                 helper_args.var_map.pop();
                 if let Some(ret) = expr {

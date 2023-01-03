@@ -321,13 +321,16 @@ impl ModuleBuilder {
         self.internal
     }
 
-    pub fn new_function(&mut self, name: &str, arg_types: &[Type], ret_type: &Type) -> FunctionId {
+    pub fn new_function(&mut self, name: &str, args: &[(&str, Type)], ret_type: &Type) -> FunctionId {
         let id = self.internal.functions.len();
         self.internal.functions.push(Function {
             name: name.to_owned(),
-            arg_types: arg_types.to_owned(),
+            arg_types: args.iter().map(|(_, t)| t.clone()).collect(),
             ret_type: ret_type.clone(),
-            variables: Vec::new(),
+            variables: args.iter().map(|(n, t)| Variable {
+                name: (*n).to_owned(),
+                type_: t.clone(),
+            }).collect(),
             blocks: Vec::new(),
             value_index: 0,
         });
@@ -404,6 +407,10 @@ impl ModuleBuilder {
 
     pub fn get_function(&self) -> Option<FunctionId> {
         self.current_function.map(FunctionId)
+    }
+
+    pub fn get_function_args(&self, func: FunctionId) -> Option<Vec<VariableId>> {
+        self.internal.functions.get(func.0).map(|f| (0..f.arg_types.len()).into_iter().map(VariableId).collect())
     }
 
     pub fn get_block(&self) -> Option<BasicBlockId> {
