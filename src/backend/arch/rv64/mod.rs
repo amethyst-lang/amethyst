@@ -32,7 +32,7 @@ pub enum RvInstruction {
     Bne {
         rx: VReg,
         ry: VReg,
-        dest: Location,
+        location: Location,
     },
 
     Ret,
@@ -45,7 +45,7 @@ impl Display for RvInstruction {
             RvInstruction::Integer { rd, value } => write!(f, "add {}, %r0, {}", rd, value),
             RvInstruction::Add { rd, rx, ry } => write!(f, "add {}, {}, {}", rd, rx, ry),
             RvInstruction::Jal { rd, location } => write!(f, "jal {}, {}", rd, location),
-            RvInstruction::Bne { rx, ry, dest } => write!(f, "bne {}, {}, {}", rx, ry, dest),
+            RvInstruction::Bne { rx, ry, location } => write!(f, "bne {}, {}, {}", rx, ry, location),
             RvInstruction::Ret => write!(f, "ret"),
         }
     }
@@ -200,8 +200,8 @@ impl InstructionSelector for RvSelector {
                         gen.push_instruction(RvInstruction::Bne {
                             rx,
                             ry: VReg::RealRegister(RV_REGISTER_ZERO),
-                            dest: Location::InternalLabel(l1),
-                        })
+                            location: Location::InternalLabel(l1),
+                        });
                     }
                     if let Some(&l2) = gen.label_map().get(&l2) {
                         gen.push_instruction(RvInstruction::Jal {
