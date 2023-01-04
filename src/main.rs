@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use amethyst::backend::arch::rv64::RvSelector;
 use amethyst::backend::sexpr_lowering;
 use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
@@ -22,5 +23,9 @@ fn main() {
     correctness::extract_structs(&sexprs, &mut struct_map);
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
 
-    print!("{}", sexpr_lowering::lower(sexprs));
+    let ir = sexpr_lowering::lower(sexprs);
+    println!("{}", ir);
+
+    let vcode = ir.lower_to_vcode::<_, RvSelector>();
+    println!("{}", vcode);
 }

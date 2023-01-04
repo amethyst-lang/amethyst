@@ -10,9 +10,10 @@ pub struct Module {
 
 impl Module {
     pub fn lower_to_vcode<I, S>(self) -> VCode<I>
-        where S: InstructionSelector<I>
+        where S: InstructionSelector<Instruction=I>
     {
         let mut gen = VCodeGenerator::<I, S>::new_module(&self.name);
+        let mut selector = S::default();
 
         for (i, function) in self.functions.iter().enumerate() {
             gen.add_function(&function.name, FunctionId(i));
@@ -27,13 +28,13 @@ impl Module {
             for (i, block) in func.blocks.into_iter().enumerate() {
                 gen.switch_to_label(BasicBlockId(FunctionId(f), i));
                 for instr in block.instructions {
-                    gen.select_instructions(instr.yielded, instr.operation);
+                    selector.select_instr(&mut gen, instr.yielded, instr.type_, instr.operation);
                 }
-                gen.select_terminator(block.terminator);
+                selector.select_term(&mut gen, block.terminator);
             }
         }
 
-        gen.build()
+        gen.build(selector)
     }
 }
 
