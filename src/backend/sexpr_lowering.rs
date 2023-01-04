@@ -281,7 +281,6 @@ fn lower_helper(builder: &mut ModuleBuilder, sexpr: SExpr, args: &mut LowerHelpe
     }
 }
 
-
 fn convert_type(type_: &SExprType) -> IrType {
     match type_ {
         SExprType::Int(signed, width) => IrType::Integer(*signed, *width),
