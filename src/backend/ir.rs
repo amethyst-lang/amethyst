@@ -1,9 +1,40 @@
 use std::fmt::Display;
 
+use super::arch::{VCodeGenerator, VCode, InstructionSelector};
+
 #[derive(Default)]
 pub struct Module {
     name: String,
     functions: Vec<Function>,
+}
+
+impl Module {
+    pub fn lower_to_vcode<I, S>(self) -> VCode<I>
+        where S: InstructionSelector<I>
+    {
+        let mut gen = VCodeGenerator::<I, S>::new_module(&self.name);
+
+        for (i, function) in self.functions.iter().enumerate() {
+            gen.add_function(&function.name, FunctionId(i));
+        }
+
+        for (f, func) in self.functions.into_iter().enumerate() {
+            gen.switch_to_function(FunctionId(f));
+            for i in 0..func.blocks.len() {
+                gen.push_label(BasicBlockId(FunctionId(f), i));
+            }
+
+            for (i, block) in func.blocks.into_iter().enumerate() {
+                gen.switch_to_label(BasicBlockId(FunctionId(f), i));
+                for instr in block.instructions {
+                    gen.select_instructions(instr.yielded, instr.operation);
+                }
+                gen.select_terminator(block.terminator);
+            }
+        }
+
+        gen.build()
+    }
 }
 
 impl Display for Module {
@@ -56,7 +87,7 @@ impl Display for Function {
         writeln!(f, ") {{")?;
 
         for (i, var) in self.variables.iter().enumerate() {
-            writeln!(f, "    #{} = {} // {}", i, var.type_, var.name)?;
+            writeln!(f, "    #{} : {} // {}", i, var.type_, var.name)?;
         }
 
         for (i, block) in self.blocks.iter().enumerate() {
@@ -66,7 +97,7 @@ impl Display for Function {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FunctionId(usize);
 
 impl Display for FunctionId {
@@ -80,7 +111,7 @@ struct Variable {
     type_: Type,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct VariableId(usize);
 
 impl Display for VariableId {
@@ -103,7 +134,7 @@ impl Display for BasicBlock {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct BasicBlockId(FunctionId, usize);
 
 impl Display for BasicBlockId {
@@ -114,6 +145,7 @@ impl Display for BasicBlockId {
 
 struct Instruction {
     yielded: Option<Value>,
+    type_: Type,
     operation: Operation,
 }
 
@@ -123,7 +155,7 @@ impl Display for Instruction {
             write!(f, "{} = ", yielded)?;
         }
 
-        write!(f, "{}", self.operation)
+        write!(f, "{} {}", self.type_, self.operation)
     }
 }
 
@@ -326,7 +358,7 @@ impl Display for Terminator {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Value(usize);
 
 impl Display for Value {
@@ -394,7 +426,7 @@ impl ModuleBuilder {
         }
     }
 
-    pub fn push_instruction(&mut self, instr: Operation) -> Option<Value> {
+    pub fn push_instruction(&mut self, type_: &Type, instr: Operation) -> Option<Value> {
         if let Some(func_id) = self.current_function {
             if let Some(block_id) = self.current_block {
                 let yielded = match &instr {
@@ -419,9 +451,14 @@ impl ModuleBuilder {
                 func.value_index += 1;
                 block.instructions.push(Instruction {
                     yielded,
+                    type_: type_.clone(),
                     operation: instr,
                 });
-                return yielded
+                if let Type::Void = type_ {
+                    return None
+                } else {
+                    return yielded
+                }
             }
         }
 
