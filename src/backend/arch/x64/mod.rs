@@ -160,6 +160,7 @@ impl Instr for X64Instruction {
                 alloc.add_def(*dest);
                 alloc.add_use(*dest);
                 alloc.add_use(*source);
+                alloc.used_simultaneously(&[*dest, *source]);
             }
 
             X64Instruction::Mov { dest, source } => {
