@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use super::arch::{VCodeGenerator, VCode, InstructionSelector};
+use super::arch::{Instr, InstructionSelector, VCode, VCodeGenerator};
 
 #[derive(Default)]
 pub struct Module {
@@ -10,7 +10,9 @@ pub struct Module {
 
 impl Module {
     pub fn lower_to_vcode<I, S>(self) -> VCode<I>
-        where S: InstructionSelector<Instruction=I>
+    where
+        S: InstructionSelector<Instruction = I>,
+        I: Instr,
     {
         let mut gen = VCodeGenerator::<I, S>::new_module(&self.name);
         let mut selector = S::default();
@@ -59,7 +61,9 @@ impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Type::Void => write!(f, "void"),
-            Type::Integer(signed, width) => write!(f, "{}{}", if *signed { "i" } else { "u" }, width),
+            Type::Integer(signed, width) => {
+                write!(f, "{}{}", if *signed { "i" } else { "u" }, width)
+            }
         }
     }
 }
@@ -385,16 +389,24 @@ impl ModuleBuilder {
         self.internal
     }
 
-    pub fn new_function(&mut self, name: &str, args: &[(&str, Type)], ret_type: &Type) -> FunctionId {
+    pub fn new_function(
+        &mut self,
+        name: &str,
+        args: &[(&str, Type)],
+        ret_type: &Type,
+    ) -> FunctionId {
         let id = self.internal.functions.len();
         self.internal.functions.push(Function {
             name: name.to_owned(),
             arg_types: args.iter().map(|(_, t)| t.clone()).collect(),
             ret_type: ret_type.clone(),
-            variables: args.iter().map(|(n, t)| Variable {
-                name: (*n).to_owned(),
-                type_: t.clone(),
-            }).collect(),
+            variables: args
+                .iter()
+                .map(|(n, t)| Variable {
+                    name: (*n).to_owned(),
+                    type_: t.clone(),
+                })
+                .collect(),
             blocks: Vec::new(),
             value_index: 0,
         });
@@ -422,7 +434,7 @@ impl ModuleBuilder {
 
     pub fn switch_to_block(&mut self, id: BasicBlockId) {
         match self.current_function {
-            Some(x) if id.0.0 == x => self.current_block = Some(id.1),
+            Some(x) if id.0 .0 == x => self.current_block = Some(id.1),
             _ => self.current_block = None,
         }
     }
@@ -456,9 +468,9 @@ impl ModuleBuilder {
                     operation: instr,
                 });
                 if let Type::Void = type_ {
-                    return None
+                    return None;
                 } else {
-                    return yielded
+                    return yielded;
                 }
             }
         }
@@ -495,7 +507,10 @@ impl ModuleBuilder {
     }
 
     pub fn get_function_args(&self, func: FunctionId) -> Option<Vec<VariableId>> {
-        self.internal.functions.get(func.0).map(|f| (0..f.arg_types.len()).into_iter().map(VariableId).collect())
+        self.internal
+            .functions
+            .get(func.0)
+            .map(|f| (0..f.arg_types.len()).into_iter().map(VariableId).collect())
     }
 
     pub fn get_block(&self) -> Option<BasicBlockId> {

@@ -1,14 +1,20 @@
-use std::{collections::HashMap, marker::PhantomData, fmt::Display};
+use std::{collections::HashMap, fmt::Display, marker::PhantomData};
 
-use super::ir::{Operation, FunctionId, BasicBlockId, Terminator, Value, Type};
+use super::{
+    ir::{BasicBlockId, FunctionId, Operation, Terminator, Type, Value},
+    RegisterAllocator,
+};
 
 pub mod rv64;
 pub mod x64;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VReg {
     RealRegister(usize),
     Virtual(usize),
+
+    // TODO
+    Spilled,
 }
 
 impl Display for VReg {
@@ -16,10 +22,12 @@ impl Display for VReg {
         match self {
             VReg::RealRegister(r) => write!(f, "%r{}", r),
             VReg::Virtual(v) => write!(f, "${}", v),
+            VReg::Spilled => write!(f, "[spilled]"),
         }
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Location {
     InternalLabel(usize),
     Function(usize),
@@ -34,22 +42,42 @@ impl Display for Location {
     }
 }
 
-pub struct VCode<I> {
+pub trait Instr {
+    fn get_regs() -> Vec<VReg>;
+
+    fn collect_registers<A>(&self, alloc: &mut A)
+    where
+        A: RegisterAllocator;
+
+    fn apply_reg_allocs(&mut self, alloc: &HashMap<VReg, VReg>);
+}
+
+pub struct VCode<I>
+where
+    I: Instr,
+{
     pub name: String,
     pub functions: Vec<Function<I>>,
 }
 
-pub struct Function<I> {
+pub struct Function<I>
+where
+    I: Instr,
+{
     pub name: String,
     pub labels: Vec<LabelledInstructions<I>>,
 }
 
-pub struct LabelledInstructions<I> {
+pub struct LabelledInstructions<I>
+where
+    I: Instr,
+{
     pub instructions: Vec<I>,
 }
 
 impl<I> Display for VCode<I>
-    where I: Display
+where
+    I: Display + Instr,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, ";;; module = {}\n", self.name)?;
@@ -63,7 +91,8 @@ impl<I> Display for VCode<I>
 }
 
 impl<I> Display for Function<I>
-    where I: Display
+where
+    I: Display + Instr,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{}:", self.name)?;
@@ -76,7 +105,8 @@ impl<I> Display for Function<I>
 }
 
 impl<I> Display for LabelledInstructions<I>
-    where I: Display
+where
+    I: Display + Instr,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for instr in self.instructions.iter() {
@@ -88,9 +118,15 @@ impl<I> Display for LabelledInstructions<I>
 }
 
 pub trait InstructionSelector: Default {
-    type Instruction;
+    type Instruction: Instr;
 
-    fn select_instr(&mut self, gen: &mut VCodeGenerator<Self::Instruction, Self>, result: Option<Value>, type_: Type, op: Operation);
+    fn select_instr(
+        &mut self,
+        gen: &mut VCodeGenerator<Self::Instruction, Self>,
+        result: Option<Value>,
+        type_: Type,
+        op: Operation,
+    );
 
     fn select_term(&mut self, gen: &mut VCodeGenerator<Self::Instruction, Self>, op: Terminator);
 
@@ -98,7 +134,9 @@ pub trait InstructionSelector: Default {
 }
 
 pub struct VCodeGenerator<I, S>
-    where S: InstructionSelector<Instruction=I>
+where
+    S: InstructionSelector<Instruction = I>,
+    I: Instr,
 {
     internal: VCode<I>,
     _phantom: PhantomData<S>,
@@ -109,7 +147,9 @@ pub struct VCodeGenerator<I, S>
 }
 
 impl<I, S> VCodeGenerator<I, S>
-    where S: InstructionSelector<Instruction=I>
+where
+    S: InstructionSelector<Instruction = I>,
+    I: Instr,
 {
     pub fn new_module(name: &str) -> Self {
         Self {
@@ -148,7 +188,10 @@ impl<I, S> VCodeGenerator<I, S>
     }
 
     pub fn push_label(&mut self, id: BasicBlockId) {
-        if let Some(func) = self.current_function.and_then(|v| self.internal.functions.get_mut(v)) {
+        if let Some(func) = self
+            .current_function
+            .and_then(|v| self.internal.functions.get_mut(v))
+        {
             let label = func.labels.len();
             func.labels.push(LabelledInstructions {
                 instructions: Vec::new(),
@@ -162,7 +205,10 @@ impl<I, S> VCodeGenerator<I, S>
     }
 
     pub fn push_instruction(&mut self, instruction: I) {
-        if let Some(func) = self.current_function.and_then(|v| self.internal.functions.get_mut(v)) {
+        if let Some(func) = self
+            .current_function
+            .and_then(|v| self.internal.functions.get_mut(v))
+        {
             if let Some(labelled) = self.current_block.and_then(|v| func.labels.get_mut(v)) {
                 labelled.instructions.push(instruction);
             }
@@ -175,3 +221,29 @@ impl<I, S> VCodeGenerator<I, S>
     }
 }
 
+impl<I> VCode<I>
+where
+    I: Instr,
+{
+    pub fn allocate_regs<A>(&mut self)
+    where
+        A: RegisterAllocator,
+    {
+        for func in self.functions.iter_mut() {
+            let mut allocator = A::default();
+
+            for labelled in func.labels.iter() {
+                for instr in labelled.instructions.iter() {
+                    instr.collect_registers(&mut allocator);
+                }
+            }
+
+            let allocations = allocator.allocate_regs::<I>();
+            for labelled in func.labels.iter_mut() {
+                for instr in labelled.instructions.iter_mut() {
+                    instr.apply_reg_allocs(&allocations);
+                }
+            }
+        }
+    }
+}

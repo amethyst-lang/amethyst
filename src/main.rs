@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use amethyst::backend::arch::rv64::RvSelector;
 use amethyst::backend::arch::x64::X64Selector;
+use amethyst::backend::regalloc::RegAlloc;
 use amethyst::backend::sexpr_lowering;
 use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
@@ -27,6 +28,7 @@ fn main() {
     let ir = sexpr_lowering::lower(sexprs);
     println!("{}", ir);
 
-    let vcode = ir.lower_to_vcode::<_, X64Selector>();
+    let mut vcode = ir.lower_to_vcode::<_, RvSelector>();
+    vcode.allocate_regs::<RegAlloc>();
     println!("{}", vcode);
 }

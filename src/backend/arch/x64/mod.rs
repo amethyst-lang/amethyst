@@ -48,13 +48,31 @@ jge
 jle
 */
 
-use std::{fmt::Display, collections::HashMap};
+use std::{collections::HashMap, fmt::Display};
 
-use crate::backend::ir::{Value, Operation, Terminator, Type, VariableId};
+use crate::backend::{
+    ir::{Operation, Terminator, Type, Value},
+    RegisterAllocator,
+};
 
-use super::{InstructionSelector, VCodeGenerator, VCode, VReg, Location};
+use super::{Instr, InstructionSelector, Location, VCode, VCodeGenerator, VReg};
 
-const X64_REGISTER_RAX: usize = 0;
+pub const X64_REGISTER_RAX: usize = 0;
+pub const X64_REGISTER_RBX: usize = 1;
+pub const X64_REGISTER_RCX: usize = 2;
+pub const X64_REGISTER_RDX: usize = 3;
+pub const X64_REGISTER_RSI: usize = 4;
+pub const X64_REGISTER_RDI: usize = 5;
+pub const X64_REGISTER_RSP: usize = 6;
+pub const X64_REGISTER_RBP: usize = 7;
+pub const X64_REGISTER_R8: usize = 8;
+pub const X64_REGISTER_R9: usize = 9;
+pub const X64_REGISTER_R10: usize = 10;
+pub const X64_REGISTER_R11: usize = 11;
+pub const X64_REGISTER_R12: usize = 12;
+pub const X64_REGISTER_R13: usize = 13;
+pub const X64_REGISTER_R14: usize = 14;
+pub const X64_REGISTER_R15: usize = 15;
 
 pub enum X64Instruction {
     PhiPlaceholder {
@@ -89,7 +107,7 @@ pub enum X64Instruction {
         location: Location,
     },
 
-    Ret
+    Ret,
 }
 
 impl Display for X64Instruction {
@@ -107,17 +125,119 @@ impl Display for X64Instruction {
     }
 }
 
+impl Instr for X64Instruction {
+    fn get_regs() -> Vec<VReg> {
+        vec![
+            VReg::RealRegister(X64_REGISTER_RAX),
+            VReg::RealRegister(X64_REGISTER_RBX),
+            VReg::RealRegister(X64_REGISTER_RCX),
+            VReg::RealRegister(X64_REGISTER_RDX),
+            VReg::RealRegister(X64_REGISTER_RSI),
+            VReg::RealRegister(X64_REGISTER_RDI),
+            VReg::RealRegister(X64_REGISTER_R8),
+            VReg::RealRegister(X64_REGISTER_R9),
+            VReg::RealRegister(X64_REGISTER_R10),
+            VReg::RealRegister(X64_REGISTER_R11),
+            VReg::RealRegister(X64_REGISTER_R12),
+            VReg::RealRegister(X64_REGISTER_R13),
+            VReg::RealRegister(X64_REGISTER_R14),
+            VReg::RealRegister(X64_REGISTER_R15),
+        ]
+    }
+
+    fn collect_registers<A>(&self, alloc: &mut A)
+    where
+        A: RegisterAllocator,
+    {
+        match self {
+            X64Instruction::PhiPlaceholder { .. } => (),
+
+            X64Instruction::Integer { dest, .. } => {
+                alloc.add_def(*dest);
+            }
+
+            X64Instruction::Add { dest, source } => {
+                alloc.add_def(*dest);
+                alloc.add_use(*dest);
+                alloc.add_use(*source);
+            }
+
+            X64Instruction::Mov { dest, source } => {
+                alloc.add_def(*dest);
+                alloc.add_use(*source);
+            }
+
+            X64Instruction::CmpZero { source } => {
+                alloc.add_use(*source);
+            }
+
+            X64Instruction::Jmp { .. } => (),
+
+            X64Instruction::Bne { .. } => (),
+
+            X64Instruction::Ret => (),
+        }
+    }
+
+    fn apply_reg_allocs(&mut self, alloc: &HashMap<VReg, VReg>) {
+        match self {
+            X64Instruction::PhiPlaceholder { .. } => (),
+
+            X64Instruction::Integer { dest, .. } => {
+                if let Some(new) = alloc.get(dest) {
+                    *dest = *new;
+                }
+            }
+
+            X64Instruction::Add { dest, source } => {
+                if let Some(new) = alloc.get(dest) {
+                    *dest = *new;
+                }
+                if let Some(new) = alloc.get(source) {
+                    *source = *new;
+                }
+            }
+
+            X64Instruction::Mov { dest, source } => {
+                if let Some(new) = alloc.get(dest) {
+                    *dest = *new;
+                }
+                if let Some(new) = alloc.get(source) {
+                    *source = *new;
+                }
+            }
+
+            X64Instruction::CmpZero { source } => {
+                if let Some(new) = alloc.get(source) {
+                    *source = *new;
+                }
+            }
+
+            X64Instruction::Jmp { .. } => (),
+
+            X64Instruction::Bne { .. } => (),
+
+            X64Instruction::Ret => (),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct X64Selector {
     value_map: HashMap<Value, VReg>,
-    var_map: HashMap<VariableId, VReg>,
     vreg_index: usize,
 }
 
 impl InstructionSelector for X64Selector {
     type Instruction = X64Instruction;
 
-    fn select_instr(&mut self, gen: &mut VCodeGenerator<Self::Instruction, Self>, result: Option<Value>, _type_: Type, op: Operation) {
+    fn select_instr(
+        &mut self,
+        gen: &mut VCodeGenerator<Self::Instruction, Self>,
+        result: Option<Value>,
+        _type_: Type,
+        op: Operation,
+    ) {
         let dest = result.map(|v| {
             let dest = VReg::Virtual(self.vreg_index);
             self.vreg_index += 1;
@@ -134,25 +254,16 @@ impl InstructionSelector for X64Selector {
 
                 let value = u64::from_le_bytes(value[..8].try_into().unwrap());
                 if let Some(dest) = dest {
-                    gen.push_instruction(X64Instruction::Integer {
-                        dest,
-                        value,
-                    });
+                    gen.push_instruction(X64Instruction::Integer { dest, value });
                 }
             }
 
             Operation::Add(a, b) => {
                 if let Some(dest) = dest {
                     if let Some(&source) = self.value_map.get(&a) {
-                        gen.push_instruction(X64Instruction::Mov {
-                            dest,
-                            source,
-                        });
+                        gen.push_instruction(X64Instruction::Mov { dest, source });
                         if let Some(&source) = self.value_map.get(&b) {
-                            gen.push_instruction(X64Instruction::Add {
-                                dest,
-                                source,
-                            });
+                            gen.push_instruction(X64Instruction::Add { dest, source });
                         }
                     }
                 }
@@ -178,47 +289,25 @@ impl InstructionSelector for X64Selector {
                 if let Some(dest) = dest {
                     gen.push_instruction(X64Instruction::PhiPlaceholder {
                         dest,
-                        options: mapping.into_iter().filter_map(|(b, v)| {
-                            if let Some(&l) = gen.label_map().get(&b) {
-                                if let Some(&r) = self.value_map.get(&v) {
-                                    return Some((Location::InternalLabel(l), r))
+                        options: mapping
+                            .into_iter()
+                            .filter_map(|(b, v)| {
+                                if let Some(&l) = gen.label_map().get(&b) {
+                                    if let Some(&r) = self.value_map.get(&v) {
+                                        return Some((Location::InternalLabel(l), r));
+                                    }
                                 }
-                            }
 
-                            None
-                        }).collect(),
+                                None
+                            })
+                            .collect(),
                     });
                 }
             }
 
-            Operation::GetVar(var) => {
-                if let Some(dest) = dest {
-                    if let Some(&source) = self.var_map.get(&var) {
-                        gen.push_instruction(X64Instruction::Mov {
-                            dest,
-                            source,
-                        });
-                    }
-                }
-            }
+            Operation::GetVar(_) => todo!(),
 
-            Operation::SetVar(var, val) => {
-                let dest = match self.var_map.get(&var) {
-                    Some(&rd) => rd,
-                    None => {
-                        let dest = VReg::Virtual(self.vreg_index);
-                        self.vreg_index += 1;
-                        self.var_map.insert(var, dest);
-                        dest
-                    }
-                };
-                if let Some(&source) = self.value_map.get(&val) {
-                    gen.push_instruction(X64Instruction::Mov {
-                        dest,
-                        source,
-                    });
-                }
-            }
+            Operation::SetVar(_, _) => todo!(),
 
             Operation::Call(_, _) => todo!(),
             Operation::CallIndirect(_, _) => todo!(),
@@ -254,9 +343,7 @@ impl InstructionSelector for X64Selector {
 
             Terminator::Branch(v, l1, l2) => {
                 if let Some(&source) = self.value_map.get(&v) {
-                    gen.push_instruction(X64Instruction::CmpZero {
-                        source,
-                    });
+                    gen.push_instruction(X64Instruction::CmpZero { source });
                     if let Some(&l1) = gen.label_map().get(&l1) {
                         gen.push_instruction(X64Instruction::Bne {
                             location: Location::InternalLabel(l1),
@@ -289,10 +376,10 @@ impl InstructionSelector for X64Selector {
                     for (label, source) in options {
                         if let Location::InternalLabel(label) = label {
                             let labelled = &mut func.labels[label];
-                            labelled.instructions.insert(labelled.instructions.len() - 1, X64Instruction::Mov {
-                                dest,
-                                source,
-                            });
+                            labelled.instructions.insert(
+                                labelled.instructions.len() - 1,
+                                X64Instruction::Mov { dest, source },
+                            );
                         }
                     }
                 }
