@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, collections::{HashSet, HashMap}};
 
 use super::arch::{Instr, InstructionSelector, VCode, VCodeGenerator};
 
@@ -23,11 +23,19 @@ impl Module {
 
         for (f, func) in self.functions.into_iter().enumerate() {
             gen.switch_to_function(FunctionId(f));
-            for i in 0..func.blocks.len() {
+            for (i, block) in func.blocks.iter().enumerate() {
+                if block.deleted {
+                    continue;
+                }
+
                 gen.push_label(BasicBlockId(FunctionId(f), i));
             }
 
             for (i, block) in func.blocks.into_iter().enumerate() {
+                if block.deleted {
+                    continue;
+                }
+
                 gen.switch_to_label(BasicBlockId(FunctionId(f), i));
                 for instr in block.instructions {
                     selector.select_instr(&mut gen, instr.yielded, instr.type_, instr.operation);
@@ -96,7 +104,9 @@ impl Display for Function {
         }
 
         for (i, block) in self.blocks.iter().enumerate() {
-            write!(f, "{}:\n{}", i, block)?;
+            if !block.deleted {
+                write!(f, "{}:\n{}", i, block)?;
+            }
         }
         write!(f, "}}")
     }
@@ -126,6 +136,8 @@ impl Display for VariableId {
 }
 
 struct BasicBlock {
+    deleted: bool,
+    predecessors: HashSet<BasicBlockId>,
     instructions: Vec<Instruction>,
     terminator: Terminator,
 }
@@ -229,6 +241,8 @@ impl ToIntegerOperation for u128 {
 }
 
 pub enum Operation {
+    Identity(Value),
+
     Integer(bool, Vec<u8>),
 
     Add(Value, Value),
@@ -260,6 +274,8 @@ pub enum Operation {
 impl Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Operation::Identity(val) => write!(f, "id {}", val),
+
             Operation::Integer(signed, val) => {
                 if *signed {
                     write!(f, "iconst ")?;
@@ -385,7 +401,132 @@ impl ModuleBuilder {
         self
     }
 
-    pub fn build(self) -> Module {
+    // Automatically does some dead code elimination, lowers variables to phi operations, and
+    // checks for malformed IR.
+    // TODO: return Result<Module, MalformedIrError> on malformed IR instead of panicking.
+    pub fn build(mut self) -> Module {
+        for (f, func) in self.internal.functions.iter_mut().enumerate() {
+            let mut blocks_prec = vec![HashSet::new(); func.blocks.len()];
+            for (i, block) in func.blocks.iter().enumerate() {
+                match &block.terminator {
+                    Terminator::NoTerminator => (),
+                    Terminator::ReturnVoid => (),
+                    Terminator::Return(_) => (),
+
+                    Terminator::Jump(next) => {
+                        let this = BasicBlockId(FunctionId(f), i);
+                        blocks_prec[next.1].insert(this);
+                    }
+
+                    Terminator::Branch(_, on_true, on_false) => {
+                        let this = BasicBlockId(FunctionId(f), i);
+                        blocks_prec[on_true.1].insert(this);
+                        blocks_prec[on_false.1].insert(this);
+                    }
+                }
+            }
+
+            for (block, prec) in func.blocks.iter_mut().zip(blocks_prec.into_iter()) {
+                block.predecessors = prec;
+            }
+
+            let mut removed = Vec::new();
+            while {
+                removed.clear();
+
+                for (i, block) in func.blocks.iter_mut().enumerate() {
+                    if block.deleted || i == 0 {
+                        continue;
+                    }
+
+                    if block.predecessors.is_empty() {
+                        block.deleted = true;
+                        removed.push(BasicBlockId(FunctionId(f), i));
+                    }
+                }
+
+                for block in func.blocks.iter_mut() {
+                    for remove in removed.iter() {
+                        block.predecessors.remove(remove);
+                    }
+                }
+
+                !removed.is_empty()
+            } {}
+
+            for block in func.blocks.iter() {
+                if block.deleted {
+                    continue;
+                }
+
+                if let Terminator::Branch(_, a, b) = block.terminator {
+                    if func.blocks[a.1].predecessors.len() > 1 || func.blocks[b.1].predecessors.len() > 1 {
+                        panic!("malformed ir");
+                    }
+                }
+            }
+
+            let mut var_map = HashMap::new();
+            for (i, block) in func.blocks.iter_mut().enumerate() {
+                if block.deleted {
+                    continue;
+                }
+
+                if block.predecessors.len() == 1 {
+                    let prev = block.predecessors.iter().next().unwrap().1;
+                    for var in func.arg_types.len()..func.variables.len() {
+                        let var = VariableId(var);
+                        if let Some(&val) = var_map.get(&(var, prev)) {
+                            var_map.insert((var, i), val);
+                        }
+                    }
+                } else if i != 0 {
+                    for var in func.arg_types.len()..func.variables.len() {
+                        let var = VariableId(var);
+                        let phi = block.predecessors.iter().filter_map(|&v| var_map.get(&(var, v.1)).map(|&u| (v, u))).collect();
+                        let operation = Operation::Phi(phi);
+                        let val = Value(func.value_index);
+                        func.value_index += 1;
+                        let phi = Instruction {
+                            yielded: Some(val),
+                            type_: func.variables[var.0].type_.clone(),
+                            operation,
+                        };
+                        block.instructions.insert(0, phi);
+                        var_map.insert((var, i), val);
+                    }
+                }
+
+                let mut to_remove = Vec::new();
+                for (j, instruction) in block.instructions.iter_mut().enumerate() {
+                    match instruction.operation {
+                        Operation::GetVar(var) => {
+                            match var_map.get(&(var, i)) {
+                                Some(&val) => {
+                                    instruction.operation = Operation::Identity(val);
+                                }
+
+                                None => {
+                                    panic!("malformed ir");
+                                }
+                            }
+                        }
+
+                        Operation::SetVar(var, val) => {
+                            var_map.insert((var, i), val);
+                            to_remove.push(j);
+                        }
+
+                        _ => (),
+                    }
+                }
+
+                for remove in to_remove.into_iter().rev() {
+                    block.instructions.remove(remove);
+                }
+            }
+        }
+
         self.internal
     }
 
@@ -423,7 +564,9 @@ impl ModuleBuilder {
             let func = unsafe { self.internal.functions.get_unchecked_mut(func_id) };
             let block_id = func.blocks.len();
             func.blocks.push(BasicBlock {
-                instructions: vec![],
+                deleted: false,
+                predecessors: HashSet::new(),
+                instructions: Vec::new(),
                 terminator: Terminator::NoTerminator,
             });
             Some(BasicBlockId(FunctionId(func_id), block_id))

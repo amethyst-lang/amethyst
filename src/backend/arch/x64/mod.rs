@@ -343,6 +343,14 @@ impl InstructionSelector for X64Selector {
         });
 
         match op {
+            Operation::Identity(value) => {
+                if let Some(dest) = dest {
+                    if let Some(&source) = self.value_map.get(&value) {
+                        gen.push_instruction(X64Instruction::Mov { dest, source });
+                    }
+                }
+            }
+
             Operation::Integer(_signed, mut value) => {
                 // TODO: better way to do this
                 while value.len() < 8 {
@@ -402,9 +410,8 @@ impl InstructionSelector for X64Selector {
                 }
             }
 
-            Operation::GetVar(_) => todo!(),
-
-            Operation::SetVar(_, _) => todo!(),
+            Operation::GetVar(_) => unreachable!(),
+            Operation::SetVar(_, _) => unreachable!(),
 
             Operation::Call(_, _) => todo!(),
             Operation::CallIndirect(_, _) => todo!(),

@@ -23,6 +23,7 @@ fn main() {
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
 
     let ir = sexpr_lowering::lower(sexprs);
+    println!("{}", ir);
 
     match target.as_str() {
         "x64" => {
@@ -38,8 +39,9 @@ fn main() {
         }
 
         target => {
-            eprintln!("Invalid target {}", target);
+            eprintln!("Invalid target `{}`", target);
             std::process::exit(1);
         }
     }
 }
+
