@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, fs::File, io::Write};
 
 use crate::backend::{
     ir::{Operation, Terminator, Type, Value},
@@ -189,6 +189,108 @@ impl Instr for RvInstruction {
 
             RvInstruction::Ret => (),
         }
+    }
+
+    fn emit_assembly(vcode: &VCode<Self>) {
+        match File::create(format!("{}.s", vcode.name)) {
+            Ok(mut file) => {
+                let _ = writeln!(file, ".global main");
+                for func in vcode.functions.iter() {
+                    let _ = writeln!(file, "{}:", func.name);
+                    for (i, labelled) in func.labels.iter().enumerate() {
+                        let _ = writeln!(file, ".L{}:", i);
+                        for instruction in labelled.instructions.iter() {
+                            match instruction {
+                                RvInstruction::PhiPlaceholder { .. } => (),
+
+                                RvInstruction::Integer { rd, value } => {
+                                    let _ = writeln!(file, "    li {}, {}", register(*rd), value);
+                                }
+
+                                RvInstruction::Add { rd, rx, ry } => {
+                                    let _ = writeln!(file, "    add {}, {}, {}", register(*rd), register(*rx), register(*ry));
+                                }
+
+                                RvInstruction::Jal { rd, location } => {
+                                    match *location {
+                                        Location::InternalLabel(_) => {
+                                            let _ = writeln!(file, "    jal {}, {}", register(*rd), location);
+                                        }
+                                        Location::Function(f) => {
+                                            let _ = writeln!(file, "    jal {}, {}", register(*rd), vcode.functions[f].name);
+                                        }
+                                    }
+                                }
+
+                                RvInstruction::Bne { rx, ry, location } => {
+                                    match *location {
+                                        Location::InternalLabel(_) => {
+                                            let _ = writeln!(file, "    bne {}, {}, {}", register(*rx), register(*ry), location);
+                                        }
+                                        Location::Function(f) => {
+                                            let _ = writeln!(file, "    bne {}, {}, {}", register(*rx), register(*ry), vcode.functions[f].name);
+                                        }
+                                    }
+                                }
+
+                                RvInstruction::Ret => {
+                                    let _ = write!(file, "    ret");
+                                }
+                            }
+                        }
+                    }
+
+                    let _ = writeln!(file);
+                }
+            }
+            Err(e) => {
+                eprintln!("Could not open file `{}`: {}", vcode.name, e);
+            }
+        }
+    }
+}
+
+fn register(reg: VReg) -> String {
+    match reg {
+        VReg::RealRegister(reg) => {
+            String::from(match reg {
+                v if v == RV_REGISTER_ZERO => "zero",
+                v if v == RV_REGISTER_RA => "ra",
+                v if v == RV_REGISTER_SP => "sp",
+                v if v == RV_REGISTER_GP => "gp",
+                v if v == RV_REGISTER_TP => "tp",
+                v if v == RV_REGISTER_T0 => "t0",
+                v if v == RV_REGISTER_T1 => "t1",
+                v if v == RV_REGISTER_T2 => "t2",
+                v if v == RV_REGISTER_FP => "s0",
+                v if v == RV_REGISTER_S1 => "s1",
+                v if v == RV_REGISTER_A0 => "a0",
+                v if v == RV_REGISTER_A1 => "a1",
+                v if v == RV_REGISTER_A2 => "a2",
+                v if v == RV_REGISTER_A3 => "a3",
+                v if v == RV_REGISTER_A4 => "a4",
+                v if v == RV_REGISTER_A5 => "a5",
+                v if v == RV_REGISTER_A6 => "a6",
+                v if v == RV_REGISTER_A7 => "a7",
+                v if v == RV_REGISTER_S2 => "s2",
+                v if v == RV_REGISTER_S3 => "s3",
+                v if v == RV_REGISTER_S4 => "s4",
+                v if v == RV_REGISTER_S5 => "s5",
+                v if v == RV_REGISTER_S6 => "s6",
+                v if v == RV_REGISTER_S7 => "s7",
+                v if v == RV_REGISTER_S8 => "s8",
+                v if v == RV_REGISTER_S9 => "s9",
+                v if v == RV_REGISTER_S10 => "s10",
+                v if v == RV_REGISTER_S11 => "s11",
+                v if v == RV_REGISTER_T3 => "t3",
+                v if v == RV_REGISTER_T4 => "t4",
+                v if v == RV_REGISTER_T5 => "t5",
+                v if v == RV_REGISTER_T6 => "t6",
+                _ => unreachable!(),
+            })
+        }
+        VReg::Virtual(_) => unreachable!(),
+        VReg::Spilled => todo!(),
     }
 }
 

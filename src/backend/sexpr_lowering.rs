@@ -404,7 +404,7 @@ fn convert_type(type_: &SExprType) -> IrType {
 }
 
 pub fn lower(sexprs: Vec<SExpr>) -> Module {
-    let mut builder = ModuleBuilder::default().with_name("uwu");
+    let mut builder = ModuleBuilder::default().with_name("a");
     let mut helper_args = LowerHelperArgs {
         breaks: Vec::new(),
         var_map: Vec::new(),

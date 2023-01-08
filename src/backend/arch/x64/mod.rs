@@ -48,7 +48,7 @@ jge
 jle
 */
 
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, fs::File, io::Write};
 
 use crate::backend::{
     ir::{Operation, Terminator, Type, Value},
@@ -220,6 +220,102 @@ impl Instr for X64Instruction {
 
             X64Instruction::Ret => (),
         }
+    }
+
+    fn emit_assembly(vcode: &VCode<Self>) {
+        match File::create(format!("{}.s", vcode.name)) {
+            Ok(mut file) => {
+                let _ = writeln!(file, ".intel_syntax\n.global main");
+
+                for func in vcode.functions.iter() {
+                    let _ = writeln!(file, "{}:", func.name);
+                    for (i, labelled) in func.labels.iter().enumerate() {
+                        let _ = writeln!(file, ".L{}:", i);
+                        for instruction in labelled.instructions.iter() {
+                            match instruction {
+                                X64Instruction::PhiPlaceholder { .. } => (),
+
+                                X64Instruction::Integer { dest, value } => {
+                                    let _ = writeln!(file, "    mov {}, {}", register(*dest), value);
+                                }
+
+                                X64Instruction::Add { dest, source } => {
+                                    let _ = writeln!(file, "    add {}, {}", register(*dest), register(*source));
+                                }
+
+                                X64Instruction::Mov { dest, source } => {
+                                    let _ = writeln!(file, "    mov {}, {}", register(*dest), register(*source));
+                                }
+
+                                X64Instruction::CmpZero { source } => {
+                                    let _ = writeln!(file, "    cmp {}, 0", register(*source));
+                                }
+
+                                X64Instruction::Jmp { location } => {
+                                    match *location {
+                                        Location::InternalLabel(_) => {
+                                            let _ = writeln!(file, "    jmp {}", location);
+                                        }
+                                        Location::Function(f) => {
+                                            let _ = writeln!(file, "    jmp {}", vcode.functions[f].name);
+                                        }
+                                    }
+                                }
+
+                                X64Instruction::Bne { location } => {
+                                    match *location {
+                                        Location::InternalLabel(_) => {
+                                            let _ = writeln!(file, "    jne {}", location);
+                                        }
+                                        Location::Function(f) => {
+                                            let _ = writeln!(file, "    jne {}", vcode.functions[f].name);
+                                        }
+                                    }
+                                }
+
+                                X64Instruction::Ret => {
+                                    let _ = writeln!(file, "    ret");
+                                }
+                            }
+                        }
+
+                        let _ = writeln!(file);
+                    }
+                }
+            }
+
+            Err(e) => {
+                eprintln!("Could not open file `{}`: {}", vcode.name, e);
+            }
+        }
+    }
+}
+
+fn register(reg: VReg) -> String {
+    match reg {
+        VReg::RealRegister(reg) => {
+            String::from(match reg {
+                v if v == X64_REGISTER_RAX => "%rax",
+                v if v == X64_REGISTER_RBX => "%rbx",
+                v if v == X64_REGISTER_RCX => "%rcx",
+                v if v == X64_REGISTER_RDX => "%rdx",
+                v if v == X64_REGISTER_RSI => "%rsi",
+                v if v == X64_REGISTER_RDI => "%rdi",
+                v if v == X64_REGISTER_RSP => "%rsp",
+                v if v == X64_REGISTER_RBP => "%rbp",
+                v if v == X64_REGISTER_R8 => "%r8",
+                v if v == X64_REGISTER_R9 => "%r9",
+                v if v == X64_REGISTER_R10 => "%r10",
+                v if v == X64_REGISTER_R11 => "%r11",
+                v if v == X64_REGISTER_R12 => "%r12",
+                v if v == X64_REGISTER_R13 => "%r13",
+                v if v == X64_REGISTER_R14 => "%r14",
+                v if v == X64_REGISTER_R15 => "%r15",
+                _ => unreachable!(),
+            })
+        }
+        VReg::Virtual(_) => unreachable!(),
+        VReg::Spilled => todo!(),
     }
 }
 

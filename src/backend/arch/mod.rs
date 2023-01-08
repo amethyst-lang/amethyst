@@ -42,7 +42,7 @@ impl Display for Location {
     }
 }
 
-pub trait Instr {
+pub trait Instr: Sized {
     fn get_regs() -> Vec<VReg>;
 
     fn collect_registers<A>(&self, alloc: &mut A)
@@ -50,6 +50,8 @@ pub trait Instr {
         A: RegisterAllocator;
 
     fn apply_reg_allocs(&mut self, alloc: &HashMap<VReg, VReg>);
+
+    fn emit_assembly(vcode: &VCode<Self>);
 }
 
 pub struct VCode<I>
@@ -245,5 +247,9 @@ where
                 }
             }
         }
+    }
+
+    pub fn emit_assembly(&self) {
+        I::emit_assembly(self);
     }
 }
