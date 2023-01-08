@@ -333,6 +333,7 @@ fn lower_helper(
             args,
             linked_to,
         } => todo!(),
+
         SExpr::StructDef { meta, name, fields } => todo!(),
 
         SExpr::StructSet { meta, name, values } => todo!(),

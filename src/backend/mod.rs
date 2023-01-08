@@ -14,7 +14,7 @@ pub trait RegisterAllocator: Default {
 
     fn force_same(&mut self, reg: VReg, constraint: VReg);
 
-    fn used_simultaneously(&mut self, regs: &[VReg]);
+    fn next_live_step(&mut self);
 
     fn allocate_regs<I>(self) -> HashMap<VReg, VReg>
     where

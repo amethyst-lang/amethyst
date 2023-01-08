@@ -13,8 +13,7 @@ pub enum VReg {
     RealRegister(usize),
     Virtual(usize),
 
-    // TODO
-    Spilled,
+    Spilled(usize),
 }
 
 impl Display for VReg {
@@ -22,7 +21,7 @@ impl Display for VReg {
         match self {
             VReg::RealRegister(r) => write!(f, "%r{}", r),
             VReg::Virtual(v) => write!(f, "${}", v),
-            VReg::Spilled => write!(f, "[spilled]"),
+            VReg::Spilled(s) => write!(f, "[spilled #{}]", s),
         }
     }
 }
@@ -237,6 +236,7 @@ where
             for labelled in func.labels.iter() {
                 for instr in labelled.instructions.iter() {
                     instr.collect_registers(&mut allocator);
+                    allocator.next_live_step();
                 }
             }
 

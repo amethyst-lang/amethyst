@@ -133,7 +133,6 @@ impl Instr for RvInstruction {
                 alloc.add_def(*rd);
                 alloc.add_use(*rx);
                 alloc.add_use(*ry);
-                alloc.used_simultaneously(&[*rx, *ry]);
             }
 
             RvInstruction::Jal { rd, .. } => {
@@ -143,7 +142,6 @@ impl Instr for RvInstruction {
             RvInstruction::Bne { rx, ry, .. } => {
                 alloc.add_use(*rx);
                 alloc.add_use(*ry);
-                alloc.used_simultaneously(&[*rx, *ry]);
             }
 
             RvInstruction::Ret => (),
@@ -290,7 +288,7 @@ fn register(reg: VReg) -> String {
             })
         }
         VReg::Virtual(_) => unreachable!(),
-        VReg::Spilled => todo!(),
+        VReg::Spilled(_) => todo!(),
     }
 }
 

@@ -23,12 +23,13 @@ fn main() {
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
 
     let ir = sexpr_lowering::lower(sexprs);
-    println!("{}", ir);
 
     match target.as_str() {
         "x64" => {
             let mut vcode = ir.lower_to_vcode::<_, X64Selector>();
+            println!("{}", vcode);
             vcode.allocate_regs::<RegAlloc>();
+            println!("{}", vcode);
             vcode.emit_assembly();
         }
 
