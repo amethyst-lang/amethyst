@@ -1,5 +1,6 @@
 /*
 instructions that will be used:
+(cmov cannot take destination memory operand; everything else can)
 cmove
 cmovne
 cmovae
@@ -10,6 +11,7 @@ cmovg
 cmovge
 cmovl
 cmovle
+
 xchg
 movsx
 movzx
@@ -103,11 +105,16 @@ pub enum X64Instruction {
         location: Location,
     },
 
-    Bne {
+    Jne {
         location: Location,
     },
 
     Ret,
+
+    Xchg {
+        dest: VReg,
+        source: VReg,
+    }
 }
 
 impl Display for X64Instruction {
@@ -119,8 +126,9 @@ impl Display for X64Instruction {
             X64Instruction::Mov { dest, source } => write!(f, "mov {}, {}", dest, source),
             X64Instruction::CmpZero { source } => write!(f, "cmp {}, 0", source),
             X64Instruction::Jmp { location } => write!(f, "jmp {}", location),
-            X64Instruction::Bne { location } => write!(f, "bne {}", location),
+            X64Instruction::Jne { location } => write!(f, "bne {}", location),
             X64Instruction::Ret => write!(f, "ret"),
+            X64Instruction::Xchg { dest, source } => write!(f, "xchg {}, {}", dest, source),
         }
     }
 }
@@ -173,9 +181,11 @@ impl Instr for X64Instruction {
 
             X64Instruction::Jmp { .. } => (),
 
-            X64Instruction::Bne { .. } => (),
+            X64Instruction::Jne { .. } => (),
 
             X64Instruction::Ret => (),
+
+            X64Instruction::Xchg { .. } => (),
         }
     }
 
@@ -215,9 +225,52 @@ impl Instr for X64Instruction {
 
             X64Instruction::Jmp { .. } => (),
 
-            X64Instruction::Bne { .. } => (),
+            X64Instruction::Jne { .. } => (),
 
             X64Instruction::Ret => (),
+
+            X64Instruction::Xchg { .. } => (),
+        }
+    }
+
+    fn mandatory_transforms(vcode: &mut VCode<Self>) {
+        for func in vcode.functions.iter_mut() {
+            for labelled in func.labels.iter_mut() {
+                let mut xchgs = Vec::new();
+                for (i, instruction) in labelled.instructions.iter().enumerate() {
+                    match instruction {
+                        X64Instruction::Add { dest, source }
+                        | X64Instruction::Mov { dest, source } => {
+                            if let (VReg::Spilled(_), VReg::Spilled(_)) = (*dest, *source) {
+                                xchgs.push((i, *source));
+                            }
+                        }
+
+                        _ => (),
+                    }
+                }
+
+                for (index, source) in xchgs.into_iter().rev() {
+                    labelled.instructions.insert(index, X64Instruction::Xchg {
+                        dest: VReg::RealRegister(X64_REGISTER_RAX),
+                        source,
+                    });
+
+                    match &mut labelled.instructions[index + 1] {
+                        X64Instruction::Add { source, .. }
+                        | X64Instruction::Mov { source, .. } => {
+                            *source = VReg::RealRegister(X64_REGISTER_RAX);
+                        }
+
+                        _ => (),
+                    }
+
+                    labelled.instructions.insert(index + 2, X64Instruction::Xchg {
+                        dest: VReg::RealRegister(X64_REGISTER_RAX),
+                        source,
+                    });
+                }
+            }
         }
     }
 
@@ -227,7 +280,7 @@ impl Instr for X64Instruction {
                 let _ = writeln!(file, ".intel_syntax\n.global main");
 
                 for func in vcode.functions.iter() {
-                    let _ = writeln!(file, "{}:", func.name);
+                    let _ = writeln!(file, "{}:\n    push %rbp\n    mov %rbp, %rsp", func.name);
                     for (i, labelled) in func.labels.iter().enumerate() {
                         let _ = writeln!(file, ".L{}:", i);
                         for instruction in labelled.instructions.iter() {
@@ -261,7 +314,7 @@ impl Instr for X64Instruction {
                                     }
                                 }
 
-                                X64Instruction::Bne { location } => {
+                                X64Instruction::Jne { location } => {
                                     match *location {
                                         Location::InternalLabel(_) => {
                                             let _ = writeln!(file, "    jne {}", location);
@@ -273,7 +326,11 @@ impl Instr for X64Instruction {
                                 }
 
                                 X64Instruction::Ret => {
-                                    let _ = writeln!(file, "    ret");
+                                    let _ = writeln!(file, "    mov %rsp, %rbp\n    pop %rbp\n    ret");
+                                }
+
+                                X64Instruction::Xchg { dest, source } => {
+                                    let _ = writeln!(file, "    xchg {}, {}", register(*dest), register(*source));
                                 }
                             }
                         }
@@ -290,6 +347,7 @@ impl Instr for X64Instruction {
     }
 }
 
+// TODO: add width stuff
 fn register(reg: VReg) -> String {
     match reg {
         VReg::RealRegister(reg) => {
@@ -314,7 +372,7 @@ fn register(reg: VReg) -> String {
             })
         }
         VReg::Virtual(_) => unreachable!(),
-        VReg::Spilled(_) => todo!(),
+        VReg::Spilled(s) => format!("qword ptr [%rbp - {}]", 8 * s),
     }
 }
 
@@ -448,7 +506,7 @@ impl InstructionSelector for X64Selector {
                 if let Some(&source) = self.value_map.get(&v) {
                     gen.push_instruction(X64Instruction::CmpZero { source });
                     if let Some(&l1) = gen.label_map().get(&l1) {
-                        gen.push_instruction(X64Instruction::Bne {
+                        gen.push_instruction(X64Instruction::Jne {
                             location: Location::InternalLabel(l1),
                         });
                     }

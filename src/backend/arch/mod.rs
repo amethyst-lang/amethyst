@@ -50,6 +50,8 @@ pub trait Instr: Sized {
 
     fn apply_reg_allocs(&mut self, alloc: &HashMap<VReg, VReg>);
 
+    fn mandatory_transforms(vcode: &mut VCode<Self>);
+
     fn emit_assembly(vcode: &VCode<Self>);
 }
 
@@ -247,6 +249,8 @@ where
                 }
             }
         }
+
+        I::mandatory_transforms(self);
     }
 
     pub fn emit_assembly(&self) {

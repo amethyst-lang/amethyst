@@ -69,19 +69,38 @@ pub enum RvInstruction {
     },
 
     Ret,
+
+    LoadStack {
+        rd: VReg,
+        rx: VReg,
+    },
+
+    StoreStack {
+        rx: VReg,
+        ry: VReg,
+    },
 }
 
 impl Display for RvInstruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RvInstruction::PhiPlaceholder { rd, .. } => write!(f, "phi {} ...", rd),
+
             RvInstruction::Integer { rd, value } => write!(f, "add {}, %r0, {}", rd, value),
+
             RvInstruction::Add { rd, rx, ry } => write!(f, "add {}, {}, {}", rd, rx, ry),
+
             RvInstruction::Jal { rd, location } => write!(f, "jal {}, {}", rd, location),
+
             RvInstruction::Bne { rx, ry, location } => {
                 write!(f, "bne {}, {}, {}", rx, ry, location)
             }
+
             RvInstruction::Ret => write!(f, "ret"),
+
+            RvInstruction::LoadStack { rd, rx } => write!(f, "load {}, {}", rd, rx),
+
+            RvInstruction::StoreStack { rx, ry } => write!(f, "store {}, {}", rx, ry),
         }
     }
 }
@@ -90,6 +109,7 @@ impl Instr for RvInstruction {
     fn get_regs() -> Vec<VReg> {
         vec![
             VReg::RealRegister(RV_REGISTER_T0),
+            /*
             VReg::RealRegister(RV_REGISTER_T1),
             VReg::RealRegister(RV_REGISTER_T2),
             VReg::RealRegister(RV_REGISTER_T3),
@@ -115,6 +135,7 @@ impl Instr for RvInstruction {
             VReg::RealRegister(RV_REGISTER_A5),
             VReg::RealRegister(RV_REGISTER_A6),
             VReg::RealRegister(RV_REGISTER_A7),
+            */
         ]
     }
 
@@ -145,6 +166,10 @@ impl Instr for RvInstruction {
             }
 
             RvInstruction::Ret => (),
+
+            RvInstruction::LoadStack { .. } => (),
+
+            RvInstruction::StoreStack { .. } => (),
         }
     }
 
@@ -186,6 +211,62 @@ impl Instr for RvInstruction {
             }
 
             RvInstruction::Ret => (),
+
+            RvInstruction::LoadStack { .. } => (),
+
+            RvInstruction::StoreStack { .. } => (),
+        }
+    }
+
+    fn mandatory_transforms(vcode: &mut VCode<Self>) {
+        for func in vcode.functions.iter_mut() {
+            for labelled in func.labels.iter_mut() {
+                let mut swap = Vec::new();
+                for (i, instruction) in labelled.instructions.iter().enumerate() {
+                    match instruction {
+                        RvInstruction::PhiPlaceholder { .. } => (),
+
+                        RvInstruction::Integer { rd, .. } => {
+                            if let VReg::Spilled(_) = *rd {
+                                swap.push()
+                            }
+                        }
+
+                        RvInstruction::Add { rd, rx, ry } => todo!(),
+
+                        RvInstruction::Jal { rd, .. } => todo!(),
+
+                        RvInstruction::Bne { rx, ry, .. } => todo!(),
+
+                        RvInstruction::Ret => (),
+
+                        RvInstruction::LoadStack { .. } => (),
+
+                        RvInstruction::StoreStack { .. } => (),
+                    }
+                }
+
+                for (index, source) in xchgs.into_iter().rev() {
+                    labelled.instructions.insert(index, X64Instruction::Xchg {
+                        dest: VReg::RealRegister(X64_REGISTER_RAX),
+                        source,
+                    });
+
+                    match &mut labelled.instructions[index + 1] {
+                        X64Instruction::Add { source, .. }
+                        | X64Instruction::Mov { source, .. } => {
+                            *source = VReg::RealRegister(X64_REGISTER_RAX);
+                        }
+
+                        _ => (),
+                    }
+
+                    labelled.instructions.insert(index + 2, X64Instruction::Xchg {
+                        dest: VReg::RealRegister(X64_REGISTER_RAX),
+                        source,
+                    });
+                }
+            }
         }
     }
 
@@ -233,6 +314,14 @@ impl Instr for RvInstruction {
 
                                 RvInstruction::Ret => {
                                     let _ = write!(file, "    ret");
+                                }
+
+                                RvInstruction::LoadStack { rd, rx } => {
+                                    let _ = writeln!(file, "    load {}, {}", rd, rx);
+                                }
+
+                                RvInstruction::StoreStack { rx, ry } => {
+                                    let _ = writeln!(file, "    store {}, {}", rx, ry);
                                 }
                             }
                         }
@@ -287,8 +376,10 @@ fn register(reg: VReg) -> String {
                 _ => unreachable!(),
             })
         }
+
         VReg::Virtual(_) => unreachable!(),
-        VReg::Spilled(_) => todo!(),
+
+        VReg::Spilled(s) => format!("-{}(fp)", 8 * s),
     }
 }
 
