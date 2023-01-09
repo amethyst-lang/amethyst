@@ -228,7 +228,7 @@ impl Instr for RvInstruction {
 
                         RvInstruction::Integer { rd, .. } => {
                             if let VReg::Spilled(_) = *rd {
-                                swap.push()
+                                //swap.push()
                             }
                         }
 
