@@ -219,6 +219,7 @@ impl Instr for RvInstruction {
     }
 
     fn mandatory_transforms(vcode: &mut VCode<Self>) {
+        /*
         for func in vcode.functions.iter_mut() {
             for labelled in func.labels.iter_mut() {
                 let mut swap = Vec::new();
@@ -268,6 +269,7 @@ impl Instr for RvInstruction {
                 }
             }
         }
+        */
     }
 
     fn emit_assembly(vcode: &VCode<Self>) {
