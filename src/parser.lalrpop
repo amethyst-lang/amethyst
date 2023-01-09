@@ -75,8 +75,26 @@ KeyRaw =
 Key: Ast<'input> =
     <s:@L> <v:KeyRaw> <e:@R> => Ast::Key(s..e, &v[1..]);
 
-SExpr: Ast<'input> =
-    <s:@L> "(" <v:Attribute*> ")" <e:@R> => Ast::SExpr(s..e, v);
+InfixOps: Ast<'input> = {
+    <v:Attribute> => v,
+    <s:@L> <a:InfixOps> <op:Symbol> <b:Attribute> <e:@R> => Ast::SExpr(s..e, vec![op, a, b]),
+    <s:@L> <a:InfixOps> <mut partial:SExpr> <b:Attribute> <e:@R> => {
+        match &mut partial {
+            Ast::SExpr(_, v) => {
+                v.insert(1, a);
+                v.push(b);
+            }
+
+            _ => unreachable!(),
+        }
+        partial
+    }
+}
+
+SExpr: Ast<'input> = {
+    <s:@L> "(" <v:Attribute*> ")" <e:@R> => Ast::SExpr(s..e, v),
+    <s:@L> "[" <v:InfixOps> "]" <e:@R> => v,
+}
 
 // AttributeElement: Ast<'input> = {
     // <Symbol>,
