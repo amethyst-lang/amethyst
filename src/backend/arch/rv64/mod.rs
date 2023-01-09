@@ -70,13 +70,15 @@ pub enum RvInstruction {
 
     Ret,
 
-    LoadStack {
+    Load {
         rd: VReg,
+        imm: i16,
         rx: VReg,
     },
 
-    StoreStack {
+    Store {
         rx: VReg,
+        imm: i16,
         ry: VReg,
     },
 }
@@ -98,9 +100,9 @@ impl Display for RvInstruction {
 
             RvInstruction::Ret => write!(f, "ret"),
 
-            RvInstruction::LoadStack { rd, rx } => write!(f, "load {}, {}", rd, rx),
+            RvInstruction::Load { rd, imm, rx } => write!(f, "load {}, {}({})", rd, imm, rx),
 
-            RvInstruction::StoreStack { rx, ry } => write!(f, "store {}, {}", rx, ry),
+            RvInstruction::Store { rx, imm, ry } => write!(f, "store {}, {}({})", rx, imm, ry),
         }
     }
 }
@@ -167,9 +169,9 @@ impl Instr for RvInstruction {
 
             RvInstruction::Ret => (),
 
-            RvInstruction::LoadStack { .. } => (),
+            RvInstruction::Load { .. } => (),
 
-            RvInstruction::StoreStack { .. } => (),
+            RvInstruction::Store { .. } => (),
         }
     }
 
@@ -212,14 +214,20 @@ impl Instr for RvInstruction {
 
             RvInstruction::Ret => (),
 
-            RvInstruction::LoadStack { .. } => (),
+            RvInstruction::Load { .. } => (),
 
-            RvInstruction::StoreStack { .. } => (),
+            RvInstruction::Store { .. } => (),
         }
     }
 
     fn mandatory_transforms(vcode: &mut VCode<Self>) {
-        /*
+        enum SwapType {
+            Rd,
+            Rx,
+            Ry
+        }
+        use SwapType::*;
+
         for func in vcode.functions.iter_mut() {
             for labelled in func.labels.iter_mut() {
                 let mut swap = Vec::new();
@@ -229,47 +237,59 @@ impl Instr for RvInstruction {
 
                         RvInstruction::Integer { rd, .. } => {
                             if let VReg::Spilled(_) = *rd {
-                                //swap.push()
+                                swap.push((i, *rd, Rd));
                             }
                         }
 
-                        RvInstruction::Add { rd, rx, ry } => todo!(),
+                        RvInstruction::Add { rd, rx, ry } => {
+                            if let VReg::Spilled(_) = *rd {
+                                swap.push((i, *rd, Rd));
+                            }
+                            if let VReg::Spilled(_) = *rx {
+                                swap.push((i, *rx, Rx));
+                            }
+                            if let VReg::Spilled(_) = *ry {
+                                swap.push((i, *ry, Ry));
+                            }
+                        }
 
-                        RvInstruction::Jal { rd, .. } => todo!(),
+                        RvInstruction::Jal { .. } => (),
 
-                        RvInstruction::Bne { rx, ry, .. } => todo!(),
+                        RvInstruction::Bne { .. } => (),
 
                         RvInstruction::Ret => (),
 
-                        RvInstruction::LoadStack { .. } => (),
+                        RvInstruction::Load { .. } => (),
 
-                        RvInstruction::StoreStack { .. } => (),
+                        RvInstruction::Store { .. } => (),
                     }
                 }
 
-                for (index, source) in xchgs.into_iter().rev() {
-                    labelled.instructions.insert(index, X64Instruction::Xchg {
-                        dest: VReg::RealRegister(X64_REGISTER_RAX),
-                        source,
-                    });
-
-                    match &mut labelled.instructions[index + 1] {
-                        X64Instruction::Add { source, .. }
-                        | X64Instruction::Mov { source, .. } => {
-                            *source = VReg::RealRegister(X64_REGISTER_RAX);
+                let temp_reg = VReg::RealRegister(RV_REGISTER_T0);
+                for (index, reg, swap_type) in swap.into_iter().rev() {
+                    match swap_type {
+                        Rd => todo!(),
+                        Rx | Ry => {
+                            labelled.instructions.insert(index, RvInstruction::Store {
+                                rx: temp_reg,
+                                imm: 0,
+                                ry: VReg::RealRegister(RV_REGISTER_SP),
+                            });
+                            let spilled = if let VReg::Spilled(s) = reg {
+                                s
+                            } else {
+                                unreachable!()
+                            };
+                            labelled.instructions.insert(index + 1, RvInstruction::Load {
+                                rd: temp_reg,
+                                imm: spilled as i16 * -8,
+                                rx: VReg::RealRegister(RV_REGISTER_FP),
+                            });
                         }
-
-                        _ => (),
                     }
-
-                    labelled.instructions.insert(index + 2, X64Instruction::Xchg {
-                        dest: VReg::RealRegister(X64_REGISTER_RAX),
-                        source,
-                    });
                 }
             }
         }
-        */
     }
 
     fn emit_assembly(vcode: &VCode<Self>) {
@@ -318,12 +338,12 @@ impl Instr for RvInstruction {
                                     let _ = write!(file, "    ret");
                                 }
 
-                                RvInstruction::LoadStack { rd, rx } => {
-                                    let _ = writeln!(file, "    load {}, {}", rd, rx);
+                                RvInstruction::Load { rd, imm, rx } => {
+                                    let _ = writeln!(file, "    load {}, {}({})", rd, imm, rx);
                                 }
 
-                                RvInstruction::StoreStack { rx, ry } => {
-                                    let _ = writeln!(file, "    store {}, {}", rx, ry);
+                                RvInstruction::Store { rx, imm, ry } => {
+                                    let _ = writeln!(file, "    store {}, {}({})", rx, imm, ry);
                                 }
                             }
                         }

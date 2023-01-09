@@ -111,10 +111,13 @@ pub enum X64Instruction {
 
     Ret,
 
-    Xchg {
-        dest: VReg,
+    Push {
         source: VReg,
-    }
+    },
+
+    Pop {
+        dest: VReg,
+    },
 }
 
 impl Display for X64Instruction {
@@ -128,7 +131,8 @@ impl Display for X64Instruction {
             X64Instruction::Jmp { location } => write!(f, "jmp {}", location),
             X64Instruction::Jne { location } => write!(f, "bne {}", location),
             X64Instruction::Ret => write!(f, "ret"),
-            X64Instruction::Xchg { dest, source } => write!(f, "xchg {}, {}", dest, source),
+            X64Instruction::Push { source } => write!(f, "push {}", source),
+            X64Instruction::Pop { dest } => write!(f, "pop {}", dest),
         }
     }
 }
@@ -185,7 +189,9 @@ impl Instr for X64Instruction {
 
             X64Instruction::Ret => (),
 
-            X64Instruction::Xchg { .. } => (),
+            X64Instruction::Push { .. } => (),
+
+            X64Instruction::Pop { .. } => (),
         }
     }
 
@@ -229,7 +235,9 @@ impl Instr for X64Instruction {
 
             X64Instruction::Ret => (),
 
-            X64Instruction::Xchg { .. } => (),
+            X64Instruction::Push { .. } => (),
+
+            X64Instruction::Pop { .. } => (),
         }
     }
 
@@ -251,12 +259,16 @@ impl Instr for X64Instruction {
                 }
 
                 for (index, source) in xchgs.into_iter().rev() {
-                    labelled.instructions.insert(index, X64Instruction::Xchg {
+                    labelled.instructions.insert(index, X64Instruction::Push {
+                        source: VReg::RealRegister(X64_REGISTER_RAX),
+                    });
+
+                    labelled.instructions.insert(index + 1, X64Instruction::Mov {
                         dest: VReg::RealRegister(X64_REGISTER_RAX),
                         source,
                     });
 
-                    match &mut labelled.instructions[index + 1] {
+                    match &mut labelled.instructions[index + 2] {
                         X64Instruction::Add { source, .. }
                         | X64Instruction::Mov { source, .. } => {
                             *source = VReg::RealRegister(X64_REGISTER_RAX);
@@ -265,9 +277,8 @@ impl Instr for X64Instruction {
                         _ => (),
                     }
 
-                    labelled.instructions.insert(index + 2, X64Instruction::Xchg {
+                    labelled.instructions.insert(index + 3, X64Instruction::Pop {
                         dest: VReg::RealRegister(X64_REGISTER_RAX),
-                        source,
                     });
                 }
             }
@@ -329,8 +340,12 @@ impl Instr for X64Instruction {
                                     let _ = writeln!(file, "    mov %rsp, %rbp\n    pop %rbp\n    ret");
                                 }
 
-                                X64Instruction::Xchg { dest, source } => {
-                                    let _ = writeln!(file, "    xchg {}, {}", register(*dest), register(*source));
+                                X64Instruction::Push { source } => {
+                                    let _ = writeln!(file, "    push {}", register(*source));
+                                }
+
+                                X64Instruction::Pop { dest } => {
+                                    let _ = writeln!(file, "    pop {}", register(*dest));
                                 }
                             }
                         }

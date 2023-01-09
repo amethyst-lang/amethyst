@@ -842,20 +842,30 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
 
                         let mut fields = vec![];
                         let mut generics = vec![];
+                        let mut current_field_name = None;
                         for field in sexpr.into_iter().skip(1) {
-                            match field {
-                                Ast::SExpr(_, mut v) if v.len() == 2 => match v.swap_remove(0) {
-                                    Ast::Symbol(_, name) => {
-                                        let type_ = parse_type(v.swap_remove(0))?;
-                                        type_.find_generics(&mut generics);
-                                        fields.push((name, type_));
+                            match current_field_name {
+                                Some(name) => {
+                                    let type_ = parse_type(field)?;
+                                    type_.find_generics(&mut generics);
+                                    fields.push((name, type_));
+                                    current_field_name = None;
+                                }
+
+                                None => {
+                                    match field {
+                                        Ast::Key(_, name) => {
+                                            current_field_name = Some(name);
+                                        }
+
+                                        _ => return Err(LoweringError::InvalidDefStruct),
                                     }
-
-                                    _ => return Err(LoweringError::InvalidDefStruct),
-                                },
-
-                                _ => return Err(LoweringError::InvalidDefStruct),
+                                }
                             }
+                        }
+
+                        if current_field_name.is_some() {
+                            return Err(LoweringError::InvalidDefStruct);
                         }
 
                         SExpr::StructDef {
@@ -875,18 +885,28 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         };
 
                         let mut values = vec![];
+                        let mut current_field_name = None;
                         for field in sexpr.into_iter().skip(1) {
-                            match field {
-                                Ast::SExpr(_, mut v) if v.len() == 2 => match v.swap_remove(0) {
-                                    Ast::Symbol(_, name) => {
-                                        values.push((name, lower_helper(v.remove(0), false)?));
+                            match current_field_name {
+                                Some(name) => {
+                                    values.push((name, lower_helper(field, false)?));
+                                    current_field_name = None;
+                                }
+
+                                None => {
+                                    match field {
+                                        Ast::Key(_, name) => {
+                                            current_field_name = Some(name);
+                                        }
+
+                                        _ => return Err(LoweringError::InvalidInst),
                                     }
-
-                                    _ => return Err(LoweringError::InvalidInst),
-                                },
-
-                                _ => return Err(LoweringError::InvalidInst),
+                                }
                             }
+                        }
+
+                        if current_field_name.is_some() {
+                            return Err(LoweringError::InvalidInst);
                         }
 
                         SExpr::StructSet {

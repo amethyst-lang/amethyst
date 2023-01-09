@@ -22,6 +22,7 @@ fn main() {
     correctness::extract_structs(&sexprs, &mut struct_map);
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
 
+    /*
     let ir = sexpr_lowering::lower(sexprs);
 
     match target.as_str() {
@@ -42,5 +43,6 @@ fn main() {
             std::process::exit(1);
         }
     }
+    */
 }
 
