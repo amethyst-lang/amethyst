@@ -110,8 +110,14 @@ impl Display for RvInstruction {
 impl Instr for RvInstruction {
     fn get_regs() -> Vec<VReg> {
         vec![
-            VReg::RealRegister(RV_REGISTER_T0),
-            /*
+            VReg::RealRegister(RV_REGISTER_A0),
+            VReg::RealRegister(RV_REGISTER_A1),
+            VReg::RealRegister(RV_REGISTER_A2),
+            VReg::RealRegister(RV_REGISTER_A3),
+            VReg::RealRegister(RV_REGISTER_A4),
+            VReg::RealRegister(RV_REGISTER_A5),
+            VReg::RealRegister(RV_REGISTER_A6),
+            VReg::RealRegister(RV_REGISTER_A7),
             VReg::RealRegister(RV_REGISTER_T1),
             VReg::RealRegister(RV_REGISTER_T2),
             VReg::RealRegister(RV_REGISTER_T3),
@@ -129,15 +135,6 @@ impl Instr for RvInstruction {
             VReg::RealRegister(RV_REGISTER_S9),
             VReg::RealRegister(RV_REGISTER_S10),
             VReg::RealRegister(RV_REGISTER_S11),
-            VReg::RealRegister(RV_REGISTER_A0),
-            VReg::RealRegister(RV_REGISTER_A1),
-            VReg::RealRegister(RV_REGISTER_A2),
-            VReg::RealRegister(RV_REGISTER_A3),
-            VReg::RealRegister(RV_REGISTER_A4),
-            VReg::RealRegister(RV_REGISTER_A5),
-            VReg::RealRegister(RV_REGISTER_A6),
-            VReg::RealRegister(RV_REGISTER_A7),
-            */
         ]
     }
 
@@ -221,41 +218,55 @@ impl Instr for RvInstruction {
     }
 
     fn mandatory_transforms(vcode: &mut VCode<Self>) {
-        enum SwapType {
-            Rd,
-            Rx,
-            Ry
-        }
-        use SwapType::*;
-
         for func in vcode.functions.iter_mut() {
             for labelled in func.labels.iter_mut() {
-                let mut swap = Vec::new();
-                for (i, instruction) in labelled.instructions.iter().enumerate() {
+                let mut swaps = Vec::new();
+                #[derive(Copy, Clone)]
+                enum SwapType {
+                    Rd,
+                    Rx,
+                    Ry,
+                }
+                use SwapType::*;
+
+                for (i, instruction) in labelled.instructions.iter_mut().enumerate() {
                     match instruction {
                         RvInstruction::PhiPlaceholder { .. } => (),
 
                         RvInstruction::Integer { rd, .. } => {
-                            if let VReg::Spilled(_) = *rd {
-                                swap.push((i, *rd, Rd));
+                            if let VReg::Spilled(spill) = *rd {
+                                swaps.push((i, spill, Rd));
+                                *rd = VReg::RealRegister(RV_REGISTER_TP);
                             }
                         }
 
                         RvInstruction::Add { rd, rx, ry } => {
-                            if let VReg::Spilled(_) = *rd {
-                                swap.push((i, *rd, Rd));
+                            if let VReg::Spilled(spill) = *rx {
+                                swaps.push((i, spill, Rx));
+                                *rx = VReg::RealRegister(RV_REGISTER_TP);
                             }
-                            if let VReg::Spilled(_) = *rx {
-                                swap.push((i, *rx, Rx));
+                            if let VReg::Spilled(spill) = *ry {
+                                swaps.push((i, spill, Ry));
+                                *ry = VReg::RealRegister(RV_REGISTER_T0);
                             }
-                            if let VReg::Spilled(_) = *ry {
-                                swap.push((i, *ry, Ry));
+                            if let VReg::Spilled(spill) = *rd {
+                                swaps.push((i, spill, Rd));
+                                *rd = VReg::RealRegister(RV_REGISTER_TP);
                             }
                         }
 
                         RvInstruction::Jal { .. } => (),
 
-                        RvInstruction::Bne { .. } => (),
+                        RvInstruction::Bne { rx, ry, .. } => {
+                            if let VReg::Spilled(spill) = *rx {
+                                swaps.push((i, spill, Rx));
+                                *rx = VReg::RealRegister(RV_REGISTER_TP);
+                            }
+                            if let VReg::Spilled(spill) = *ry {
+                                swaps.push((i, spill, Ry));
+                                *rx = VReg::RealRegister(RV_REGISTER_T0);
+                            }
+                        }
 
                         RvInstruction::Ret => (),
 
@@ -265,24 +276,28 @@ impl Instr for RvInstruction {
                     }
                 }
 
-                let temp_reg = VReg::RealRegister(RV_REGISTER_T0);
-                for (index, reg, swap_type) in swap.into_iter().rev() {
+                for (index, spill, swap_type) in swaps.into_iter().rev() {
                     match swap_type {
-                        Rd => todo!(),
-                        Rx | Ry => {
-                            labelled.instructions.insert(index, RvInstruction::Store {
-                                rx: temp_reg,
-                                imm: 0,
-                                ry: VReg::RealRegister(RV_REGISTER_SP),
+                        Rd => {
+                            labelled.instructions.insert(index + 1, RvInstruction::Store {
+                                rx: VReg::RealRegister(RV_REGISTER_TP),
+                                imm: spill as i16 * -8,
+                                ry: VReg::RealRegister(RV_REGISTER_FP),
                             });
-                            let spilled = if let VReg::Spilled(s) = reg {
-                                s
-                            } else {
-                                unreachable!()
-                            };
-                            labelled.instructions.insert(index + 1, RvInstruction::Load {
-                                rd: temp_reg,
-                                imm: spilled as i16 * -8,
+                        }
+
+                        Rx => {
+                            labelled.instructions.insert(index, RvInstruction::Load {
+                                rd: VReg::RealRegister(RV_REGISTER_TP),
+                                imm: spill as i16 * -8,
+                                rx: VReg::RealRegister(RV_REGISTER_FP),
+                            });
+                        }
+
+                        Ry => {
+                            labelled.instructions.insert(index, RvInstruction::Load {
+                                rd: VReg::RealRegister(RV_REGISTER_T0),
+                                imm: spill as i16 * -8,
                                 rx: VReg::RealRegister(RV_REGISTER_FP),
                             });
                         }
@@ -297,7 +312,7 @@ impl Instr for RvInstruction {
             Ok(mut file) => {
                 let _ = writeln!(file, ".global main");
                 for func in vcode.functions.iter() {
-                    let _ = writeln!(file, "{}:", func.name);
+                    let _ = writeln!(file, "{}:\n    sd s0, (sp)\n    add s0, sp, zero", func.name);
                     for (i, labelled) in func.labels.iter().enumerate() {
                         let _ = writeln!(file, ".L{}:", i);
                         for instruction in labelled.instructions.iter() {
@@ -335,15 +350,15 @@ impl Instr for RvInstruction {
                                 }
 
                                 RvInstruction::Ret => {
-                                    let _ = write!(file, "    ret");
+                                    let _ = write!(file, "add sp, s0, zero\n    ret");
                                 }
 
                                 RvInstruction::Load { rd, imm, rx } => {
-                                    let _ = writeln!(file, "    load {}, {}({})", rd, imm, rx);
+                                    let _ = writeln!(file, "    ld {}, {}({})", register(*rd), imm, register(*rx));
                                 }
 
                                 RvInstruction::Store { rx, imm, ry } => {
-                                    let _ = writeln!(file, "    store {}, {}({})", rx, imm, ry);
+                                    let _ = writeln!(file, "    sd {}, {}({})", register(*rx), imm, register(*ry));
                                 }
                             }
                         }
