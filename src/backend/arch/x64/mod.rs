@@ -101,6 +101,7 @@ impl Display for X64CMovOp {
 pub enum X64AluOp {
     Add,
     Sub,
+    IMul,
     And,
     Or,
     Xor,
@@ -114,6 +115,7 @@ impl Display for X64AluOp {
             X64AluOp::And => write!(f, "and"),
             X64AluOp::Or => write!(f, "or"),
             X64AluOp::Xor => write!(f, "xor"),
+            X64AluOp::IMul => write!(f, "imul"),
         }
     }
 }
@@ -132,6 +134,12 @@ pub enum X64Instruction {
     AluOp {
         op: X64AluOp,
         dest: VReg,
+        source: VReg,
+    },
+
+    DivRem {
+        rem: VReg, // RDX
+        div: VReg, // RAX
         source: VReg,
     },
 
@@ -180,6 +188,7 @@ impl Display for X64Instruction {
             X64Instruction::PhiPlaceholder { dest, .. } => write!(f, "phi {} ...", dest),
             X64Instruction::Integer { dest, value } => write!(f, "mov {}, {}", dest, value),
             X64Instruction::AluOp { op, dest, source } => write!(f, "{} {}, {}", op, dest, source),
+            X64Instruction::DivRem { source, .. } => write!(f, "idiv {}", source),
             X64Instruction::Mov { dest, source } => write!(f, "mov {}, {}", dest, source),
             X64Instruction::CMov { op, dest, source } => write!(f, "cmov{} {}, {}", op, dest, source),
             X64Instruction::Cmp{ a, b } => write!(f, "cmp {}, {}", a, b),
@@ -230,6 +239,16 @@ impl Instr for X64Instruction {
                 alloc.add_use(*source);
             }
 
+            X64Instruction::DivRem { rem, div, source } => {
+                alloc.add_def(*rem);
+                alloc.add_use(*rem);
+                alloc.force_same(*rem, VReg::RealRegister(X64_REGISTER_RDX));
+                alloc.add_def(*div);
+                alloc.add_use(*div);
+                alloc.force_same(*div, VReg::RealRegister(X64_REGISTER_RAX));
+                alloc.add_use(*source);
+            }
+
             X64Instruction::Mov { dest, source } => {
                 alloc.add_def(*dest);
                 alloc.add_use(*source);
@@ -274,6 +293,18 @@ impl Instr for X64Instruction {
             X64Instruction::AluOp { dest, source, .. } => {
                 if let Some(new) = alloc.get(dest) {
                     *dest = *new;
+                }
+                if let Some(new) = alloc.get(source) {
+                    *source = *new;
+                }
+            }
+
+            X64Instruction::DivRem { rem, div, source } => {
+                if let Some(new) = alloc.get(rem) {
+                    *rem = *new;
+                }
+                if let Some(new) = alloc.get(div) {
+                    *div = *new;
                 }
                 if let Some(new) = alloc.get(source) {
                     *source = *new;
@@ -388,6 +419,10 @@ impl Instr for X64Instruction {
 
                                 X64Instruction::AluOp { op, dest, source } => {
                                     let _ = writeln!(file, "    {} {}, {}", op, register(*dest), register(*source));
+                                }
+
+                                X64Instruction::DivRem { source, .. } => {
+                                    let _ = writeln!(file, "    div {}", register(*source));
                                 }
 
                                 X64Instruction::Mov { dest, source } => {
@@ -529,6 +564,7 @@ impl InstructionSelector for X64Selector {
 
             Operation::Add(a, b)
             | Operation::Sub(a, b)
+            | Operation::Mul(a, b)
             | Operation::BitAnd(a, b)
             | Operation::BitOr(a, b)
             | Operation::BitXor(a, b) => {
@@ -539,6 +575,7 @@ impl InstructionSelector for X64Selector {
                             gen.push_instruction(X64Instruction::AluOp { op: match op {
                                 Operation::Add(_, _) => X64AluOp::Add,
                                 Operation::Sub(_, _) => X64AluOp::Sub,
+                                Operation::Mul(_, _) => X64AluOp::IMul,
                                 Operation::BitAnd(_, _) => X64AluOp::And,
                                 Operation::BitOr(_, _) => X64AluOp::Or,
                                 Operation::BitXor(_, _) => X64AluOp::Xor,
@@ -549,12 +586,56 @@ impl InstructionSelector for X64Selector {
                 }
             }
 
+            Operation::Div(a, b) => {
+                if let Some(dest) = dest {
+                    if let Some(&a) = self.value_map.get(&a) {
+                        if let Some(&source) = self.value_map.get(&b) {
+                            let rem = VReg::Virtual(self.vreg_index);
+                            self.vreg_index += 1;
+                            gen.push_instruction(X64Instruction::Mov {
+                                dest,
+                                source: a,
+                            });
+                            gen.push_instruction(X64Instruction::Integer {
+                                dest: rem,
+                                value: 0,
+                            });
+                            gen.push_instruction(X64Instruction::DivRem {
+                                rem,
+                                div: dest,
+                                source,
+                            });
+                        }
+                    }
+                }
+            }
 
-            Operation::Mul(_, _) => todo!(),
-            Operation::Div(_, _) => todo!(),
-            Operation::Mod(_, _) => todo!(),
-            Operation::Bsl(_, _) => todo!(),
-            Operation::Bsr(_, _) => todo!(),
+            Operation::Mod(a, b) => {
+                if let Some(dest) = dest {
+                    if let Some(&a) = self.value_map.get(&a) {
+                        if let Some(&source) = self.value_map.get(&b) {
+                            let div = VReg::Virtual(self.vreg_index);
+                            self.vreg_index += 1;
+                            gen.push_instruction(X64Instruction::Mov {
+                                dest: div,
+                                source: a,
+                            });
+                            gen.push_instruction(X64Instruction::Integer {
+                                dest,
+                                value: 0,
+                            });
+                            gen.push_instruction(X64Instruction::DivRem {
+                                rem: dest,
+                                div,
+                                source,
+                            });
+                        }
+                    }
+                }
+            }
+
+            Operation::Bsl(_, _)
+            | Operation::Bsr(_, _) => todo!(),
 
             Operation::Eq(a, b) 
             | Operation::Ne(a, b)
