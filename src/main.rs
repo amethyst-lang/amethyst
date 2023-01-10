@@ -14,7 +14,7 @@ use clap::Parser;
 struct Args {
     #[arg(value_name = "Input file")]
     input_file: String,
-    #[arg(short, long, default_value_t = String::from("x86"), value_name = "Target arch")]
+    #[arg(short, long, default_value_t = String::from("x64"), value_name = "Target arch")]
     target: String
 }
 
@@ -34,7 +34,7 @@ fn main() {
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
 
     let ir = sexpr_lowering::lower(sexprs);
-
+    
     match args.target.as_str() {
         "x64" => {
             let mut vcode = ir.lower_to_vcode::<_, X64Selector>();
