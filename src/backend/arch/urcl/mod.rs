@@ -451,7 +451,7 @@ impl Instr for UrclInstruction {
                 for func in vcode.functions.iter() {
                     let _ = writeln!(file, ".{}", func.name);
                     for (i, labelled) in func.labels.iter().enumerate() {
-                        let _ = writeln!(file, ".L{}:", i);
+                        let _ = writeln!(file, ".L{}", i);
                         for instruction in labelled.instructions.iter() {
                             match instruction {
                                 UrclInstruction::PhiPlaceholder { .. } => (),
@@ -467,10 +467,10 @@ impl Instr for UrclInstruction {
                                 UrclInstruction::Jmp { location } => {
                                     match *location {
                                         Location::InternalLabel(_) => {
-                                            let _ = writeln!(file, "    jmp .{}", location);
+                                            let _ = writeln!(file, "    jmp {}", location);
                                         }
                                         Location::Function(f) => {
-                                            let _ = writeln!(file, "    jmp .{}", vcode.functions[f].name);
+                                            let _ = writeln!(file, "    jmp {}", vcode.functions[f].name);
                                         }
                                     }
                                 }
