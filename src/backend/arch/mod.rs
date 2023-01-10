@@ -7,6 +7,7 @@ use super::{
 
 pub mod rv64;
 pub mod x64;
+pub mod urcl;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VReg {
