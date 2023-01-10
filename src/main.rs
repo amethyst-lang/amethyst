@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use amethyst::backend::arch::rv64::RvSelector;
+use amethyst::backend::arch::urcl::UrclSelector;
 use amethyst::backend::arch::x64::X64Selector;
 use amethyst::backend::regalloc::RegAlloc;
 use amethyst::backend::sexpr_lowering;
@@ -33,6 +34,12 @@ fn main() {
 
         "rv64" => {
             let mut vcode = ir.lower_to_vcode::<_, RvSelector>();
+            vcode.allocate_regs::<RegAlloc>();
+            vcode.emit_assembly();
+        }
+
+        "urcl" => {
+            let mut vcode = ir.lower_to_vcode::<_, UrclSelector>();
             vcode.allocate_regs::<RegAlloc>();
             vcode.emit_assembly();
         }
