@@ -98,6 +98,26 @@ impl Display for X64CMovOp {
     }
 }
 
+pub enum X64AluOp {
+    Add,
+    Sub,
+    And,
+    Or,
+    Xor,
+}
+
+impl Display for X64AluOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            X64AluOp::Add => write!(f, "add"),
+            X64AluOp::Sub => write!(f, "sub"),
+            X64AluOp::And => write!(f, "and"),
+            X64AluOp::Or => write!(f, "or"),
+            X64AluOp::Xor => write!(f, "xor"),
+        }
+    }
+}
+
 pub enum X64Instruction {
     PhiPlaceholder {
         dest: VReg,
@@ -109,7 +129,8 @@ pub enum X64Instruction {
         value: u64,
     },
 
-    Add {
+    AluOp {
+        op: X64AluOp,
         dest: VReg,
         source: VReg,
     },
@@ -158,7 +179,7 @@ impl Display for X64Instruction {
         match self {
             X64Instruction::PhiPlaceholder { dest, .. } => write!(f, "phi {} ...", dest),
             X64Instruction::Integer { dest, value } => write!(f, "mov {}, {}", dest, value),
-            X64Instruction::Add { dest, source } => write!(f, "add {}, {}", dest, source),
+            X64Instruction::AluOp { op, dest, source } => write!(f, "{} {}, {}", op, dest, source),
             X64Instruction::Mov { dest, source } => write!(f, "mov {}, {}", dest, source),
             X64Instruction::CMov { op, dest, source } => write!(f, "cmov{} {}, {}", op, dest, source),
             X64Instruction::Cmp{ a, b } => write!(f, "cmp {}, {}", a, b),
@@ -203,7 +224,7 @@ impl Instr for X64Instruction {
                 alloc.add_def(*dest);
             }
 
-            X64Instruction::Add { dest, source } => {
+            X64Instruction::AluOp { dest, source, .. } => {
                 alloc.add_def(*dest);
                 alloc.add_use(*dest);
                 alloc.add_use(*source);
@@ -250,7 +271,7 @@ impl Instr for X64Instruction {
                 }
             }
 
-            X64Instruction::Add { dest, source } => {
+            X64Instruction::AluOp { dest, source, .. } => {
                 if let Some(new) = alloc.get(dest) {
                     *dest = *new;
                 }
@@ -310,7 +331,7 @@ impl Instr for X64Instruction {
                 let mut swaps = Vec::new();
                 for (i, instruction) in labelled.instructions.iter().enumerate() {
                     match instruction {
-                        X64Instruction::Add { dest, source }
+                        X64Instruction::AluOp { dest, source, .. }
                         | X64Instruction::Mov { dest, source } => {
                             if let (VReg::Spilled(_), VReg::Spilled(_)) = (*dest, *source) {
                                 swaps.push((i, *source));
@@ -332,7 +353,7 @@ impl Instr for X64Instruction {
                     });
 
                     match &mut labelled.instructions[index + 2] {
-                        X64Instruction::Add { source, .. }
+                        X64Instruction::AluOp { source, .. }
                         | X64Instruction::Mov { source, .. } => {
                             *source = VReg::RealRegister(X64_REGISTER_RAX);
                         }
@@ -365,8 +386,8 @@ impl Instr for X64Instruction {
                                     let _ = writeln!(file, "    mov {}, {}", register(*dest), value);
                                 }
 
-                                X64Instruction::Add { dest, source } => {
-                                    let _ = writeln!(file, "    add {}, {}", register(*dest), register(*source));
+                                X64Instruction::AluOp { op, dest, source } => {
+                                    let _ = writeln!(file, "    {} {}, {}", op, register(*dest), register(*source));
                                 }
 
                                 X64Instruction::Mov { dest, source } => {
@@ -506,26 +527,34 @@ impl InstructionSelector for X64Selector {
                 }
             }
 
-            Operation::Add(a, b) => {
+            Operation::Add(a, b)
+            | Operation::Sub(a, b)
+            | Operation::BitAnd(a, b)
+            | Operation::BitOr(a, b)
+            | Operation::BitXor(a, b) => {
                 if let Some(dest) = dest {
                     if let Some(&source) = self.value_map.get(&a) {
                         gen.push_instruction(X64Instruction::Mov { dest, source });
                         if let Some(&source) = self.value_map.get(&b) {
-                            gen.push_instruction(X64Instruction::Add { dest, source });
+                            gen.push_instruction(X64Instruction::AluOp { op: match op {
+                                Operation::Add(_, _) => X64AluOp::Add,
+                                Operation::Sub(_, _) => X64AluOp::Sub,
+                                Operation::BitAnd(_, _) => X64AluOp::And,
+                                Operation::BitOr(_, _) => X64AluOp::Or,
+                                Operation::BitXor(_, _) => X64AluOp::Xor,
+                                _ => unreachable!(),
+                            }, dest, source });
                         }
                     }
                 }
             }
 
-            Operation::Sub(_, _) => todo!(),
+
             Operation::Mul(_, _) => todo!(),
             Operation::Div(_, _) => todo!(),
             Operation::Mod(_, _) => todo!(),
             Operation::Bsl(_, _) => todo!(),
             Operation::Bsr(_, _) => todo!(),
-            Operation::BitAnd(_, _) => todo!(),
-            Operation::BitOr(_, _) => todo!(),
-            Operation::BitXor(_, _) => todo!(),
 
             Operation::Eq(a, b) 
             | Operation::Ne(a, b)
