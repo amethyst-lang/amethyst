@@ -76,6 +76,28 @@ pub const X64_REGISTER_R13: usize = 13;
 pub const X64_REGISTER_R14: usize = 14;
 pub const X64_REGISTER_R15: usize = 15;
 
+pub enum X64CMovOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl Display for X64CMovOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            X64CMovOp::Eq => write!(f, "e"),
+            X64CMovOp::Ne => write!(f, "ne"),
+            X64CMovOp::Lt => write!(f, "l"),
+            X64CMovOp::Le => write!(f, "le"),
+            X64CMovOp::Gt => write!(f, "g"),
+            X64CMovOp::Ge => write!(f, "ge"),
+        }
+    }
+}
+
 pub enum X64Instruction {
     PhiPlaceholder {
         dest: VReg,
@@ -95,6 +117,17 @@ pub enum X64Instruction {
     Mov {
         dest: VReg,
         source: VReg,
+    },
+
+    CMov {
+        op: X64CMovOp,
+        dest: VReg,
+        source: VReg,
+    },
+
+    Cmp {
+        a: VReg,
+        b: VReg,
     },
 
     CmpZero {
@@ -127,6 +160,8 @@ impl Display for X64Instruction {
             X64Instruction::Integer { dest, value } => write!(f, "mov {}, {}", dest, value),
             X64Instruction::Add { dest, source } => write!(f, "add {}, {}", dest, source),
             X64Instruction::Mov { dest, source } => write!(f, "mov {}, {}", dest, source),
+            X64Instruction::CMov { op, dest, source } => write!(f, "cmov{} {}, {}", op, dest, source),
+            X64Instruction::Cmp{ a, b } => write!(f, "cmp {}, {}", a, b),
             X64Instruction::CmpZero { source } => write!(f, "cmp {}, 0", source),
             X64Instruction::Jmp { location } => write!(f, "jmp {}", location),
             X64Instruction::Jne { location } => write!(f, "bne {}", location),
@@ -179,6 +214,16 @@ impl Instr for X64Instruction {
                 alloc.add_use(*source);
             }
 
+            X64Instruction::CMov { dest, source, .. } => {
+                alloc.add_def(*dest);
+                alloc.add_use(*source);
+            }
+
+            X64Instruction::Cmp { a, b } => {
+                alloc.add_use(*a);
+                alloc.add_use(*b);
+            }
+
             X64Instruction::CmpZero { source } => {
                 alloc.add_use(*source);
             }
@@ -215,6 +260,24 @@ impl Instr for X64Instruction {
             }
 
             X64Instruction::Mov { dest, source } => {
+                if let Some(new) = alloc.get(dest) {
+                    *dest = *new;
+                }
+                if let Some(new) = alloc.get(source) {
+                    *source = *new;
+                }
+            }
+
+            X64Instruction::Cmp { a, b } => {
+                if let Some(new) = alloc.get(a) {
+                    *a = *new;
+                }
+                if let Some(new) = alloc.get(b) {
+                    *b = *new;
+                }
+            }
+
+            X64Instruction::CMov { dest, source, .. } => {
                 if let Some(new) = alloc.get(dest) {
                     *dest = *new;
                 }
@@ -308,6 +371,14 @@ impl Instr for X64Instruction {
 
                                 X64Instruction::Mov { dest, source } => {
                                     let _ = writeln!(file, "    mov {}, {}", register(*dest), register(*source));
+                                }
+
+                                X64Instruction::CMov { op, dest, source } => {
+                                    let _ = writeln!(file, "    cmov{} {}, {}", op, register(*dest), register(*source));
+                                }
+
+                                X64Instruction::Cmp { a, b } => {
+                                    let _ = writeln!(file, "    cmp {}, {}", register(*a), register(*b));
                                 }
 
                                 X64Instruction::CmpZero { source } => {
@@ -452,15 +523,50 @@ impl InstructionSelector for X64Selector {
             Operation::Mod(_, _) => todo!(),
             Operation::Bsl(_, _) => todo!(),
             Operation::Bsr(_, _) => todo!(),
-            Operation::Eq(_, _) => todo!(),
-            Operation::Ne(_, _) => todo!(),
-            Operation::Lt(_, _) => todo!(),
-            Operation::Le(_, _) => todo!(),
-            Operation::Gt(_, _) => todo!(),
-            Operation::Ge(_, _) => todo!(),
             Operation::BitAnd(_, _) => todo!(),
             Operation::BitOr(_, _) => todo!(),
             Operation::BitXor(_, _) => todo!(),
+
+            Operation::Eq(a, b) 
+            | Operation::Ne(a, b)
+            | Operation::Lt(a, b)
+            | Operation::Le(a, b)
+            | Operation::Gt(a, b)
+            | Operation::Ge(a, b) => {
+                if let Some(dest) = dest {
+                    if let Some(&a) = self.value_map.get(&a) {
+                        if let Some(&b) = self.value_map.get(&b) {
+                            gen.push_instruction(X64Instruction::Integer {
+                                dest,
+                                value: 0,
+                            });
+                            gen.push_instruction(X64Instruction::Cmp {
+                                a,
+                                b,
+                            });
+                            let source = VReg::Virtual(self.vreg_index);
+                            self.vreg_index += 1;
+                            gen.push_instruction(X64Instruction::Integer {
+                                dest: source,
+                                value: 1,
+                            });
+                            gen.push_instruction(X64Instruction::CMov {
+                                op: match op {
+                                    Operation::Eq(_, _) => X64CMovOp::Eq,
+                                    Operation::Ne(_, _) => X64CMovOp::Ne,
+                                    Operation::Lt(_, _) => X64CMovOp::Lt,
+                                    Operation::Le(_, _) => X64CMovOp::Le,
+                                    Operation::Gt(_, _) => X64CMovOp::Gt,
+                                    Operation::Ge(_, _) => X64CMovOp::Ge,
+                                    _ => unreachable!(),
+                                },
+                                dest,
+                                source,
+                            });
+                        }
+                    }
+                }
+            }
 
             Operation::Phi(mapping) => {
                 if let Some(dest) = dest {
