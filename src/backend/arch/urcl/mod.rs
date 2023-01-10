@@ -42,7 +42,7 @@ pub enum UrclInstruction {
         ry: VReg,
     },
 
-    Mul {
+    Mlt {
         rd: VReg,
         rx: VReg,
         ry: VReg,
@@ -140,6 +140,12 @@ pub enum UrclInstruction {
         rx: VReg,
     },
 
+    Cal {
+        location: Location
+    },
+
+    Ret,
+
     Hlt,
 }
 
@@ -178,7 +184,7 @@ impl Display for UrclInstruction {
 
             UrclInstruction::Div { rd, rx, ry } => write!(f, "div {} {} {}", rd, rx, ry),
 
-            UrclInstruction::Mul { rd, rx, ry } => write!(f, "mul {} {} {}", rd, rx, ry),
+            UrclInstruction::Mlt { rd, rx, ry } => write!(f, "Mlt {} {} {}", rd, rx, ry),
 
             UrclInstruction::Bsl { rd, rx, ry } => write!(f, "bsl {} {} {}", rd, rx, ry),
 
@@ -189,6 +195,10 @@ impl Display for UrclInstruction {
             UrclInstruction::Str { rd, rx } => write!(f, "str {} {}", rd, rx),
 
             UrclInstruction::Hlt => write!(f, "hlt"),
+
+            UrclInstruction::Cal { location } => write!(f, "cal {}", location),
+
+            UrclInstruction::Ret => write!(f, "ret"),
         }
     }
 }
@@ -272,7 +282,7 @@ impl Instr for UrclInstruction {
                 alloc.add_use(*ry);
             }
 
-            UrclInstruction::Mul { rd, rx, ry } => {
+            UrclInstruction::Mlt { rd, rx, ry } => {
                 alloc.add_def(*rd);
                 alloc.add_use(*rx);
                 alloc.add_use(*ry);
@@ -320,7 +330,11 @@ impl Instr for UrclInstruction {
                 alloc.add_use(*ry);
             }
 
-            UrclInstruction::Hlt => ()
+            UrclInstruction::Hlt => (),
+
+            UrclInstruction::Cal { .. } => (),
+
+            UrclInstruction::Ret => ()
         }
     }
 
@@ -389,7 +403,7 @@ impl Instr for UrclInstruction {
                 apply_alloc(alloc, ry);
             }
 
-            UrclInstruction::Mul { rd, rx, ry } => {
+            UrclInstruction::Mlt { rd, rx, ry } => {
                 apply_alloc(alloc, rd);
                 apply_alloc(alloc, rx);
                 apply_alloc(alloc, ry);
@@ -437,17 +451,23 @@ impl Instr for UrclInstruction {
                 apply_alloc(alloc, ry);
             }
 
-            UrclInstruction::Hlt => ()
+            UrclInstruction::Hlt => (),
+
+            UrclInstruction::Cal { .. } => (),
+
+            UrclInstruction::Ret => (),
         }
     }
 
-    fn mandatory_transforms(vcode: &mut VCode<Self>) {
+    fn mandatory_transforms(_vcode: &mut VCode<Self>) {
         // TODO
     }
 
     fn emit_assembly(vcode: &VCode<Self>) {
         match File::create(format!("{}.urcl", vcode.name)) {
             Ok(mut file) => {
+                let _ = writeln!(file, "minreg 8");
+                let _ = writeln!(file, "bits 64");
                 for func in vcode.functions.iter() {
                     let _ = writeln!(file, ".{}", func.name);
                     for (i, labelled) in func.labels.iter().enumerate() {
@@ -553,8 +573,8 @@ impl Instr for UrclInstruction {
                                     let _ = writeln!(file, "    sub {} {} {}", register(*rd), register(*rx), register(*ry));
                                 }
 
-                                UrclInstruction::Mul { rd, rx, ry } => {
-                                    let _ = writeln!(file, "    mul {} {} {}", register(*rd), register(*rx), register(*ry));
+                                UrclInstruction::Mlt { rd, rx, ry } => {
+                                    let _ = writeln!(file, "    mlt {} {} {}", register(*rd), register(*rx), register(*ry));
                                 }
 
                                 UrclInstruction::Div { rd, rx, ry } => {
@@ -587,6 +607,14 @@ impl Instr for UrclInstruction {
 
                                 UrclInstruction::Hlt => {
                                     let _ = writeln!(file, "    hlt");
+                                }
+
+                                UrclInstruction::Cal { location } => {
+                                    let _ = writeln!(file, "    cal {}", location);
+                                }
+
+                                UrclInstruction::Ret => {
+                                    let _ = writeln!(file, "    ret");
                                 }
                             }
                         }
@@ -684,21 +712,75 @@ impl InstructionSelector for UrclSelector {
                 }
             }
 
-            Operation::Sub(_, _) => todo!(),
-            Operation::Mul(_, _) => todo!(),
-            Operation::Div(_, _) => todo!(),
-            Operation::Mod(_, _) => todo!(),
-            Operation::Bsl(_, _) => todo!(),
-            Operation::Bsr(_, _) => todo!(),
+            Operation::Sub(a, b) => {
+                if let Some(&rx) = self.value_map.get(&a) {
+                    if let Some(&ry) = self.value_map.get(&b) {
+                        gen.push_instruction(UrclInstruction::Sub { rd, rx, ry });
+                    }
+                }
+            },
+            Operation::Mul(a, b) => {
+                if let Some(&rx) = self.value_map.get(&a) {
+                    if let Some(&ry) = self.value_map.get(&b) {
+                        gen.push_instruction(UrclInstruction::Mlt { rd, rx, ry });
+                    }
+                }
+            },
+            Operation::Div(a, b) => {
+                if let Some(&rx) = self.value_map.get(&a) {
+                    if let Some(&ry) = self.value_map.get(&b) {
+                        gen.push_instruction(UrclInstruction::Div { rd, rx, ry });
+                    }
+                }
+            },
+            Operation::Mod(a, b) => {
+                if let Some(&rx) = self.value_map.get(&a) {
+                    if let Some(&ry) = self.value_map.get(&b) {
+                        gen.push_instruction(UrclInstruction::Mod { rd, rx, ry });
+                    }
+                }
+            },
+            Operation::Bsl(a, b) => {
+                if let Some(&rx) = self.value_map.get(&a) {
+                    if let Some(&ry) = self.value_map.get(&b) {
+                        gen.push_instruction(UrclInstruction::Bsl { rd, rx, ry });
+                    }
+                }
+            },
+            Operation::Bsr(a, b) => {
+                if let Some(&rx) = self.value_map.get(&a) {
+                    if let Some(&ry) = self.value_map.get(&b) {
+                        gen.push_instruction(UrclInstruction::Bsr { rd, rx, ry });
+                    }
+                }
+            },
             Operation::Eq(_, _) => todo!(),
             Operation::Ne(_, _) => todo!(),
             Operation::Lt(_, _) => todo!(),
             Operation::Le(_, _) => todo!(),
             Operation::Gt(_, _) => todo!(),
             Operation::Ge(_, _) => todo!(),
-            Operation::BitAnd(_, _) => todo!(),
-            Operation::BitOr(_, _) => todo!(),
-            Operation::BitXor(_, _) => todo!(),
+            Operation::BitAnd(a, b) => {
+                if let Some(&rx) = self.value_map.get(&a) {
+                    if let Some(&ry) = self.value_map.get(&b) {
+                        gen.push_instruction(UrclInstruction::And { rd, rx, ry });
+                    }
+                }
+            },
+            Operation::BitOr(a, b) => {
+                if let Some(&rx) = self.value_map.get(&a) {
+                    if let Some(&ry) = self.value_map.get(&b) {
+                        gen.push_instruction(UrclInstruction::Or { rd, rx, ry });
+                    }
+                }
+            },
+            Operation::BitXor(a, b) => {
+                if let Some(&rx) = self.value_map.get(&a) {
+                    if let Some(&ry) = self.value_map.get(&b) {
+                        gen.push_instruction(UrclInstruction::Xor { rd, rx, ry });
+                    }
+                }
+            },
 
             Operation::Phi(mapping) => {
                 gen.push_instruction(UrclInstruction::PhiPlaceholder {
@@ -731,10 +813,10 @@ impl InstructionSelector for UrclSelector {
             Terminator::NoTerminator => (),
 
             Terminator::ReturnVoid => {
-                gen.push_instruction(UrclInstruction::Hlt);
+                gen.push_instruction(UrclInstruction::Ret);
             }
 
-            Terminator::Return(v) => {
+            Terminator::Return(_) => {
                 gen.push_instruction(UrclInstruction::Hlt);
             }
 
