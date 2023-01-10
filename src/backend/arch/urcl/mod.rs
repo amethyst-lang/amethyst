@@ -466,6 +466,8 @@ impl Instr for UrclInstruction {
     fn emit_assembly(vcode: &VCode<Self>) {
         match File::create(format!("{}.urcl", vcode.name)) {
             Ok(mut file) => {
+                let _ = writeln!(file, "minreg 8");
+                let _ = writeln!(file, "bits 64");
                 for func in vcode.functions.iter() {
                     let _ = writeln!(file, ".{}", func.name);
                     for (i, labelled) in func.labels.iter().enumerate() {
