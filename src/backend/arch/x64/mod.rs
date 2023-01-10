@@ -79,7 +79,7 @@ pub const X64_REGISTER_R15: usize = 15;
 pub enum X64Instruction {
     PhiPlaceholder {
         dest: VReg,
-        options: Vec<(Location, VReg)>,
+        options: Vec<(Location, Value)>,
     },
 
     Integer {
@@ -470,12 +470,10 @@ impl InstructionSelector for X64Selector {
                             .into_iter()
                             .filter_map(|(b, v)| {
                                 if let Some(&l) = gen.label_map().get(&b) {
-                                    if let Some(&r) = self.value_map.get(&v) {
-                                        return Some((Location::InternalLabel(l), r));
-                                    }
+                                    Some((Location::InternalLabel(l), v))
+                                } else {
+                                    None
                                 }
-
-                                None
                             })
                             .collect(),
                     });
@@ -549,13 +547,15 @@ impl InstructionSelector for X64Selector {
             for (label_index, instr_index) in v.into_iter().rev() {
                 let phi = func.labels[label_index].instructions.remove(instr_index);
                 if let X64Instruction::PhiPlaceholder { dest, options } = phi {
-                    for (label, source) in options {
+                    for (label, v) in options {
                         if let Location::InternalLabel(label) = label {
-                            let labelled = &mut func.labels[label];
-                            labelled.instructions.insert(
-                                labelled.instructions.len() - 1,
-                                X64Instruction::Mov { dest, source },
-                            );
+                            if let Some(&source) = self.value_map.get(&v) {
+                                let labelled = &mut func.labels[label];
+                                labelled.instructions.insert(
+                                    labelled.instructions.len() - 1,
+                                    X64Instruction::Mov { dest, source },
+                                );
+                            }
                         }
                     }
                 }

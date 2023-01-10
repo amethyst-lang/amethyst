@@ -105,7 +105,11 @@ impl Display for Function {
 
         for (i, block) in self.blocks.iter().enumerate() {
             if !block.deleted {
-                write!(f, "{}:\n{}", i, block)?;
+                write!(f, "{}: // preds =", i)?;
+                for pred in block.predecessors.iter() {
+                    write!(f, " {}", pred)?;
+                }
+                write!(f, "\n{}", block)?;
             }
         }
         write!(f, "}}")
@@ -467,33 +471,40 @@ impl ModuleBuilder {
             }
 
             let mut var_map = HashMap::new();
+            let mut phi_to_var_map = HashMap::new();
             for (i, block) in func.blocks.iter_mut().enumerate() {
                 if block.deleted {
                     continue;
                 }
 
-                if block.predecessors.len() == 1 {
-                    let prev = block.predecessors.iter().next().unwrap().1;
-                    for var in func.arg_types.len()..func.variables.len() {
-                        let var = VariableId(var);
-                        if let Some(&val) = var_map.get(&(var, prev)) {
-                            var_map.insert((var, i), val);
+                match block.predecessors.len() {
+                    0 => (),
+
+                    1 => {
+                        let prev = block.predecessors.iter().next().unwrap().1;
+                        for var in func.arg_types.len()..func.variables.len() {
+                            let var = VariableId(var);
+                            if let Some(&val) = var_map.get(&(var, prev)) {
+                                var_map.insert((var, i), val);
+                            }
                         }
                     }
-                } else if i != 0 {
-                    for var in func.arg_types.len()..func.variables.len() {
-                        let var = VariableId(var);
-                        let phi = block.predecessors.iter().filter_map(|&v| var_map.get(&(var, v.1)).map(|&u| (v, u))).collect();
-                        let operation = Operation::Phi(phi);
-                        let val = Value(func.value_index);
-                        func.value_index += 1;
-                        let phi = Instruction {
-                            yielded: Some(val),
-                            type_: func.variables[var.0].type_.clone(),
-                            operation,
-                        };
-                        block.instructions.insert(0, phi);
-                        var_map.insert((var, i), val);
+
+                    _ => {
+                        for var in func.arg_types.len()..func.variables.len() {
+                            let var = VariableId(var);
+                            let operation = Operation::Phi(Vec::new());
+                            let val = Value(func.value_index);
+                            func.value_index += 1;
+                            let phi = Instruction {
+                                yielded: Some(val),
+                                type_: func.variables[var.0].type_.clone(),
+                                operation,
+                            };
+                            block.instructions.insert(0, phi);
+                            var_map.insert((var, i), val);
+                            phi_to_var_map.insert(val, var);
+                        }
                     }
                 }
 
@@ -523,6 +534,22 @@ impl ModuleBuilder {
 
                 for remove in to_remove.into_iter().rev() {
                     block.instructions.remove(remove);
+                }
+            }
+
+            for block in func.blocks.iter_mut() {
+                if block.deleted {
+                    continue;
+                }
+
+                if block.predecessors.len() > 1 {
+                    for instruction in block.instructions.iter_mut() {
+                        if let Operation::Phi(mapping) = &mut instruction.operation {
+                            if let Some(&var) = instruction.yielded.as_ref().and_then(|v| phi_to_var_map.get(v)) {
+                                *mapping = block.predecessors.iter().filter_map(|&v| var_map.get(&(var, v.1)).map(|&u| (v, u))).collect();
+                            }
+                        }
+                    }
                 }
             }
         }

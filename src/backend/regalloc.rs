@@ -23,26 +23,38 @@ struct RegNode {
 
 impl RegisterAllocator for RegAlloc {
     fn add_use(&mut self, reg: VReg) {
-        for node in self.nodes.iter_mut() {
-            if node.reg == reg {
-                node.usage_count += 1;
-                node.live_range.end = self.live_step_count;
-            }
+        if let Some(node) = self.nodes.iter_mut().find(|v| v.reg == reg) {
+            node.usage_count += 1;
+            node.live_range.end = self.live_step_count;
+        } else if let VReg::Virtual(_) = reg {
+            self.nodes.push(RegNode {
+                reg,
+                colour: None,
+                live_range: self.live_step_count..self.live_step_count,
+                usage_count: 1,
+                edge_count: 0,
+                in_stack: false,
+            });
         }
     }
 
     fn add_def(&mut self, reg: VReg) {
         match reg {
             VReg::RealRegister(_) => (),
+
             VReg::Virtual(_) => {
-                self.nodes.push(RegNode {
-                    reg,
-                    colour: None,
-                    live_range: self.live_step_count..self.live_step_count,
-                    usage_count: 0,
-                    edge_count: 0,
-                    in_stack: false,
-                });
+                if let Some(node) = self.nodes.iter_mut().find(|v| v.reg == reg) {
+                    node.live_range.end = self.live_step_count;
+                } else {
+                    self.nodes.push(RegNode {
+                        reg,
+                        colour: None,
+                        live_range: self.live_step_count..self.live_step_count,
+                        usage_count: 0,
+                        edge_count: 0,
+                        in_stack: false,
+                    });
+                }
             }
 
             VReg::Spilled(_) => (),
@@ -59,8 +71,8 @@ impl RegisterAllocator for RegAlloc {
                 }
             }
 
-            VReg::Virtual(_) => todo!(),
-            VReg::Spilled(_) => todo!(),
+            VReg::Virtual(_) => unreachable!(),
+            VReg::Spilled(_) => unreachable!(),
         }
     }
 
@@ -91,7 +103,7 @@ impl RegisterAllocator for RegAlloc {
             let mut pushed_to_stack = false;
             for (i, node) in self.nodes.iter_mut().enumerate() {
                 if !node.in_stack
-                    && (node.edge_count < regs.len() || node.colour.is_some())
+                    && (node.edge_count < regs.len() && node.colour.is_none())
                 {
                     node.in_stack = true;
                     stack.push(i);
@@ -103,14 +115,24 @@ impl RegisterAllocator for RegAlloc {
                 let mut min = usize::MAX;
                 let mut index = 0;
                 for (i, node) in self.nodes.iter().enumerate() {
-                    if node.usage_count < min && !node.in_stack {
+                    if node.usage_count < min && !node.in_stack && node.colour.is_none() {
                         min = node.usage_count;
                         index = i;
                     }
                 }
 
-                self.nodes[index].in_stack = true;
-                stack.push(index);
+                if min != usize::MAX {
+                    self.nodes[index].in_stack = true;
+                    stack.push(index);
+                } else {
+                    for (i, node) in self.nodes.iter().enumerate() {
+                        if node.colour.is_none() {
+                            self.nodes[i].in_stack = true;
+                            stack.push(i);
+                            break;
+                        }
+                    }
+                }
             }
 
             if let Some(&i) = stack.last() {

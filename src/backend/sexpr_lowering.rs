@@ -121,6 +121,8 @@ fn lower_helper(
                 builder.switch_to_block(final_block);
                 if mappings.is_empty() {
                     None
+                } else if mappings.len() == 1 {
+                    Some(mappings[0].1)
                 } else {
                     builder.push_instruction(&type_, Operation::Phi(mappings))
                 }
