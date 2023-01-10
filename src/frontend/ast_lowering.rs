@@ -305,7 +305,7 @@ pub enum SExpr<'a> {
     Deref {
         meta: Metadata<'a>,
         value: Box<SExpr<'a>>,
-    }
+    },
 }
 
 impl<'a> SExpr<'a> {
@@ -753,7 +753,9 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                     if let Ast::Symbol(_, name) = arg[0] {
                                         args.push((name, parse_type(arg.remove(1))?));
                                     } else {
-                                        return Err(LoweringError::InvalidDefun(String::from(name)));
+                                        return Err(LoweringError::InvalidDefun(String::from(
+                                            name,
+                                        )));
                                     }
                                 }
 
@@ -806,7 +808,9 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                     if let Ast::Symbol(_, name) = arg[0] {
                                         args.push((name, parse_type(arg.remove(1))?));
                                     } else {
-                                        return Err(LoweringError::InvalidDefun(String::from(name)));
+                                        return Err(LoweringError::InvalidDefun(String::from(
+                                            name,
+                                        )));
                                     }
                                 }
 
@@ -838,20 +842,30 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
 
                         let mut fields = vec![];
                         let mut generics = vec![];
+                        let mut current_field_name = None;
                         for field in sexpr.into_iter().skip(1) {
-                            match field {
-                                Ast::SExpr(_, mut v) if v.len() == 2 => match v.swap_remove(0) {
-                                    Ast::Symbol(_, name) => {
-                                        let type_ = parse_type(v.swap_remove(0))?;
-                                        type_.find_generics(&mut generics);
-                                        fields.push((name, type_));
+                            match current_field_name {
+                                Some(name) => {
+                                    let type_ = parse_type(field)?;
+                                    type_.find_generics(&mut generics);
+                                    fields.push((name, type_));
+                                    current_field_name = None;
+                                }
+
+                                None => {
+                                    match field {
+                                        Ast::Key(_, name) => {
+                                            current_field_name = Some(name);
+                                        }
+
+                                        _ => return Err(LoweringError::InvalidDefStruct),
                                     }
-
-                                    _ => return Err(LoweringError::InvalidDefStruct),
-                                },
-
-                                _ => return Err(LoweringError::InvalidDefStruct),
+                                }
                             }
+                        }
+
+                        if current_field_name.is_some() {
+                            return Err(LoweringError::InvalidDefStruct);
                         }
 
                         SExpr::StructDef {
@@ -871,18 +885,28 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         };
 
                         let mut values = vec![];
+                        let mut current_field_name = None;
                         for field in sexpr.into_iter().skip(1) {
-                            match field {
-                                Ast::SExpr(_, mut v) if v.len() == 2 => match v.swap_remove(0) {
-                                    Ast::Symbol(_, name) => {
-                                        values.push((name, lower_helper(v.remove(0), false)?));
+                            match current_field_name {
+                                Some(name) => {
+                                    values.push((name, lower_helper(field, false)?));
+                                    current_field_name = None;
+                                }
+
+                                None => {
+                                    match field {
+                                        Ast::Key(_, name) => {
+                                            current_field_name = Some(name);
+                                        }
+
+                                        _ => return Err(LoweringError::InvalidInst),
                                     }
-
-                                    _ => return Err(LoweringError::InvalidInst),
-                                },
-
-                                _ => return Err(LoweringError::InvalidInst),
+                                }
                             }
+                        }
+
+                        if current_field_name.is_some() {
+                            return Err(LoweringError::InvalidInst);
                         }
 
                         SExpr::StructSet {
@@ -988,43 +1012,34 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
             }
         }
 
-        Ast::Attribute(range, value, attr) => {
+        Ast::Attribute(range, value, attr) => match *attr {
+            Ast::Symbol(_, "&") => SExpr::Ref {
+                meta: Metadata {
+                    range,
+                    type_: Type::Unknown,
+                },
+                value: Box::new(lvalue_creator(*value)?),
+            },
 
-            match *attr {
-                Ast::Symbol(_, "&") => {
-                    SExpr::Ref {
-                        meta: Metadata {
-                            range,
-                            type_: Type::Unknown,
-                        },
-                        value: Box::new(lvalue_creator(*value)?),
-                    }
-                }
+            Ast::Symbol(_, "*") => SExpr::Deref {
+                meta: Metadata {
+                    range,
+                    type_: Type::Unknown,
+                },
+                value: Box::new(lower_helper(*value, quoting)?),
+            },
 
-                Ast::Symbol(_, "*") => {
-                    SExpr::Deref {
-                        meta: Metadata {
-                            range,
-                            type_: Type::Unknown,
-                        },
-                        value: Box::new(lower_helper(*value, quoting)?),
-                    }
-                }
+            Ast::Symbol(_, attr) => SExpr::Attribute {
+                meta: Metadata {
+                    range,
+                    type_: Type::Unknown,
+                },
+                top: Box::new(lower_helper(*value, quoting)?),
+                attr,
+            },
 
-                Ast::Symbol(_, attr) => {
-                    SExpr::Attribute {
-                        meta: Metadata {
-                            range,
-                            type_: Type::Unknown,
-                        },
-                        top: Box::new(lower_helper(*value, quoting)?),
-                        attr,
-                    }
-                }
-
-                _ => unreachable!("parser emits only symbols"),
-            }
-        }
+            _ => unreachable!("parser emits only symbols"),
+        },
     };
 
     Ok(sexpr)
@@ -1047,13 +1062,11 @@ fn lvalue_creator(ast: Ast<'_>) -> Result<LValue<'_>, LoweringError> {
             }
         }
 
-        Ast::Attribute(_, top, attr) => {
-            match *attr {
-                Ast::Symbol(_, "*") => Ok(LValue::Deref(Box::new(lvalue_creator(*top)?))),
-                Ast::Symbol(_, attr) => Ok(LValue::Attribute(Box::new(lvalue_creator(*top)?), attr)),
-                _ => Err(LoweringError::InvalidAttribute)
-            }
-        }
+        Ast::Attribute(_, top, attr) => match *attr {
+            Ast::Symbol(_, "*") => Ok(LValue::Deref(Box::new(lvalue_creator(*top)?))),
+            Ast::Symbol(_, attr) => Ok(LValue::Attribute(Box::new(lvalue_creator(*top)?), attr)),
+            _ => Err(LoweringError::InvalidAttribute),
+        },
 
         _ => Err(LoweringError::InvalidLvalue),
     }

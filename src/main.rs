@@ -1,13 +1,26 @@
 use std::collections::HashMap;
 
-use amethyst::backend::Generator;
+use amethyst::backend::arch::rv64::RvSelector;
+use amethyst::backend::arch::urcl::UrclSelector;
+use amethyst::backend::arch::x64::X64Selector;
+use amethyst::backend::regalloc::RegAlloc;
+use amethyst::backend::sexpr_lowering;
 use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
 
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(value_name = "Input file")]
+    input_file: String,
+    #[arg(short, long, default_value_t = String::from("x64"), value_name = "Target arch")]
+    target: String
+}
+
 fn main() {
-    let contents = std::fs::read_to_string(std::env::args().nth(1).unwrap()).unwrap();
-    let output = std::env::args().nth(2).unwrap_or_else(|| String::from("a.out"));
-    let object = output + ".o";
+    let args = Args::parse();
+    let contents = std::fs::read_to_string(args.input_file).unwrap();
 
     let mut asts = TopParser::new().parse(&contents).unwrap();
     let mut map = HashMap::new();
@@ -19,7 +32,32 @@ fn main() {
     let mut struct_map = HashMap::new();
     correctness::extract_structs(&sexprs, &mut struct_map);
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
-    let mut gen = Generator::default();
-    gen.compile(sexprs, &struct_map);
-    std::fs::write(&object, gen.emit_object()).unwrap();
+
+    let ir = sexpr_lowering::lower(sexprs);
+    
+    match args.target.as_str() {
+        "x64" => {
+            let mut vcode = ir.lower_to_vcode::<_, X64Selector>();
+            vcode.allocate_regs::<RegAlloc>();
+            vcode.emit_assembly();
+        }
+
+        "rv64" => {
+            let mut vcode = ir.lower_to_vcode::<_, RvSelector>();
+            vcode.allocate_regs::<RegAlloc>();
+            vcode.emit_assembly();
+        }
+
+        "urcl" => {
+            let mut vcode = ir.lower_to_vcode::<_, UrclSelector>();
+            vcode.allocate_regs::<RegAlloc>();
+            vcode.emit_assembly();
+        }
+
+        target => {
+            eprintln!("Invalid target `{}`", target);
+            std::process::exit(1);
+        }
+    }
 }
+

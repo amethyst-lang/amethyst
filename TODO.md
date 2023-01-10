@@ -1,4 +1,4 @@
- # Things to do:
+# Things to do:
  - Fix ref (only act on lvalues, which are variables, attributes, dereferences, and array accesses)
     - Fix passing structs to functions
  - Add `array.(index)` syntax
@@ -10,7 +10,8 @@
  - Typeclasses
  - Tuple generics
  - Expand macro capabilities
+ - Compile time reference counting or linear types
+ - Capabilities
  - Standard library
      - Steal stuff from APL
- - Compile time reference counting
  - Multiple backends
