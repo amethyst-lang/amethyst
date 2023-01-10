@@ -244,13 +244,13 @@ impl Instr for X64Instruction {
     fn mandatory_transforms(vcode: &mut VCode<Self>) {
         for func in vcode.functions.iter_mut() {
             for labelled in func.labels.iter_mut() {
-                let mut xchgs = Vec::new();
+                let mut swaps = Vec::new();
                 for (i, instruction) in labelled.instructions.iter().enumerate() {
                     match instruction {
                         X64Instruction::Add { dest, source }
                         | X64Instruction::Mov { dest, source } => {
                             if let (VReg::Spilled(_), VReg::Spilled(_)) = (*dest, *source) {
-                                xchgs.push((i, *source));
+                                swaps.push((i, *source));
                             }
                         }
 
@@ -258,7 +258,7 @@ impl Instr for X64Instruction {
                     }
                 }
 
-                for (index, source) in xchgs.into_iter().rev() {
+                for (index, source) in swaps.into_iter().rev() {
                     labelled.instructions.insert(index, X64Instruction::Push {
                         source: VReg::RealRegister(X64_REGISTER_RAX),
                     });

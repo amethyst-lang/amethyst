@@ -421,7 +421,11 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
         } = sexpr
         {
             let args: Vec<_> = args.iter().map(|(n, t)| (*n, convert_type(t))).collect();
-            let func = builder.new_function(name, &args, &convert_type(ret_type));
+            let func = if *name == "main" {
+                builder.new_function(name, &args, &convert_type(ret_type))
+            } else {
+                builder.new_function(&format!("_amy_{}", name), &args, &convert_type(ret_type))
+            };
             helper_args.func_map.insert((*name).to_owned(), func);
         }
     }
