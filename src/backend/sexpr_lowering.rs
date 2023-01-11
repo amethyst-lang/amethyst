@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::frontend::ast_lowering::{LValue, SExpr, Type as SExprType};
 
-use super::ir::{
+use codegem::ir::{
     BasicBlockId, FunctionId, Module, ModuleBuilder, Operation, Terminator, ToIntegerOperation,
     Type as IrType, Value, VariableId,
 };

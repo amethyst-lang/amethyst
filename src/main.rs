@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
-use amethyst::backend::arch::rv64::RvSelector;
-use amethyst::backend::arch::urcl::UrclSelector;
-use amethyst::backend::arch::x64::X64Selector;
-use amethyst::backend::regalloc::RegAlloc;
+use clap::Parser;
+use codegem::arch::rv64::RvSelector;
+use codegem::arch::urcl::UrclSelector;
+use codegem::arch::x64::X64Selector;
+use codegem::regalloc::RegAlloc;
+
 use amethyst::backend::sexpr_lowering;
 use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
-
-use clap::Parser;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -34,7 +34,7 @@ fn main() {
     correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
 
     let ir = sexpr_lowering::lower(sexprs);
-    
+
     match args.target.as_str() {
         "x64" => {
             let mut vcode = ir.lower_to_vcode::<_, X64Selector>();
