@@ -34,6 +34,8 @@ pub enum Type<'a> {
     // name, generics
     Struct(&'a str, Vec<Type<'a>>),
 
+    Union(Vec<Type<'a>>),
+
     Generic(&'a str),
 
     // argument types, return type
@@ -43,6 +45,63 @@ pub enum Type<'a> {
 }
 
 impl<'a> Type<'a> {
+    pub fn is_subtype(&self, supertype: &Type) -> bool {
+        match (self, supertype) {
+            (Type::Int(s1, w1), Type::Int(s2, w2)) => s1 == s2 && w1 == w2,
+            (Type::F32, Type::F32)
+            | (Type::F64, Type::F64) => true,
+            (Type::Tuple(v1), Type::Tuple(v2)) => v1.len() == v2.len() && v1.iter().zip(v2.iter()).all(|(v1, v2)| v1.is_subtype(v2)),
+            (Type::Pointer(_, v1), Type::Pointer(_, v2))
+            | (Type::Slice(_, v1), Type::Slice(_, v2)) => v1.is_subtype(v2),
+            (Type::Function(a1, r1), Type::Function(a2, r2)) => r1.is_subtype(r2) && a1.len() == a2.len() && a1.iter().zip(a2.iter()).all(|(v1, v2)| v1.is_subtype(v2)),
+
+            (Type::Union(v1), Type::Union(v2)) => {
+                let mut is_subset = true;
+                for a in v1.iter() {
+                    let mut not_found = true;
+                    for b in v2.iter() {
+                        if a == b {
+                            not_found = false;
+                            break;
+                        }
+                    }
+
+                    if not_found {
+                        is_subset = false;
+                        break;
+                    }
+                }
+
+                if is_subset {
+                    true
+                } else {
+                    let mut is_subset = true;
+                    for a in v2.iter() {
+                        let mut not_found = true;
+                        for b in v1.iter() {
+                            if a == b {
+                                not_found = false;
+                                break;
+                            }
+                        }
+
+                        if not_found {
+                            is_subset = false;
+                            break;
+                        }
+                    }
+
+                    is_subset
+                }
+            }
+
+            (Type::Union(v), x)
+            | (x, Type::Union(v)) => v.iter().any(|v| v.is_subtype(x)),
+
+            _ => false,
+        }
+    }
+
     pub fn has_generic(&self) -> bool {
         match self {
             Type::Tuple(v) => {
@@ -57,7 +116,8 @@ impl<'a> Type<'a> {
             Type::Pointer(_, v) => v.has_generic(),
             Type::Slice(_, v) => v.has_generic(),
 
-            Type::Struct(_, v) => {
+            Type::Struct(_, v)
+            | Type::Union(v) => {
                 for v in v {
                     if v.has_generic() {
                         return true;
@@ -90,7 +150,8 @@ impl<'a> Type<'a> {
             Type::Pointer(_, v) => v.find_generics(generics),
             Type::Slice(_, v) => v.find_generics(generics),
 
-            Type::Struct(_, v) => {
+            Type::Struct(_, v)
+            | Type::Union(v) => {
                 for v in v {
                     v.find_generics(generics);
                 }
@@ -128,7 +189,8 @@ impl<'a> Type<'a> {
             Type::Pointer(_, v) => v.replace_generics(type_var_counter, map),
             Type::Slice(_, v) => v.replace_generics(type_var_counter, map),
 
-            Type::Struct(_, v) => {
+            Type::Struct(_, v)
+            | Type::Union(v) => {
                 for v in v {
                     v.replace_generics(type_var_counter, map);
                 }
@@ -464,6 +526,13 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
                 }
             }
 
+            Ast::Symbol(_, "union") => Ok(Type::Union(
+                ast.into_iter()
+                    .skip(1)
+                    .map(parse_type)
+                    .collect::<Result<_, _>>()?,
+            )),
+
             Ast::Symbol(_, v) => Ok(Type::Struct(
                 v,
                 ast.into_iter()
@@ -718,7 +787,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             SExpr::Type {
                                 meta: Metadata {
                                     range,
-                                    type_: parse_type(sexpr.swap_remove(1))?,
+                                    type_: parse_type(sexpr.swap_remove(2))?,
                                 },
                                 value: Box::new(lower_helper(sexpr.swap_remove(1), false)?),
                             }

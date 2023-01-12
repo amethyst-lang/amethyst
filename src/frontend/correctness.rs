@@ -25,6 +25,33 @@ fn get_leaf<'a, 'b>(
     t
 }
 
+fn check_coercion(
+    coercions: &mut HashMap<u64, FloatOrInt>,
+    i: &u64,
+    t: &Type,
+) -> bool {
+    match (coercions.get(i), &t) {
+        (Some(FloatOrInt::Int), Type::Int(_, _)) => true,
+        (Some(FloatOrInt::Float), Type::F32 | Type::F64) => true,
+        (Some(&v), Type::TypeVariable(j)) => match coercions.entry(*j) {
+            Entry::Occupied(w) => {
+                *w.get() == v
+            }
+
+            Entry::Vacant(w) => {
+                w.insert(v);
+                true
+            }
+        },
+
+        (None, _) => true,
+
+        (Some(_), Type::Union(v)) => v.iter().any(|v| check_coercion(coercions, i, v)),
+
+        _ => false,
+    }
+}
+
 fn substitute<'a>(
     assignee: &mut Type<'a>,
     assigner: &Type<'a>,
@@ -34,53 +61,29 @@ fn substitute<'a>(
     *assignee = get_leaf(assignee, substitutions).clone();
     let assigner = get_leaf(assigner, substitutions).clone();
 
-    if assigner == *assignee {
+    if assignee.is_subtype(&assigner) {
+        *assignee = assigner;
         Ok(())
     } else if *assignee == Type::Unknown {
         *assignee = assigner.clone();
         Ok(())
     } else if let Type::TypeVariable(i) = assignee {
-        match (coercions.get(i), &assigner) {
-            (Some(FloatOrInt::Int), Type::Int(_, _)) => (),
-            (Some(FloatOrInt::Float), Type::F32 | Type::F64) => (),
-            (Some(&v), Type::TypeVariable(j)) => match coercions.entry(*j) {
-                Entry::Occupied(w) => {
-                    if *w.get() != v {
-                        todo!("error handling");
-                    }
-                }
-
-                Entry::Vacant(w) => {
-                    w.insert(v);
-                }
-            },
-            (None, _) => (),
-            _ => todo!("error handling"),
-        }
-        if substitutions.insert(*i, assigner.clone()).is_some() {
-            todo!("error handling");
+        if let Some(t) = substitutions.insert(*i, assigner.clone()) {
+            if !assigner.is_subtype(&t) {
+                todo!("error handling");
+            } else {
+                *assignee = assigner;
+                Ok(())
+            }
         } else {
             *assignee = assigner;
             Ok(())
         }
     } else if let Type::TypeVariable(i) = assigner {
-        match (coercions.get(&i), &assignee) {
-            (Some(FloatOrInt::Int), Type::Int(_, _)) => (),
-            (Some(FloatOrInt::Float), Type::F32 | Type::F64) => (),
-            (Some(&v), Type::TypeVariable(j)) => match coercions.entry(*j) {
-                Entry::Occupied(w) => {
-                    if *w.get() != v {
-                        todo!("error handling");
-                    }
-                }
-
-                Entry::Vacant(w) => {
-                    w.insert(v);
-                }
-            },
-            (None, _) => (),
-            _ => todo!("error handling"),
+        if !check_coercion(coercions, &i, assignee) {
+            todo!("error handling");
         }
+
         if substitutions.insert(i, assignee.clone()).is_some() {
             todo!("error handling");
         } else {
@@ -376,8 +379,8 @@ fn traverse_sexpr<'a>(
                 break_type,
             )?;
             substitute(
-                &mut meta.type_,
-                &value.meta().type_,
+                &mut value.meta_mut().type_,
+                &meta.type_,
                 substitutions,
                 coercions,
             )
