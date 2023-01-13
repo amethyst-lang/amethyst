@@ -15,9 +15,6 @@ pub enum Ast<'a> {
     Key(Range<usize>, &'a str),
 
     Quote(Range<usize>, Box<Ast<'a>>),
-    Comma(Range<usize>, Box<Ast<'a>>),
-    Backtick(Range<usize>, Box<Ast<'a>>),
-    Splice(Range<usize>, Box<Ast<'a>>),
 
     SExpr(Range<usize>, Vec<Ast<'a>>),
     Attribute(Range<usize>, Box<Ast<'a>>, Box<Ast<'a>>),
@@ -33,9 +30,6 @@ impl<'a> Ast<'a> {
             | Ast::Symbol(s, _)
             | Ast::Key(s, _)
             | Ast::Quote(s, _)
-            | Ast::Comma(s, _)
-            | Ast::Backtick(s, _)
-            | Ast::Splice(s, _)
             | Ast::SExpr(s, _)
             | Ast::Attribute(s, _, _) => s.clone(),
         }

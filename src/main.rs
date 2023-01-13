@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs::File;
 
 use clap::Parser;
 use codegem::arch::rv64::RvSelector;
@@ -39,19 +40,22 @@ fn main() {
         "x64" => {
             let mut vcode = ir.lower_to_vcode::<_, X64Selector>();
             vcode.allocate_regs::<RegAlloc>();
-            vcode.emit_assembly();
+            let mut file = File::create(format!("{}.s", vcode.name)).expect("o no");
+            vcode.emit_assembly(&mut file).unwrap();
         }
 
         "rv64" => {
             let mut vcode = ir.lower_to_vcode::<_, RvSelector>();
             vcode.allocate_regs::<RegAlloc>();
-            vcode.emit_assembly();
+            let mut file = File::create(format!("{}.s", vcode.name)).expect("o no");
+            vcode.emit_assembly(&mut file).unwrap();
         }
 
         "urcl" => {
             let mut vcode = ir.lower_to_vcode::<_, UrclSelector>();
             vcode.allocate_regs::<RegAlloc>();
-            vcode.emit_assembly();
+            let mut file = File::create(format!("{}.urcl", vcode.name)).expect("o no");
+            vcode.emit_assembly(&mut file).unwrap();
         }
 
         target => {

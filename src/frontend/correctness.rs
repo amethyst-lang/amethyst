@@ -200,11 +200,28 @@ fn traverse_sexpr<'a>(
             }
         }
 
-        SExpr::List { .. } => todo!(),
-        SExpr::Quote { .. } => todo!(),
-        SExpr::Comma { .. } => todo!(),
-        SExpr::Backtick { .. } => todo!(),
-        SExpr::Splice { .. } => todo!(),
+        SExpr::Tuple { meta, tuple } => {
+            for value in tuple.iter_mut() {
+                traverse_sexpr(
+                    value,
+                    type_var_counter,
+                    substitutions,
+                    coercions,
+                    func_map,
+                    struct_map,
+                    monomorphisms,
+                    scopes,
+                    break_type,
+                )?;
+            }
+
+            let new_type = Type::Tuple(tuple.iter().map(|_| {
+                let t = Type::TypeVariable(*type_var_counter);
+                *type_var_counter += 1;
+                t
+            }).collect());
+            substitute(&mut meta.type_, &new_type, substitutions, coercions)
+        }
 
         SExpr::Seq { meta, values } => {
             scopes.push(HashMap::new());
@@ -677,6 +694,40 @@ fn traverse_sexpr<'a>(
             }
         }
 
+        SExpr::SliceGet { meta, top, index } => {
+            traverse_sexpr(
+                &mut **top,
+                type_var_counter,
+                substitutions,
+                coercions,
+                func_map,
+                struct_map,
+                monomorphisms,
+                scopes,
+                break_type,
+            )?;
+
+            traverse_sexpr(
+                &mut **index,
+                type_var_counter,
+                substitutions,
+                coercions,
+                func_map,
+                struct_map,
+                monomorphisms,
+                scopes,
+                break_type,
+            )?;
+
+            substitute(&mut index.meta_mut().type_, &Type::Int(false, 64), substitutions, coercions)?;
+            match &top.meta().type_ {
+                Type::Slice(_, t) => substitute(&mut meta.type_, &**t, substitutions, coercions),
+                t @ Type::TypeVariable(_) => substitute(&mut Type::Slice(false, Box::new(meta.type_.clone())), t, substitutions, coercions),
+
+                _ => todo!("error handling"),
+            }
+        }
+
         SExpr::SizeOf { .. } => Ok(()),
 
         SExpr::Ref { meta, value } => {
@@ -918,11 +969,11 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, T
     flatten_substitution(&mut sexpr.meta_mut().type_, substitutions);
 
     match sexpr {
-        SExpr::List { .. } => todo!(),
-        SExpr::Quote { .. } => todo!(),
-        SExpr::Comma { .. } => todo!(),
-        SExpr::Backtick { .. } => todo!(),
-        SExpr::Splice { .. } => todo!(),
+        SExpr::Tuple { tuple, .. } => {
+            for value in tuple {
+                apply_substitutions(value, substitutions);
+            }
+        }
 
         SExpr::Seq { values, .. } => {
             for value in values {
@@ -969,6 +1020,10 @@ fn apply_substitutions<'a>(sexpr: &mut SExpr<'a>, substitutions: &HashMap<u64, T
         }
 
         SExpr::Attribute { top, .. } => apply_substitutions(&mut **top, substitutions),
+        SExpr::SliceGet { top, index, .. } => {
+            apply_substitutions(&mut **top, substitutions);
+            apply_substitutions(&mut **index, substitutions);
+        }
 
         SExpr::SizeOf { type_, .. } => flatten_substitution(type_, substitutions),
 
@@ -1120,11 +1175,11 @@ fn update_generic_refs_lvalue<'a>(lvalue: &mut LValue<'a>, map: &mut HashMap<&'a
 
 fn update_generic_refs<'a>(expr: &mut SExpr<'a>, map: &mut HashMap<&'a str, Type<'a>>) {
     match expr {
-        SExpr::List { .. } => todo!(),
-        SExpr::Quote { .. } => todo!(),
-        SExpr::Comma { .. } => todo!(),
-        SExpr::Backtick { .. } => todo!(),
-        SExpr::Splice { .. } => todo!(),
+        SExpr::Tuple { tuple, .. } => {
+            for value in tuple {
+                update_generic_refs(value, map);
+            }
+        }
 
         SExpr::Seq { values, .. } => {
             for value in values {
@@ -1166,6 +1221,10 @@ fn update_generic_refs<'a>(expr: &mut SExpr<'a>, map: &mut HashMap<&'a str, Type
             update_generic_refs(&mut **value, map);
         }
         SExpr::Attribute { top, .. } => update_generic_refs(&mut **top, map),
+        SExpr::SliceGet { top, index, .. } => {
+            update_generic_refs(&mut **top, map);
+            update_generic_refs(&mut **index, map);
+        }
         SExpr::SizeOf { type_, .. } => {
             let mut tvc = 0;
             type_.replace_generics(&mut tvc, map);
@@ -1389,18 +1448,6 @@ pub fn create_default_signatures<'a>() -> HashMap<&'a str, Signature<'a>> {
         Signature {
             arg_types: vec![Type::Int(false, 64)],
             ret_type: Type::Slice(true, Box::new(Type::Generic("a"))),
-            index: None,
-            linkage: SignatureLinkage::Builtin,
-        },
-    );
-    map.insert(
-        "get",
-        Signature {
-            arg_types: vec![
-                Type::Slice(true, Box::new(Type::Generic("a"))),
-                Type::Int(false, 64),
-            ],
-            ret_type: Type::Generic("a"),
             index: None,
             linkage: SignatureLinkage::Builtin,
         },

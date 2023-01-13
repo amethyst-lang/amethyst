@@ -38,11 +38,7 @@ fn lower_helper(
             None
         }
 
-        SExpr::List { meta, values } => todo!(),
-        SExpr::Quote { meta, value } => todo!(),
-        SExpr::Comma { meta, value } => todo!(),
-        SExpr::Backtick { meta, value } => todo!(),
-        SExpr::Splice { meta, value } => todo!(),
+        SExpr::Tuple { meta, tuple } => todo!(),
 
         SExpr::Seq { meta, values } => {
             let mut last = None;
@@ -384,6 +380,7 @@ fn lower_helper(
         } => todo!(),
 
         SExpr::Attribute { meta, top, attr } => todo!(),
+        SExpr::SliceGet { meta, top, index } => todo!(),
         SExpr::SizeOf { meta, type_ } => todo!(),
         SExpr::Ref { meta, value } => todo!(),
         SExpr::Deref { meta, value } => todo!(),

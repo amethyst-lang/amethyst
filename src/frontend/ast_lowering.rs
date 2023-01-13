@@ -246,29 +246,10 @@ pub enum SExpr<'a> {
         meta: Metadata<'a>,
         value: &'a str,
     },
-    List {
-        meta: Metadata<'a>,
-        values: Vec<SExpr<'a>>,
-    },
 
-    Quote {
+    Tuple {
         meta: Metadata<'a>,
-        value: Box<SExpr<'a>>,
-    },
-
-    Comma {
-        meta: Metadata<'a>,
-        value: Box<SExpr<'a>>,
-    },
-
-    Backtick {
-        meta: Metadata<'a>,
-        value: Box<SExpr<'a>>,
-    },
-
-    Splice {
-        meta: Metadata<'a>,
-        value: Box<SExpr<'a>>,
+        tuple: Vec<SExpr<'a>>,
     },
 
     Seq {
@@ -354,6 +335,12 @@ pub enum SExpr<'a> {
         attr: &'a str,
     },
 
+    SliceGet {
+        meta: Metadata<'a>,
+        top: Box<SExpr<'a>>,
+        index: Box<SExpr<'a>>,
+    },
+
     SizeOf {
         meta: Metadata<'a>,
         type_: Type<'a>,
@@ -377,11 +364,7 @@ impl<'a> SExpr<'a> {
             | SExpr::Float { meta, .. }
             | SExpr::Str { meta, .. }
             | SExpr::Symbol { meta, .. }
-            | SExpr::List { meta, .. }
-            | SExpr::Quote { meta, .. }
-            | SExpr::Comma { meta, .. }
-            | SExpr::Backtick { meta, .. }
-            | SExpr::Splice { meta, .. }
+            | SExpr::Tuple { meta, .. }
             | SExpr::Seq { meta, .. }
             | SExpr::Cond { meta, .. }
             | SExpr::Loop { meta, .. }
@@ -396,6 +379,7 @@ impl<'a> SExpr<'a> {
             | SExpr::Declare { meta, .. }
             | SExpr::Assign { meta, .. }
             | SExpr::Attribute { meta, .. }
+            | SExpr::SliceGet { meta, .. }
             | SExpr::SizeOf { meta, .. }
             | SExpr::Ref { meta, .. }
             | SExpr::Deref { meta, .. } => meta,
@@ -408,11 +392,7 @@ impl<'a> SExpr<'a> {
             | SExpr::Float { meta, .. }
             | SExpr::Str { meta, .. }
             | SExpr::Symbol { meta, .. }
-            | SExpr::List { meta, .. }
-            | SExpr::Quote { meta, .. }
-            | SExpr::Comma { meta, .. }
-            | SExpr::Backtick { meta, .. }
-            | SExpr::Splice { meta, .. }
+            | SExpr::Tuple { meta, .. }
             | SExpr::Seq { meta, .. }
             | SExpr::Cond { meta, .. }
             | SExpr::Loop { meta, .. }
@@ -427,6 +407,7 @@ impl<'a> SExpr<'a> {
             | SExpr::Declare { meta, .. }
             | SExpr::Assign { meta, .. }
             | SExpr::Attribute { meta, .. }
+            | SExpr::SliceGet { meta, .. }
             | SExpr::SizeOf { meta, .. }
             | SExpr::Ref { meta, .. }
             | SExpr::Deref { meta, .. } => meta,
@@ -533,6 +514,13 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
                     .collect::<Result<_, _>>()?,
             )),
 
+            Ast::Symbol(_, "tuple") => Ok(Type::Tuple(
+                ast.into_iter()
+                    .skip(1)
+                    .map(parse_type)
+                    .collect::<Result<_, _>>()?,
+            )),
+
             Ast::Symbol(_, v) => Ok(Type::Struct(
                 v,
                 ast.into_iter()
@@ -548,7 +536,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
     }
 }
 
-fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError> {
+fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
     let sexpr = match ast {
         Ast::Int(range, value) => SExpr::Int {
             meta: Metadata {
@@ -592,37 +580,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
 
         Ast::Key(_, _) => todo!(),
 
-        Ast::Quote(range, value) => SExpr::Quote {
-            meta: Metadata {
-                range,
-                type_: Type::Unknown,
-            },
-            value: Box::new(lower_helper(*value, true)?),
-        },
-
-        Ast::Comma(range, value) => SExpr::Comma {
-            meta: Metadata {
-                range,
-                type_: Type::Unknown,
-            },
-            value: Box::new(lower_helper(*value, quoting)?),
-        },
-
-        Ast::Backtick(range, value) => SExpr::Backtick {
-            meta: Metadata {
-                range,
-                type_: Type::Unknown,
-            },
-            value: Box::new(lower_helper(*value, quoting)?),
-        },
-
-        Ast::Splice(range, value) => SExpr::Splice {
-            meta: Metadata {
-                range,
-                type_: Type::Unknown,
-            },
-            value: Box::new(lower_helper(*value, quoting)?),
-        },
+        Ast::Quote(_, _) => todo!(),
 
         Ast::SExpr(range, mut sexpr) => {
             if sexpr.is_empty() {
@@ -631,17 +589,6 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         range,
                         type_: Type::Tuple(vec![]),
                     },
-                }
-            } else if quoting {
-                SExpr::List {
-                    meta: Metadata {
-                        range,
-                        type_: Type::Unknown,
-                    },
-                    values: sexpr
-                        .into_iter()
-                        .map(|v| lower_helper(v, false))
-                        .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                 }
             } else {
                 match &sexpr[0] {
@@ -652,31 +599,17 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         },
                     },
 
-                    Ast::Symbol(_, "list") => SExpr::List {
+                    Ast::Symbol(_, "tuple") => SExpr::Tuple {
                         meta: Metadata {
                             range,
                             type_: Type::Unknown,
                         },
-                        values: sexpr
+                        tuple: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(|v| lower_helper(v, false))
+                            .map(|v| lower_helper(v))
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
-
-                    Ast::Symbol(_, "quote") => {
-                        if sexpr.len() == 2 {
-                            SExpr::Quote {
-                                meta: Metadata {
-                                    range,
-                                    type_: Type::Unknown,
-                                },
-                                value: Box::new(lower_helper(sexpr.swap_remove(2), true)?),
-                            }
-                        } else {
-                            return Err(LoweringError::TooManyQuoted);
-                        }
-                    }
 
                     Ast::Symbol(_, "seq") => SExpr::Seq {
                         meta: Metadata {
@@ -686,7 +619,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         values: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(|v| lower_helper(v, false))
+                            .map(|v| lower_helper(v))
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
@@ -698,7 +631,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         values: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(|v| lower_helper(v, false))
+                            .map(|v| lower_helper(v))
                             .chain([Ok(SExpr::Nil {
                                 meta: Metadata {
                                     range,
@@ -712,7 +645,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         let elsy = if matches!(sexpr.last(), Some(Ast::SExpr(_, v)) if v.len() == 2 && matches!(v[0], Ast::Key(_, "else")))
                         {
                             if let Ast::SExpr(_, mut v) = sexpr.remove(sexpr.len() - 1) {
-                                Some(Box::new(lower_helper(v.remove(1), false)?))
+                                Some(Box::new(lower_helper(v.remove(1))?))
                             } else {
                                 unreachable!()
                             }
@@ -735,8 +668,8 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                 .skip(1)
                                 .map(|v| match v {
                                     Ast::SExpr(_, mut v) if v.len() == 2 => Ok((
-                                        lower_helper(v.swap_remove(0), false)?,
-                                        lower_helper(v.remove(0), false)?,
+                                        lower_helper(v.swap_remove(0))?,
+                                        lower_helper(v.remove(0))?,
                                     )),
 
                                     _ => Err(LoweringError::InvalidCondBranch),
@@ -753,7 +686,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                     range,
                                     type_: Type::Unknown,
                                 },
-                                value: Box::new(lower_helper(sexpr.swap_remove(1), false)?),
+                                value: Box::new(lower_helper(sexpr.swap_remove(1))?),
                             }
                         } else {
                             return Err(LoweringError::InvalidLoop);
@@ -767,7 +700,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                     range,
                                     type_: Type::Tuple(vec![]),
                                 },
-                                value: Some(Box::new(lower_helper(sexpr.swap_remove(1), false)?)),
+                                value: Some(Box::new(lower_helper(sexpr.swap_remove(1))?)),
                             }
                         } else if sexpr.len() == 1 {
                             SExpr::Break {
@@ -789,7 +722,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                     range,
                                     type_: parse_type(sexpr.swap_remove(2))?,
                                 },
-                                value: Box::new(lower_helper(sexpr.swap_remove(1), false)?),
+                                value: Box::new(lower_helper(sexpr.swap_remove(1))?),
                             }
                         } else {
                             return Err(LoweringError::InvalidTypeSpecifier);
@@ -806,7 +739,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             _ => return Err(LoweringError::InvalidDefun(String::from("unknown"))),
                         };
 
-                        let expr = lower_helper(sexpr.remove(sexpr.len() - 1), quoting)?;
+                        let expr = lower_helper(sexpr.remove(sexpr.len() - 1))?;
                         let ret_type = if let Ast::Symbol(_, ":") = sexpr[sexpr.len() - 2] {
                             sexpr.remove(sexpr.len() - 2);
                             parse_type(sexpr.remove(sexpr.len() - 1))?
@@ -958,7 +891,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         for field in sexpr.into_iter().skip(1) {
                             match current_field_name {
                                 Some(name) => {
-                                    values.push((name, lower_helper(field, false)?));
+                                    values.push((name, lower_helper(field)?));
                                     current_field_name = None;
                                 }
 
@@ -999,7 +932,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                         },
                                         mutable: false,
                                         variable,
-                                        value: Box::new(lower_helper(sexpr.remove(3), false)?),
+                                        value: Box::new(lower_helper(sexpr.remove(3))?),
                                     }
                                 }
 
@@ -1018,7 +951,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                                     },
                                     mutable: true,
                                     variable,
-                                    value: Box::new(lower_helper(sexpr.remove(4), false)?),
+                                    value: Box::new(lower_helper(sexpr.remove(4))?),
                                 },
 
                                 _ => return Err(LoweringError::InvalidLet),
@@ -1032,7 +965,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                         if sexpr.len() == 4 {
                             match &sexpr[2] {
                                 Ast::Symbol(_, "=") => {
-                                    let value = lower_helper(sexpr.swap_remove(3), false)?;
+                                    let value = lower_helper(sexpr.swap_remove(3))?;
                                     let lvalue = lvalue_creator(sexpr.swap_remove(1))?;
                                     SExpr::Assign {
                                         meta: Metadata {
@@ -1071,10 +1004,10 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                             range,
                             type_: Type::Unknown,
                         },
-                        func: Box::new(lower_helper(sexpr.remove(0), false)?),
+                        func: Box::new(lower_helper(sexpr.remove(0))?),
                         values: sexpr
                             .into_iter()
-                            .map(|v| lower_helper(v, false))
+                            .map(|v| lower_helper(v))
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
                 }
@@ -1095,7 +1028,7 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                     range,
                     type_: Type::Unknown,
                 },
-                value: Box::new(lower_helper(*value, quoting)?),
+                value: Box::new(lower_helper(*value)?),
             },
 
             Ast::Symbol(_, attr) => SExpr::Attribute {
@@ -1103,11 +1036,29 @@ fn lower_helper(ast: Ast<'_>, quoting: bool) -> Result<SExpr<'_>, LoweringError>
                     range,
                     type_: Type::Unknown,
                 },
-                top: Box::new(lower_helper(*value, quoting)?),
+                top: Box::new(lower_helper(*value)?),
                 attr,
             },
 
-            _ => unreachable!("parser emits only symbols"),
+            Ast::SExpr(_, mut v) if v.len() == 1 => SExpr::SliceGet {
+                meta: Metadata {
+                    range,
+                    type_: Type::Unknown,
+                },
+                top: Box::new(lower_helper(*value)?),
+                index: Box::new(lower_helper(v.remove(0))?),
+            },
+
+            v @ Ast::SExpr(_, _) => SExpr::SliceGet {
+                meta: Metadata {
+                    range,
+                    type_: Type::Unknown,
+                },
+                top: Box::new(lower_helper(*value)?),
+                index: Box::new(lower_helper(v)?),
+            },
+
+            _ => unreachable!("parser emits only symbols or s expressions"),
         },
     };
 
@@ -1122,7 +1073,7 @@ fn lvalue_creator(ast: Ast<'_>) -> Result<LValue<'_>, LoweringError> {
             let first = v.remove(0);
             match first {
                 Ast::Symbol(_, "get") if v.len() == 2 => {
-                    let index = lower_helper(v.remove(1), false)?;
+                    let index = lower_helper(v.remove(1))?;
                     let slice = lvalue_creator(v.remove(0))?;
                     Ok(LValue::Get(Box::new(slice), Box::new(index)))
                 }
@@ -1145,7 +1096,7 @@ pub fn lower(asts: Vec<Ast<'_>>) -> Result<Vec<SExpr<'_>>, LoweringError> {
     let mut sexprs = vec![];
 
     for ast in asts {
-        sexprs.push(lower_helper(ast, false)?);
+        sexprs.push(lower_helper(ast)?);
     }
 
     Ok(sexprs)

@@ -96,14 +96,14 @@ SExpr: Ast<'input> = {
     <s:@L> "[" <v:InfixOps> "]" <e:@R> => v,
 }
 
-// AttributeElement: Ast<'input> = {
-    // <Symbol>,
-    // <SExpr>
-// };
+AttributeElement: Ast<'input> = {
+    <Symbol>,
+    <SExpr>
+};
 
 Attribute: Ast<'input> = {
     PrefixOp,
-    <s:Attribute> "." <a:Symbol> => {
+    <s:Attribute> "." <a:AttributeElement> => {
         Ast::Attribute(s.span().start..a.span().end, Box::new(s), Box::new(a))
     }
 };
@@ -121,9 +121,6 @@ Value: Ast<'input> = {
 
 PrefixOp: Ast<'input> = {
     <s:@L> "'" <v:PrefixOp> <e:@R> => Ast::Quote(s..e, Box::new(v)),
-    <s:@L> "`" <v:PrefixOp> <e:@R> => Ast::Backtick(s..e, Box::new(v)),
-    <s:@L> "," <v:PrefixOp> <e:@R> => Ast::Comma(s..e, Box::new(v)),
-    <s:@L> ",@" <v:PrefixOp> <e:@R> => Ast::Splice(s..e, Box::new(v)),
     <Value>,
 };
 

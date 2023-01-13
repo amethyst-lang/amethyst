@@ -124,9 +124,6 @@ fn replace_macro_args<'input>(
         }
 
         Ast::Quote(_, quote) => replace_macro_args(quote, map, args),
-        Ast::Comma(_, comma) => replace_macro_args(comma, map, args),
-        Ast::Backtick(_, backtick) => replace_macro_args(backtick, map, args),
-        Ast::Splice(_, splice) => replace_macro_args(splice, map, args),
 
         Ast::SExpr(_, sexpr) => {
             for ast in sexpr {
@@ -154,9 +151,6 @@ fn replace_macros_helper<'input>(
         | Ast::Key(_, _) => false,
 
         Ast::Quote(_, quote) => replace_macros_helper(map, quote),
-        Ast::Comma(_, comma) => replace_macros_helper(map, comma),
-        Ast::Backtick(_, backtick) => replace_macros_helper(map, backtick),
-        Ast::Splice(_, splice) => replace_macros_helper(map, splice),
 
         Ast::SExpr(_, v) => match v.first() {
             Some(Ast::Symbol(_, name)) if map.contains_key(name) => {
