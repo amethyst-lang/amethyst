@@ -11,8 +11,8 @@ clap = { version = "4.0.32", features = ["derive"] }
 lalrpop-util = { version = "0.19.6", features = ["std", "lexer"] }
 regex = "1"
 target-lexicon = "0.12.3"
-# codegem = { path = "../codegem" }
-codegem = "*"
+codegem = { path = "../codegem" }
+# codegem = "*"
 
 [build-dependencies]
 lalrpop = "0.19.6"
