@@ -607,7 +607,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         tuple: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(|v| lower_helper(v))
+                            .map(lower_helper)
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
@@ -619,7 +619,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         values: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(|v| lower_helper(v))
+                            .map(lower_helper)
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
@@ -631,7 +631,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         values: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(|v| lower_helper(v))
+                            .map(lower_helper)
                             .chain([Ok(SExpr::Nil {
                                 meta: Metadata {
                                     range,
@@ -1007,7 +1007,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         func: Box::new(lower_helper(sexpr.remove(0))?),
                         values: sexpr
                             .into_iter()
-                            .map(|v| lower_helper(v))
+                            .map(lower_helper)
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
                 }
