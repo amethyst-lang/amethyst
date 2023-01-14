@@ -5,6 +5,7 @@ use super::parsing::Ast;
 enum PatternNode<'a> {
     Literal(Ast<'a>),
     SExpr(Vec<PatternNode<'a>>),
+    Key(&'a str),
     Symbol(&'a str),
     Attribute(Box<PatternNode<'a>>, Box<PatternNode<'a>>),
     VarPat(Vec<PatternNode<'a>>),
@@ -22,6 +23,11 @@ impl<'a> PatternNode<'a> {
                     }
                 }
 
+                true
+            }
+
+            (PatternNode::Key(s), b @ Ast::Key(_, _)) => {
+                map.insert((*s).to_owned(), b.clone());
                 true
             }
 
@@ -80,9 +86,9 @@ fn extract_pattern<'a>(ast: &Ast<'a>) -> PatternNode<'a> {
         Ast::Int(_, _)
         | Ast::Char(_, _)
         | Ast::Float(_, _)
-        | Ast::Str(_, _)
-        | Ast::Key(_, _) => PatternNode::Literal(ast.clone()),
+        | Ast::Str(_, _) => PatternNode::Literal(ast.clone()),
 
+        Ast::Key(_, s) => PatternNode::Key(*s),
         Ast::Symbol(_, s) => PatternNode::Symbol(*s),
         Ast::Quote(_, v) => PatternNode::Literal((**v).clone()),
 
