@@ -6,7 +6,7 @@ use crate::frontend::ast_lowering::{LValue, SExpr, Type as SExprType};
 
 use codegem::ir::{
     BasicBlockId, FunctionId, Module, ModuleBuilder, Operation, Terminator, ToIntegerOperation,
-    Type as IrType, Value, VariableId,
+    Type as IrType, Value, VariableId, Linkage,
 };
 
 struct LowerHelperArgs {
@@ -412,20 +412,35 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
     };
 
     for sexpr in sexprs.iter() {
-        if let SExpr::FuncDef {
-            name,
-            ret_type,
-            args,
-            ..
-        } = sexpr
-        {
-            let args: Vec<_> = args.iter().map(|(n, t)| (*n, convert_type(t))).collect();
-            let func = if *name == "main" {
-                builder.new_function(name, &args, &convert_type(ret_type))
-            } else {
-                builder.new_function(&format!("_amy_{}", name), &args, &convert_type(ret_type))
-            };
-            helper_args.func_map.insert((*name).to_owned(), func);
+        match sexpr {
+            SExpr::FuncDef {
+                    name,
+                    ret_type,
+                    args,
+                    ..
+                } => {
+                let args: Vec<_> = args.iter().map(|(n, t)| (*n, convert_type(t))).collect();
+                let func = if *name == "main" {
+                    builder.new_function(name, Linkage::Public, &args, &convert_type(ret_type))
+                } else {
+                    builder.new_function(&format!("_amy_{}", name), Linkage::Private, &args, &convert_type(ret_type))
+                };
+                helper_args.func_map.insert((*name).to_owned(), func);
+            }
+
+            SExpr::FuncExtern {
+                name,
+                ret_type,
+                args,
+                linked_to,
+                ..
+            } => {
+                let args: Vec<_> = args.iter().map(|(n, t)| (*n, convert_type(t))).collect();
+                let func = builder.new_function(linked_to, Linkage::External, &args, &convert_type(ret_type));
+                helper_args.func_map.insert((*name).to_owned(), func);
+            }
+
+            _ => (),
         }
     }
 
