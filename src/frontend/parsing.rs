@@ -5,7 +5,7 @@ pub enum Error {
     NumberTooBig,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Ast<'a> {
     Int(Range<usize>, u64),
     Char(Range<usize>, u8),
@@ -18,6 +18,23 @@ pub enum Ast<'a> {
 
     SExpr(Range<usize>, Vec<Ast<'a>>),
     Attribute(Range<usize>, Box<Ast<'a>>, Box<Ast<'a>>),
+}
+
+impl<'a> PartialEq for Ast<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Int(_, l1), Self::Int(_, r1)) => l1 == r1,
+            (Self::Char(_, l1), Self::Char(_, r1)) => l1 == r1,
+            (Self::Float(_, l1), Self::Float(_, r1)) => l1 == r1,
+            (Self::Str(_, l1), Self::Str(_, r1)) => l1 == r1,
+            (Self::Symbol(_, l1), Self::Symbol(_, r1)) => l1 == r1,
+            (Self::Key(_, l1), Self::Key(_, r1)) => l1 == r1,
+            (Self::Quote(_, l1), Self::Quote(_, r1)) => l1 == r1,
+            (Self::SExpr(_, l1), Self::SExpr(_, r1)) => l1 == r1,
+            (Self::Attribute(_, l1, l2), Self::Attribute(_, r1, r2)) => l1 == r1 && l2 == r2,
+            _ => false,
+        }
+    }
 }
 
 impl<'a> Ast<'a> {

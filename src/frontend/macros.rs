@@ -1,274 +1,227 @@
-use std::ops::RangeFrom;
-
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, hash_map::Entry};
 
 use super::parsing::Ast;
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-enum ArgType {
-    Ordered,
-    Optional,
-    Key,
-    Rest,
+enum PatternNode<'a> {
+    Literal(Ast<'a>),
+    SExpr(Vec<PatternNode<'a>>),
+    Symbol(&'a str),
+    Attribute(Box<PatternNode<'a>>, Box<PatternNode<'a>>),
+    VarPat(Vec<PatternNode<'a>>),
 }
 
-#[derive(PartialEq, Debug)]
-struct Arg<'input> {
-    name: &'input str,
-    type_: ArgType,
-    value: Option<Ast<'input>>,
-}
+impl<'a> PatternNode<'a> {
+    fn matches(&self, ast: &Ast<'a>, map: &mut HashMap<String, Ast<'a>>) -> bool {
+        match (self, ast) {
+            (PatternNode::Literal(a), b) if a == b => true,
 
-#[derive(PartialEq, Debug)]
-pub struct Macro<'input> {
-    name: &'input str,
-    args: Vec<Arg<'input>>,
-    body: Option<Ast<'input>>,
-}
-
-enum CapturedArg {
-    None,
-    Single(usize),
-    Rest(RangeFrom<usize>),
-}
-
-impl<'input> Macro<'input> {
-    fn args_bind(&self, ast: &[Ast<'input>]) -> Option<HashMap<&'input str, CapturedArg>> {
-        let mut bindings = HashMap::new();
-
-        for arg in self.args.iter() {
-            bindings.insert(arg.name, CapturedArg::None);
-        }
-
-        let mut ordered_arg = 0;
-        let mut last_key = None;
-        for (i, arg) in ast.iter().enumerate() {
-            if let Ast::Key(_, key) = arg {
-                if last_key.is_some() {
-                    return None;
-                }
-
-                for arg in self.args.iter() {
-                    if arg.name == *key {
-                        last_key = Some(arg.name);
+            (PatternNode::SExpr(a), Ast::SExpr(_, b)) => {
+                for (a, b) in a.iter().zip(b.iter()) {
+                    if !a.matches(b, map) {
+                        return false;
                     }
                 }
 
-                last_key?;
-            } else if let Some(key) = last_key {
-                bindings.insert(key, CapturedArg::Single(i));
-                last_key = None;
-            } else {
-                let arg = self.args.get(ordered_arg)?;
-                if let ArgType::Ordered | ArgType::Optional = arg.type_ {
-                    bindings.insert(arg.name, CapturedArg::Single(i));
-
-                    ordered_arg += 1;
-                    while let Some(Arg {
-                        type_: ArgType::Key,
-                        ..
-                    }) = self.args.get(ordered_arg)
-                    {
-                        ordered_arg += 1;
-                    }
-                } else if let ArgType::Rest = arg.type_ {
-                    for arg in ast.iter().skip(i + 1) {
-                        if let Ast::Key(_, _) = arg {
-                            return None;
-                        }
-                    }
-
-                    bindings.insert(arg.name, CapturedArg::Rest(i..));
-                    return Some(bindings);
-                }
+                true
             }
-        }
 
-        if let Some(Arg {
-            type_: ArgType::Ordered | ArgType::Optional,
-            ..
-        }) = self.args.get(ordered_arg)
-        {
-            None
-        } else {
-            Some(bindings)
+            (PatternNode::Symbol(s), b) => {
+                map.insert((*s).to_owned(), b.clone());
+                true
+            }
+
+            (PatternNode::Attribute(v1, a1), Ast::Attribute(_, v2, a2)) => {
+                v1.matches(v2, map) | a1.matches(a2, map)
+            }
+
+            (PatternNode::VarPat(_), _) => todo!(),
+
+            _ => false,
         }
     }
 }
 
-fn replace_macro_args<'input>(
-    ast: &mut Ast<'input>,
-    map: &HashMap<&'input str, CapturedArg>,
-    args: &[Ast<'input>],
-) {
-    match ast {
-        Ast::Int(_, _) | Ast::Char(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Key(_, _) => (),
+enum ReplacementNode<'a> {
+    Literal(Ast<'a>),
+    SExpr(Vec<ReplacementNode<'a>>),
+    Symbol(&'a str),
+    Attribute(Box<ReplacementNode<'a>>, Box<ReplacementNode<'a>>),
+    VarPat(Vec<ReplacementNode<'a>>),
+}
 
-        Ast::Symbol(_, name) => {
-            if let Some(cap) = map.get(name) {
-                match cap {
-                    CapturedArg::None => *ast = Ast::SExpr(ast.span(), vec![]),
-                    CapturedArg::Single(single) => *ast = args[*single].clone(),
-                    CapturedArg::Rest(rest) => {
-                        *ast = {
-                            let sexpr = args[rest.clone()].to_vec();
-                            Ast::SExpr(
-                                sexpr.first().map(|v| v.span().start).unwrap_or(0)
-                                    ..sexpr.last().map(|v| v.span().end).unwrap_or(0),
-                                sexpr,
-                            )
-                        }
-                    }
+impl<'a> ReplacementNode<'a> {
+    fn replace(&self, map: &HashMap<String, Ast<'a>>) -> Ast<'a> {
+        match self {
+            ReplacementNode::Literal(v) => v.clone(),
+
+            ReplacementNode::SExpr(v) => Ast::SExpr(0..0, v.iter().map(|v| v.replace(map)).collect()),
+
+            ReplacementNode::Symbol(v) => {
+                if let Some(v) = map.get(*v) {
+                    v.clone()
+                } else {
+                    Ast::Symbol(0..0, *v)
                 }
             }
-        }
 
-        Ast::Quote(_, quote) => replace_macro_args(quote, map, args),
+            ReplacementNode::Attribute(v, a) => Ast::Attribute(0..0, Box::new(v.replace(map)), Box::new(a.replace(map))),
 
-        Ast::SExpr(_, sexpr) => {
-            for ast in sexpr {
-                replace_macro_args(ast, map, args);
-            }
-        }
-
-        Ast::Attribute(_, top, attr) => {
-            replace_macro_args(top, map, args);
-            replace_macro_args(attr, map, args);
+            ReplacementNode::VarPat(_) => todo!(),
         }
     }
 }
 
-fn replace_macros_helper<'input>(
-    map: &HashMap<&'input str, Vec<Macro<'input>>>,
-    ast: &mut Ast<'input>,
-) -> bool {
+struct Macros<'a> {
+    pat_rep_pairs: Vec<(PatternNode<'a>, ReplacementNode<'a>)>,
+}
+
+fn extract_pattern<'a>(ast: &Ast<'a>) -> PatternNode<'a> {
     match ast {
         Ast::Int(_, _)
         | Ast::Char(_, _)
         | Ast::Float(_, _)
         | Ast::Str(_, _)
-        | Ast::Symbol(_, _)
-        | Ast::Key(_, _) => false,
+        | Ast::Key(_, _) => PatternNode::Literal(ast.clone()),
 
-        Ast::Quote(_, quote) => replace_macros_helper(map, quote),
+        Ast::Symbol(_, s) => PatternNode::Symbol(*s),
+        Ast::Quote(_, v) => PatternNode::Literal((**v).clone()),
 
-        Ast::SExpr(_, v) => match v.first() {
-            Some(Ast::Symbol(_, name)) if map.contains_key(name) => {
-                for macro_ in map.get(name).unwrap().iter().rev() {
-                    if let Some(bindings) = macro_.args_bind(&v[1..]) {
-                        let mut new = macro_
-                            .body
-                            .clone()
-                            .unwrap_or_else(|| Ast::SExpr(0..0, Vec::new()));
-
-                        replace_macro_args(&mut new, &bindings, &v[1..]);
-
-                        *ast = new;
-                        return true;
-                    }
-                }
-
-                false
+        Ast::SExpr(_, v) => {
+            if !v.is_empty() && matches!(v[0], Ast::Symbol(_, "..")) {
+                PatternNode::VarPat(v[1..].iter().map(extract_pattern).collect())
+            } else {
+                PatternNode::SExpr(v.iter().map(extract_pattern).collect())
             }
-
-            _ => {
-                let mut updated = false;
-                for ast in v {
-                    if replace_macros_helper(map, ast) {
-                        updated = true;
-                    }
-                }
-
-                updated
-            }
-        },
-
-        Ast::Attribute(_, top, attr) => {
-            let mut updated = false;
-            let did_on_top = replace_macros_helper(map, top);
-            if replace_macros_helper(map, attr) || did_on_top {
-                updated = true;
-            }
-
-            updated
         }
+
+        Ast::Attribute(_, v, a) => PatternNode::Attribute(Box::new(extract_pattern(&**v)), Box::new(extract_pattern(&**a))),
     }
 }
 
-pub fn replace_macros<'input>(
-    map: &HashMap<&'input str, Vec<Macro<'input>>>,
-    asts: &mut [Ast<'input>],
-) {
-    while {
-        let mut updated = false;
-        for ast in asts.iter_mut() {
-            if replace_macros_helper(map, ast) {
-                updated = true;
+fn extract_replacement<'a>(ast: &Ast<'a>) -> ReplacementNode<'a> {
+    match ast {
+        Ast::Int(_, _)
+        | Ast::Char(_, _)
+        | Ast::Float(_, _)
+        | Ast::Str(_, _)
+        | Ast::Key(_, _) => ReplacementNode::Literal(ast.clone()),
+
+        Ast::Symbol(_, s) => ReplacementNode::Symbol(*s),
+        Ast::Quote(_, v) => ReplacementNode::Literal((**v).clone()),
+
+        Ast::SExpr(_, v) => {
+            if !v.is_empty() && matches!(v[0], Ast::Symbol(_, "..")) {
+                ReplacementNode::VarPat(v[1..].iter().map(extract_replacement).collect())
+            } else {
+                ReplacementNode::SExpr(v.iter().map(extract_replacement).collect())
             }
         }
-        updated
-    } {}
+
+        Ast::Attribute(_, v, a) => ReplacementNode::Attribute(Box::new(extract_replacement(&**v)), Box::new(extract_replacement(&**a))),
+    }
 }
 
-pub fn extract_macros<'input>(
-    map: &mut HashMap<&'input str, Vec<Macro<'input>>>,
-    asts: &[Ast<'input>],
-) {
-    for ast in asts {
-        if let Ast::SExpr(_, sexpr) = ast {
-            if let Some(Ast::Symbol(_, "defmacro")) = sexpr.get(0) {
-                if let Some(Ast::Symbol(_, name)) = sexpr.get(1) {
-                    let mut args = Vec::new();
-                    let mut type_ = ArgType::Ordered;
+fn find_macros<'a>(ast: &Ast<'a>, macros: &mut HashMap<String, Macros<'a>>) {
+    match ast {
+        Ast::Quote(_, v) => find_macros(v, macros),
 
-                    for arg in sexpr[2..sexpr.len() - 1].iter() {
-                        match arg {
-                            Ast::Symbol(_, "&optional") => type_ = ArgType::Optional,
-                            Ast::Symbol(_, "&key") => type_ = ArgType::Key,
-                            Ast::Symbol(_, "&rest") => type_ = ArgType::Rest,
-                            Ast::Symbol(_, name) => {
-                                args.push(Arg {
-                                    name,
-                                    type_,
-                                    value: None,
-                                });
-                            }
+        Ast::SExpr(_, v) => {
+            if v.len() >= 3 && matches!(v.get(0), Some(Ast::Symbol(_, "defmacro"))) {
+                let (name, pattern) = match &v[1] {
+                    Ast::SExpr(_, v) if !v.is_empty() => {
+                        let name = match v[0] {
+                            Ast::Symbol(_, n) => n,
+                            _ => return,
+                        };
+                        let pattern = PatternNode::SExpr(v.iter().map(extract_pattern).collect());
+                        (name, pattern)
+                    }
+                    _ => return,
+                };
 
-                            Ast::SExpr(_, sexpr) if sexpr.len() == 2 => {
-                                if let Ast::Symbol(_, name) = sexpr[0] {
-                                    args.push(Arg {
-                                        name,
-                                        type_,
-                                        value: Some(sexpr[1].clone()),
-                                    })
-                                }
-                            }
-
-                            _ => (),
-                        }
+                let replacement = ReplacementNode::SExpr([ReplacementNode::Literal(Ast::Symbol(0..0, "seq"))].into_iter().chain(v[2..].iter().map(extract_replacement)).collect());
+                match macros.entry(name.to_owned()) {
+                    Entry::Occupied(mut v) => {
+                        v.get_mut().pat_rep_pairs.push((pattern, replacement));
                     }
 
-                    let body = if sexpr.len() > 2 { sexpr.last() } else { None };
-
-                    match map.entry(*name) {
-                        Entry::Occupied(mut v) => {
-                            v.get_mut().push(Macro {
-                                name: *name,
-                                args,
-                                body: body.cloned(),
-                            });
-                        }
-
-                        Entry::Vacant(v) => {
-                            v.insert(vec![Macro {
-                                name: *name,
-                                args,
-                                body: body.cloned(),
-                            }]);
-                        }
+                    Entry::Vacant(v) => {
+                        v.insert(Macros {
+                            pat_rep_pairs: vec![(pattern, replacement)],
+                        });
                     }
                 }
+            } else {
+                for v in v {
+                    find_macros(v, macros);
+                }
             }
+        }
+
+        Ast::Attribute(_, v, a) => {
+            find_macros(v, macros);
+            find_macros(a, macros);
+        }
+
+        _ => (),
+    }
+}
+
+fn apply_macros<'a>(ast: &mut Ast<'a>, macros: &HashMap<String, Macros<'a>>) -> bool {
+    match ast {
+        Ast::Quote(_, v) => {
+            apply_macros(v, macros)
+        }
+
+        Ast::SExpr(_, v) if !v.is_empty() && !matches!(v[0], Ast::Symbol(_, "defmacro")) => {
+            match v.get(0) {
+                Some(Ast::Symbol(_, macro_name)) if macros.contains_key(*macro_name) => {
+                    if let Some(macro_) = macros.get(*macro_name) {
+                        for (pat, rep) in macro_.pat_rep_pairs.iter().rev() {
+                            let mut map = HashMap::new();
+                            if pat.matches(ast, &mut map) {
+                                *ast = rep.replace(&map);
+                                return true;
+                            }
+                        }
+
+                        false
+                    } else {
+                        false
+                    }
+                }
+
+                _ => {
+                    let mut b = false;
+                    for v in v {
+                        b |= apply_macros(v, macros);
+                    }
+                    b
+                }
+            }
+        }
+
+        Ast::Attribute(_, v, a) => {
+            apply_macros(v, macros) | apply_macros(a, macros)
+        }
+
+        _ => false,
+    }
+}
+
+pub fn execute_macros(asts: &mut [Ast<'_>]) {
+    let mut changed = true;
+    let mut macros = HashMap::new();
+    while changed {
+        changed = false;
+        macros.clear();
+
+        for ast in asts.iter() {
+            find_macros(ast, &mut macros);
+        }
+
+        for ast in asts.iter_mut() {
+            changed |= apply_macros(ast, &macros);
         }
     }
 }

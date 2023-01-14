@@ -24,9 +24,8 @@ fn main() {
     let contents = std::fs::read_to_string(args.input_file).unwrap();
 
     let mut asts = TopParser::new().parse(&contents).unwrap();
-    let mut map = HashMap::new();
-    macros::extract_macros(&mut map, &asts);
-    macros::replace_macros(&map, &mut asts);
+    macros::execute_macros(&mut asts);
+    //println!("{:#?}", &asts[3..]);
     let mut sexprs = ast_lowering::lower(asts).unwrap();
     let mut func_map = correctness::create_default_signatures();
     correctness::extract_signatures(&sexprs, &mut func_map);
