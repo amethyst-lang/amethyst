@@ -237,7 +237,9 @@ fn traverse_sexpr<'a>(
         }
 
         SExpr::Seq { meta, values } => {
-            scopes.push(HashMap::new());
+            if !matches!(let_status, LetStatus::Conditional) {
+                scopes.push(HashMap::new());
+            }
             for value in values.iter_mut() {
                 traverse_sexpr(
                     value,
@@ -262,13 +264,17 @@ fn traverse_sexpr<'a>(
                 )?;
             }
 
-            scopes.pop();
+            if !matches!(let_status, LetStatus::Conditional) {
+                scopes.pop();
+            }
             Ok(())
         }
 
         SExpr::Cond { meta, values, elsy } => {
             for (cond, then) in values.iter_mut() {
-                scopes.push(HashMap::new());
+                if !matches!(let_status, LetStatus::Conditional) {
+                    scopes.push(HashMap::new());
+                }
                 traverse_sexpr(
                     cond,
                     type_var_counter,
@@ -323,11 +329,16 @@ fn traverse_sexpr<'a>(
                     substitutions,
                     coercions,
                 )?;
-                scopes.pop();
+
+                if !matches!(let_status, LetStatus::Conditional) {
+                    scopes.pop();
+                }
             }
 
             if let Some(elsy) = elsy {
-                scopes.push(HashMap::new());
+                if !matches!(let_status, LetStatus::Conditional) {
+                    scopes.push(HashMap::new());
+                }
                 traverse_sexpr(
                     &mut **elsy,
                     type_var_counter,
@@ -346,7 +357,9 @@ fn traverse_sexpr<'a>(
                     substitutions,
                     coercions,
                 )?;
-                scopes.pop();
+                if !matches!(let_status, LetStatus::Conditional) {
+                    scopes.pop();
+                }
             } else if meta.type_ != Type::Tuple(vec![]) {
                 todo!("error handling");
             }
@@ -355,7 +368,9 @@ fn traverse_sexpr<'a>(
         }
 
         SExpr::Loop { meta, value } => {
-            scopes.push(HashMap::new());
+            if !matches!(let_status, LetStatus::Conditional) {
+                scopes.push(HashMap::new());
+            }
             let mut break_type = Some(Type::Unknown);
             traverse_sexpr(
                 &mut **value,
@@ -376,7 +391,9 @@ fn traverse_sexpr<'a>(
                 None => unreachable!(),
             };
             substitute(&mut meta.type_, &t, substitutions, coercions)?;
-            scopes.pop();
+            if !matches!(let_status, LetStatus::Conditional) {
+                scopes.pop();
+            }
 
             Ok(())
         }
