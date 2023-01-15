@@ -5,7 +5,6 @@ use super::parsing::Ast;
 enum PatternNode<'a> {
     Literal(Ast<'a>),
     SExpr(Vec<PatternNode<'a>>),
-    Key(&'a str),
     Symbol(&'a str),
     Attribute(Box<PatternNode<'a>>, Box<PatternNode<'a>>),
     VarPat(Vec<PatternNode<'a>>),
@@ -67,20 +66,6 @@ impl<'a> PatternNode<'a> {
                 }
 
                 i >= a.len() && j >= b.len()
-            }
-
-            (PatternNode::Key(s), b @ Ast::Key(_, _)) => {
-                match map.entry(s.to_string()) {
-                    Entry::Occupied(mut v) => {
-                        v.get_mut().push(b.clone());
-                    }
-
-                    Entry::Vacant(v) => {
-                        v.insert(vec![b.clone()]);
-                    }
-                }
-
-                true
             }
 
             (PatternNode::Symbol(s), b) => {
@@ -213,11 +198,11 @@ fn extract_pattern<'a>(ast: &Ast<'a>, has_var_pat: bool) -> PatternNode<'a> {
         Ast::Int(_, _)
         | Ast::Char(_, _)
         | Ast::Float(_, _)
-        | Ast::Str(_, _) => PatternNode::Literal(ast.clone()),
+        | Ast::Str(_, _)
+        | Ast::Key(_, _) => PatternNode::Literal(ast.clone()),
 
-        Ast::Key(_, s) => PatternNode::Key(*s),
         Ast::Symbol(_, s) => PatternNode::Symbol(*s),
-        Ast::SymbolOwned(_, _) => unreachable!(),
+        Ast::SymbolOwned(_, _) => todo!(),
         Ast::Quote(_, v) => PatternNode::Literal((**v).clone()),
 
         Ast::SExpr(_, v) => {
@@ -241,7 +226,7 @@ fn extract_replacement<'a>(ast: &Ast<'a>, has_var_pat: bool) -> ReplacementNode<
         | Ast::Key(_, _) => ReplacementNode::Literal(ast.clone()),
 
         Ast::Symbol(_, s) => ReplacementNode::Symbol(*s),
-        Ast::SymbolOwned(_, _) => unreachable!(),
+        Ast::SymbolOwned(_, _) => todo!(),
         Ast::Quote(_, v) => ReplacementNode::Literal((**v).clone()),
 
         Ast::SExpr(_, v) => {
@@ -268,7 +253,7 @@ fn find_macros<'a>(ast: &Ast<'a>, macros: &mut HashMap<String, Macros<'a>>) {
                             Ast::Symbol(_, n) => n,
                             _ => return,
                         };
-                        let pattern = PatternNode::SExpr(v.iter().map(|v| extract_pattern(v, false)).collect());
+                        let pattern = PatternNode::SExpr(v.iter().skip(1).map(|v| extract_pattern(v, false)).collect());
                         (name, pattern)
                     }
                     _ => return,
@@ -309,30 +294,29 @@ fn apply_macros<'a>(ast: &mut Ast<'a>, macros: &HashMap<String, Macros<'a>>) -> 
         }
 
         Ast::SExpr(_, v) if !v.is_empty() && !matches!(v[0], Ast::Symbol(_, "defmacro")) => {
+            let mut b = false;
+            for v in v.iter_mut() {
+                b |= apply_macros(v, macros);
+            }
+
             match v.get(0) {
                 Some(Ast::Symbol(_, macro_name)) if macros.contains_key(*macro_name) => {
                     if let Some(macro_) = macros.get(*macro_name) {
                         for (pat, rep) in macro_.pat_rep_pairs.iter().rev() {
                             let mut map = HashMap::new();
-                            if pat.matches(ast, &mut map) {
+                            if pat.matches(&Ast::SExpr(0..0, v[1..].to_vec()), &mut map) {
                                 *ast = rep.replace(&map);
                                 return true;
                             }
                         }
 
-                        false
+                        b
                     } else {
-                        false
+                        b
                     }
                 }
 
-                _ => {
-                    let mut b = false;
-                    for v in v {
-                        b |= apply_macros(v, macros);
-                    }
-                    b
-                }
+                _ => b,
             }
         }
 
@@ -344,7 +328,7 @@ fn apply_macros<'a>(ast: &mut Ast<'a>, macros: &HashMap<String, Macros<'a>>) -> 
     }
 }
 
-pub fn execute_macros(asts: &mut [Ast<'_>]) {
+pub fn execute_macros(asts: &mut Vec<Ast<'_>>) {
     let mut changed = true;
     let mut macros = HashMap::new();
     while changed {
@@ -358,10 +342,31 @@ pub fn execute_macros(asts: &mut [Ast<'_>]) {
         for ast in asts.iter_mut() {
             changed |= apply_macros(ast, &macros);
         }
-    }
 
-    for ast in asts.iter_mut() {
-        perform_post_macro_transformations(ast);
+        let mut includes = Vec::new();
+        for (i, ast) in asts.iter_mut().enumerate() {
+            perform_post_macro_transformations(ast);
+            match ast {
+                Ast::SExpr(_, v) if matches!(v.get(0), Some(Ast::Symbol(_, "#inline"))) => {
+                    includes.push(i);
+                }
+
+                _ => (),
+            }
+        }
+
+        for i in includes.into_iter().rev() {
+            let vals = asts.remove(i);
+            match vals {
+                Ast::SExpr(_, vals) => {
+                    for (j, val) in vals.into_iter().skip(1).enumerate() {
+                        asts.insert(i + j, val);
+                    }
+                }
+
+                _ => unreachable!(),
+            }
+        }
     }
 }
 
@@ -377,6 +382,11 @@ fn perform_post_macro_transformations(ast: &mut Ast<'_>) {
 
         Ast::Quote(_, v) => perform_post_macro_transformations(v),
 
+        Ast::SExpr(s, v) if v.len() == 2 && matches!(v.get(0), Some(Ast::Symbol(_, "#quote"))) => {
+            let v = v.remove(1);
+            *ast = Ast::Quote(s.clone(), Box::new(v));
+        }
+
         Ast::SExpr(s, v) if v.len() == 3 && matches!(v.get(0), Some(Ast::Symbol(_, "#concat"))) => {
             match (&v[1], &v[2]) {
                 (Ast::Symbol(_, a), Ast::Symbol(_, b)) => *ast = Ast::SymbolOwned(s.clone(), format!("{}{}", a, b)),
@@ -389,12 +399,12 @@ fn perform_post_macro_transformations(ast: &mut Ast<'_>) {
             }
         }
 
-        Ast::SExpr(_, v) => {
+        Ast::SExpr(_, v) if !matches!(v.get(0), Some(Ast::Symbol(_, "defmacro"))) => {
             let mut includes = Vec::new();
             for (i, v) in v.iter_mut().enumerate() {
                 perform_post_macro_transformations(v);
                 match v {
-                    Ast::SExpr(_, v) if matches!(v.get(0), Some(Ast::Symbol(_, "#include"))) => {
+                    Ast::SExpr(_, v) if matches!(v.get(0), Some(Ast::Symbol(_, "#inline"))) => {
                         includes.push(i);
                     }
 
@@ -405,7 +415,7 @@ fn perform_post_macro_transformations(ast: &mut Ast<'_>) {
             for i in includes.into_iter().rev() {
                 let vals = v.remove(i);
                 match vals {
-                    Ast::SExpr(_, vals) if matches!(vals.get(0), Some(Ast::Symbol(_, "#include"))) => {
+                    Ast::SExpr(_, vals) => {
                         for (j, val) in vals.into_iter().skip(1).enumerate() {
                             v.insert(i + j, val);
                         }
@@ -413,6 +423,12 @@ fn perform_post_macro_transformations(ast: &mut Ast<'_>) {
 
                     _ => unreachable!(),
                 }
+            }
+        }
+
+        Ast::SExpr(_, v) => {
+            if let Some(v) = v.get_mut(1) {
+                perform_post_macro_transformations(v);
             }
         }
 

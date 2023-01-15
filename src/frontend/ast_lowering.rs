@@ -577,7 +577,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
             value,
         },
 
-        Ast::Key(_, _) => todo!(),
+        Ast::Key(span, key) => todo!("{:?}: {}", span, key),
 
         Ast::Quote(_, _) => todo!(),
 

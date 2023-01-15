@@ -26,6 +26,7 @@ fn main() {
     let mut asts = TopParser::new().parse(&contents).unwrap();
     macros::execute_macros(&mut asts);
     let mut sexprs = ast_lowering::lower(asts).unwrap();
+    println!("{:#?}", sexprs.last().unwrap());
     let mut func_map = correctness::create_default_signatures();
     correctness::extract_signatures(&sexprs, &mut func_map);
     let mut struct_map = HashMap::new();

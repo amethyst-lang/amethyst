@@ -288,7 +288,7 @@ fn traverse_sexpr<'a>(
                     let_status,
                 )?;
 
-                for (_, (_, let_status)) in scopes.last_mut().unwrap() {
+                for (_, let_status) in scopes.last_mut().unwrap().values_mut() {
                     *let_status = LetStatus::Direct;
                 }
 
