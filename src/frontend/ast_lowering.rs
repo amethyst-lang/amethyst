@@ -6,13 +6,18 @@ use std::{
 use super::parsing::Ast;
 
 #[derive(Debug, Clone)]
-pub struct Metadata<'a> {
+pub struct Metadata {
     pub range: Range<usize>,
-    pub type_: Type<'a>,
+    pub type_: Type,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Annotations {
+    pub public: bool,
 }
 
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
-pub enum Type<'a> {
+pub enum Type {
     Unknown,
     UnknownInt,
     UnknownFloat,
@@ -23,28 +28,28 @@ pub enum Type<'a> {
     F32,
     F64,
 
-    Tuple(Vec<Type<'a>>),
+    Tuple(Vec<Type>),
 
     // mutable, type
-    Pointer(bool, Box<Type<'a>>),
+    Pointer(bool, Box<Type>),
 
     // mutable, type
-    Slice(bool, Box<Type<'a>>),
+    Slice(bool, Box<Type>),
 
     // name, generics
-    Struct(&'a str, Vec<Type<'a>>),
+    Struct(String, Vec<Type>),
 
-    Union(Vec<Type<'a>>),
+    Union(Vec<Type>),
 
-    Generic(&'a str),
+    Generic(String),
 
     // argument types, return type
-    Function(Vec<Type<'a>>, Box<Type<'a>>),
+    Function(Vec<Type>, Box<Type>),
 
     TypeVariable(u64),
 }
 
-impl<'a> Type<'a> {
+impl Type {
     pub fn is_subtype(&self, supertype: &Type) -> bool {
         match (self, supertype) {
             (Type::Int(s1, w1), Type::Int(s2, w2)) => s1 == s2 && w1 == w2,
@@ -177,7 +182,7 @@ impl<'a> Type<'a> {
     pub fn replace_generics(
         &mut self,
         type_var_counter: &mut u64,
-        map: &mut HashMap<&'a str, Self>,
+        map: &mut HashMap<String, Self>,
     ) {
         match self {
             Type::Tuple(v) => {
@@ -196,7 +201,7 @@ impl<'a> Type<'a> {
                 }
             }
 
-            Type::Generic(n) => match map.entry(*n) {
+            Type::Generic(n) => match map.entry(n.clone()) {
                 Entry::Occupied(entry) => {
                     *self = entry.get().clone();
                 }
@@ -221,140 +226,142 @@ impl<'a> Type<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub enum SExpr<'a> {
+pub enum SExpr {
     Int {
-        meta: Metadata<'a>,
+        meta: Metadata,
         value: u64,
     },
     Float {
-        meta: Metadata<'a>,
+        meta: Metadata,
         value: f64,
     },
     Str {
-        meta: Metadata<'a>,
+        meta: Metadata,
         value: String,
     },
     Symbol {
-        meta: Metadata<'a>,
+        meta: Metadata,
         value: String,
     },
 
     Tuple {
-        meta: Metadata<'a>,
-        tuple: Vec<SExpr<'a>>,
+        meta: Metadata,
+        tuple: Vec<SExpr>,
     },
 
     Seq {
-        meta: Metadata<'a>,
-        values: Vec<SExpr<'a>>,
+        meta: Metadata,
+        values: Vec<SExpr>,
     },
 
     Cond {
-        meta: Metadata<'a>,
-        values: Vec<(SExpr<'a>, SExpr<'a>)>,
-        elsy: Option<Box<SExpr<'a>>>,
+        meta: Metadata,
+        values: Vec<(SExpr, SExpr)>,
+        elsy: Option<Box<SExpr>>,
     },
 
     Loop {
-        meta: Metadata<'a>,
-        value: Box<SExpr<'a>>,
+        meta: Metadata,
+        value: Box<SExpr>,
     },
 
     Break {
-        meta: Metadata<'a>,
-        value: Option<Box<SExpr<'a>>>,
+        meta: Metadata,
+        value: Option<Box<SExpr>>,
     },
 
     Nil {
-        meta: Metadata<'a>,
+        meta: Metadata,
     },
 
     Type {
-        meta: Metadata<'a>,
-        value: Box<SExpr<'a>>,
+        meta: Metadata,
+        value: Box<SExpr>,
     },
 
     FuncDef {
-        meta: Metadata<'a>,
-        name: &'a str,
-        ret_type: Type<'a>,
-        args: Vec<(&'a str, Type<'a>)>,
-        expr: Box<SExpr<'a>>,
+        meta: Metadata,
+        ann: Annotations,
+        name: String,
+        ret_type: Type,
+        args: Vec<(String, Type)>,
+        expr: Box<SExpr>,
     },
 
     FuncCall {
-        meta: Metadata<'a>,
-        func: Box<SExpr<'a>>,
-        values: Vec<SExpr<'a>>,
+        meta: Metadata,
+        func: Box<SExpr>,
+        values: Vec<SExpr>,
     },
 
     FuncExtern {
-        meta: Metadata<'a>,
-        name: &'a str,
-        ret_type: Type<'a>,
-        args: Vec<(&'a str, Type<'a>)>,
+        meta: Metadata,
+        name: String,
+        ret_type: Type,
+        args: Vec<(String, Type)>,
         linked_to: String,
     },
 
     StructDef {
-        meta: Metadata<'a>,
-        name: &'a str,
-        fields: Vec<(&'a str, Type<'a>)>,
+        meta: Metadata,
+        ann: Annotations,
+        name: String,
+        fields: Vec<(String, Type)>,
     },
 
     StructSet {
-        meta: Metadata<'a>,
-        name: &'a str,
-        values: Vec<(&'a str, SExpr<'a>)>,
+        meta: Metadata,
+        name: String,
+        values: Vec<(String, SExpr)>,
     },
 
     Declare {
-        meta: Metadata<'a>,
+        meta: Metadata,
         conditional: bool,
-        settings: Vec<SExpr<'a>>,
+        settings: Vec<SExpr>,
     },
 
     Assign {
-        meta: Metadata<'a>,
+        meta: Metadata,
         var: String,
-        value: Box<SExpr<'a>>,
+        value: Box<SExpr>,
     },
 
     Attribute {
-        meta: Metadata<'a>,
-        top: Box<SExpr<'a>>,
-        attr: &'a str,
+        meta: Metadata,
+        top: Box<SExpr>,
+        attr: String,
     },
 
     SliceGet {
-        meta: Metadata<'a>,
-        top: Box<SExpr<'a>>,
-        index: Box<SExpr<'a>>,
+        meta: Metadata,
+        top: Box<SExpr>,
+        index: Box<SExpr>,
     },
 
     SizeOf {
-        meta: Metadata<'a>,
-        type_: Type<'a>,
+        meta: Metadata,
+        type_: Type,
     },
 
     Ref {
-        meta: Metadata<'a>,
-        value: Box<SExpr<'a>>,
+        meta: Metadata,
+        value: Box<SExpr>,
     },
 
     Deref {
-        meta: Metadata<'a>,
-        value: Box<SExpr<'a>>,
+        meta: Metadata,
+        value: Box<SExpr>,
     },
 
     Import {
-        meta: Metadata<'a>,
-        imports: Vec<(Option<&'a str>, String)>,
+        meta: Metadata,
+        imports: Vec<(Option<String>, String)>,
     },
 }
 
-impl<'a> SExpr<'a> {
-    pub fn meta(&self) -> &Metadata<'a> {
+impl SExpr {
+    pub fn meta(&self) -> &Metadata {
         match self {
             SExpr::Int { meta, .. }
             | SExpr::Float { meta, .. }
@@ -383,7 +390,7 @@ impl<'a> SExpr<'a> {
         }
     }
 
-    pub fn meta_mut(&mut self) -> &mut Metadata<'a> {
+    pub fn meta_mut(&mut self) -> &mut Metadata {
         match self {
             SExpr::Int { meta, .. }
             | SExpr::Float { meta, .. }
@@ -432,7 +439,7 @@ pub enum LoweringError {
     InvalidImport,
 }
 
-fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
+fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
     match ast {
         Ast::Symbol(_, "f32") => Ok(Type::F32),
         Ast::Symbol(_, "f64") => Ok(Type::F64),
@@ -445,12 +452,12 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
             }
         }
 
-        Ast::Symbol(_, v) => Ok(Type::Struct(v, vec![])),
+        Ast::Symbol(_, v) => Ok(Type::Struct(v.to_string(), vec![])),
 
         Ast::SExpr(_, v) if v.is_empty() => Ok(Type::Tuple(vec![])),
 
         Ast::Quote(_, ast) => match *ast {
-            Ast::Symbol(_, v) => Ok(Type::Generic(v)),
+            Ast::Symbol(_, v) => Ok(Type::Generic(v.to_string())),
             Ast::SExpr(_, v) => Ok(Type::Tuple(
                 v.into_iter().map(parse_type).collect::<Result<_, _>>()?,
             )),
@@ -521,7 +528,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
             )),
 
             Ast::Symbol(_, v) => Ok(Type::Struct(
-                v,
+                v.to_string(),
                 ast.into_iter()
                     .skip(1)
                     .map(parse_type)
@@ -535,7 +542,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
     }
 }
 
-fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
+fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> {
     let sexpr = match ast {
         Ast::Int(range, value) => SExpr::Int {
             meta: Metadata {
@@ -617,7 +624,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                     tag = None;
                                 }
 
-                                Ast::Key(_, s) if tag.is_none() => tag = Some(s),
+                                Ast::Key(_, s) if tag.is_none() => tag = Some(s.to_string()),
 
                                 _ => return Err(LoweringError::InvalidImport),
                             }
@@ -640,7 +647,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         tuple: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(lower_helper)
+                            .map(|v| lower_helper(v, Annotations::default()))
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
@@ -652,7 +659,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         values: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(lower_helper)
+                            .map(|v| lower_helper(v, Annotations::default()))
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
@@ -664,7 +671,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         values: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(lower_helper)
+                            .map(|v| lower_helper(v, Annotations::default()))
                             .chain([Ok(SExpr::Nil {
                                 meta: Metadata {
                                     range,
@@ -678,7 +685,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         let elsy = if matches!(sexpr.last(), Some(Ast::SExpr(_, v)) if v.len() == 2 && matches!(v[0], Ast::Key(_, "else")))
                         {
                             if let Ast::SExpr(_, mut v) = sexpr.remove(sexpr.len() - 1) {
-                                Some(Box::new(lower_helper(v.remove(1))?))
+                                Some(Box::new(lower_helper(v.remove(1), Annotations::default())?))
                             } else {
                                 unreachable!()
                             }
@@ -701,8 +708,8 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                 .skip(1)
                                 .map(|v| match v {
                                     Ast::SExpr(_, mut v) if v.len() == 2 => Ok((
-                                        lower_helper(v.swap_remove(0))?,
-                                        lower_helper(v.remove(0))?,
+                                        lower_helper(v.swap_remove(0), Annotations::default())?,
+                                        lower_helper(v.remove(0), Annotations::default())?,
                                     )),
 
                                     _ => Err(LoweringError::InvalidCondBranch),
@@ -719,7 +726,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                     range,
                                     type_: Type::Unknown,
                                 },
-                                value: Box::new(lower_helper(sexpr.swap_remove(1))?),
+                                value: Box::new(lower_helper(sexpr.swap_remove(1), Annotations::default())?),
                             }
                         } else {
                             return Err(LoweringError::InvalidLoop);
@@ -733,7 +740,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                     range,
                                     type_: Type::Tuple(vec![]),
                                 },
-                                value: Some(Box::new(lower_helper(sexpr.swap_remove(1))?)),
+                                value: Some(Box::new(lower_helper(sexpr.swap_remove(1), Annotations::default())?)),
                             }
                         } else if sexpr.len() == 1 {
                             SExpr::Break {
@@ -755,7 +762,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                     range,
                                     type_: parse_type(sexpr.swap_remove(2))?,
                                 },
-                                value: Box::new(lower_helper(sexpr.swap_remove(1))?),
+                                value: Box::new(lower_helper(sexpr.swap_remove(1), Annotations::default())?),
                             }
                         } else {
                             return Err(LoweringError::InvalidTypeSpecifier);
@@ -772,7 +779,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                             _ => return Err(LoweringError::InvalidDefun(String::from("unknown"))),
                         };
 
-                        let expr = lower_helper(sexpr.remove(sexpr.len() - 1))?;
+                        let expr = lower_helper(sexpr.remove(sexpr.len() - 1), Annotations::default())?;
                         let ret_type = if let Ast::Symbol(_, ":") = sexpr[sexpr.len() - 2] {
                             sexpr.remove(sexpr.len() - 2);
                             parse_type(sexpr.remove(sexpr.len() - 1))?
@@ -786,7 +793,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                             match arg {
                                 Ast::SExpr(_, mut arg) if arg.len() == 2 => {
                                     if let Ast::Symbol(_, name) = arg[0] {
-                                        args.push((name, parse_type(arg.remove(1))?));
+                                        args.push((name.to_string(), parse_type(arg.remove(1))?));
                                     } else {
                                         return Err(LoweringError::InvalidDefun(String::from(
                                             name,
@@ -806,7 +813,8 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                     Box::new(ret_type.clone()),
                                 ),
                             },
-                            name,
+                            ann,
+                            name: name.to_string(),
                             ret_type,
                             args,
                             expr: Box::new(expr),
@@ -841,7 +849,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                             match arg {
                                 Ast::SExpr(_, mut arg) if arg.len() == 2 => {
                                     if let Ast::Symbol(_, name) = arg[0] {
-                                        args.push((name, parse_type(arg.remove(1))?));
+                                        args.push((name.to_string(), parse_type(arg.remove(1))?));
                                     } else {
                                         return Err(LoweringError::InvalidDefun(String::from(
                                             name,
@@ -861,7 +869,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                     Box::new(ret_type.clone()),
                                 ),
                             },
-                            name,
+                            name: name.to_string(),
                             ret_type,
                             args,
                             linked_to,
@@ -890,7 +898,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                 None => {
                                     match field {
                                         Ast::Key(_, name) => {
-                                            current_field_name = Some(name);
+                                            current_field_name = Some(name.to_string());
                                         }
 
                                         _ => return Err(LoweringError::InvalidDefStruct),
@@ -906,9 +914,10 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         SExpr::StructDef {
                             meta: Metadata {
                                 range,
-                                type_: Type::Struct(name, generics),
+                                type_: Type::Struct(name.to_string(), generics),
                             },
-                            name,
+                            ann,
+                            name: name.to_string(),
                             fields,
                         }
                     }
@@ -924,14 +933,14 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         for field in sexpr.into_iter().skip(1) {
                             match current_field_name {
                                 Some(name) => {
-                                    values.push((name, lower_helper(field)?));
+                                    values.push((name, lower_helper(field, Annotations::default())?));
                                     current_field_name = None;
                                 }
 
                                 None => {
                                     match field {
                                         Ast::Key(_, name) => {
-                                            current_field_name = Some(name);
+                                            current_field_name = Some(name.to_string());
                                         }
 
                                         _ => return Err(LoweringError::InvalidInst),
@@ -949,7 +958,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                 range,
                                 type_: Type::Unknown,
                             },
-                            name,
+                            name: name.to_string(),
                             values,
                         }
                     }
@@ -962,7 +971,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                                     type_: Type::Unknown,
                                 },
                                 conditional: l.ends_with('?'),
-                                settings: sexpr.into_iter().skip(1).map(lower_helper).collect::<Result<_, _>>()?,
+                                settings: sexpr.into_iter().skip(1).map(|v| lower_helper(v, Annotations::default())).collect::<Result<_, _>>()?,
                             }
                         } else {
                             return Err(LoweringError::InvalidLet);
@@ -971,7 +980,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
 
                     Ast::Symbol(_, "=") => {
                         if sexpr.len() == 3 {
-                            let value = lower_helper(sexpr.swap_remove(2))?;
+                            let value = lower_helper(sexpr.swap_remove(2), Annotations::default())?;
                             match sexpr.swap_remove(1) {
                                 Ast::Symbol(_, var) => SExpr::Assign {
                                     meta: Metadata {
@@ -1018,10 +1027,10 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                             range,
                             type_: Type::Unknown,
                         },
-                        func: Box::new(lower_helper(sexpr.remove(0))?),
+                        func: Box::new(lower_helper(sexpr.remove(0), Annotations::default())?),
                         values: sexpr
                             .into_iter()
-                            .map(lower_helper)
+                            .map(|v| lower_helper(v, Annotations::default()))
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
                 }
@@ -1034,7 +1043,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                     range,
                     type_: Type::Unknown,
                 },
-                value: Box::new(lower_helper(*value)?),
+                value: Box::new(lower_helper(*value, Annotations::default())?),
             },
 
             Ast::Symbol(_, "*") => SExpr::Deref {
@@ -1042,7 +1051,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                     range,
                     type_: Type::Unknown,
                 },
-                value: Box::new(lower_helper(*value)?),
+                value: Box::new(lower_helper(*value, Annotations::default())?),
             },
 
             Ast::Symbol(_, attr) => SExpr::Attribute {
@@ -1050,8 +1059,8 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                     range,
                     type_: Type::Unknown,
                 },
-                top: Box::new(lower_helper(*value)?),
-                attr,
+                top: Box::new(lower_helper(*value, Annotations::default())?),
+                attr: attr.to_string(),
             },
 
             Ast::SExpr(_, mut v) if v.len() == 1 => SExpr::SliceGet {
@@ -1059,8 +1068,8 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                     range,
                     type_: Type::Unknown,
                 },
-                top: Box::new(lower_helper(*value)?),
-                index: Box::new(lower_helper(v.remove(0))?),
+                top: Box::new(lower_helper(*value, Annotations::default())?),
+                index: Box::new(lower_helper(v.remove(0), Annotations::default())?),
             },
 
             v @ Ast::SExpr(_, _) => SExpr::SliceGet {
@@ -1068,8 +1077,8 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                     range,
                     type_: Type::Unknown,
                 },
-                top: Box::new(lower_helper(*value)?),
-                index: Box::new(lower_helper(v)?),
+                top: Box::new(lower_helper(*value, Annotations::default())?),
+                index: Box::new(lower_helper(v, Annotations::default())?),
             },
 
             _ => unreachable!("parser emits only symbols or s expressions"),
@@ -1079,11 +1088,21 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
     Ok(sexpr)
 }
 
-pub fn lower(asts: Vec<Ast<'_>>) -> Result<Vec<SExpr<'_>>, LoweringError> {
+pub fn lower(asts: Vec<Ast<'_>>) -> Result<Vec<SExpr>, LoweringError> {
     let mut sexprs = vec![];
 
+    let mut ann = Annotations::default();
     for ast in asts {
-        sexprs.push(lower_helper(ast)?);
+        match ast {
+            Ast::SExpr(_, v) if v.len() == 1 && matches!(v.get(0), Some(Ast::Symbol(_, "public"))) => {
+                ann.public = true;
+            }
+
+            _ => {
+                sexprs.push(lower_helper(ast, ann)?);
+                ann = Annotations::default();
+            }
+        }
     }
 
     Ok(sexprs)

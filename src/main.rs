@@ -1,38 +1,47 @@
+use std::path::Path;
 use std::collections::HashMap;
-use std::fs::File;
+//use std::fs::File;
 
 use clap::Parser;
+/*
 use codegem::arch::rv64::RvSelector;
 use codegem::arch::urcl::UrclSelector;
 use codegem::arch::x64::X64Selector;
 use codegem::regalloc::RegAlloc;
 
 use amethyst::backend::sexpr_lowering;
+*/
 use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(value_name = "Input file")]
-    input_file: String,
+    #[arg(value_name = "Input files")]
+    input_files: Vec<String>,
     #[arg(short, long, default_value_t = String::from("x64"), value_name = "Target arch")]
     target: String
 }
 
 fn main() {
     let args = Args::parse();
-    let contents = std::fs::read_to_string(args.input_file).unwrap();
+    let mut modules = Vec::new();
+    let mut exports = HashMap::new();
+    for file in args.input_files.iter() {
+        let path = Path::new(file).canonicalize().unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let mut asts = TopParser::new().parse(&contents).unwrap();
+        macros::execute_macros(&mut asts);
+        let sexprs = ast_lowering::lower(asts).unwrap();
+        let (module, exported) = correctness::create_module(sexprs);
+        modules.push((path.clone(), module));
+        exports.insert(path, exported);
+    }
 
-    let mut asts = TopParser::new().parse(&contents).unwrap();
-    macros::execute_macros(&mut asts);
-    let mut sexprs = ast_lowering::lower(asts).unwrap();
-    println!("{:#?}", sexprs.last().unwrap());
-    let mut func_map = correctness::create_default_signatures();
-    correctness::extract_signatures(&sexprs, &mut func_map);
-    let mut struct_map = HashMap::new();
-    correctness::extract_structs(&sexprs, &mut struct_map);
-    correctness::check(&mut sexprs, &func_map, &struct_map).unwrap();
+    for (name, module) in modules.iter_mut() {
+        correctness::check(name, module, &exports).unwrap();
+    }
 
+    /*
     let ir = sexpr_lowering::lower(sexprs);
 
     match args.target.as_str() {
@@ -62,5 +71,6 @@ fn main() {
             std::process::exit(1);
         }
     }
+    */
 }
 

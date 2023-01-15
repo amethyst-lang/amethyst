@@ -146,11 +146,7 @@ fn lower_helper(
         SExpr::Type { meta, value } => lower_helper(builder, *value, args),
 
         SExpr::FuncDef {
-            meta,
-            name,
-            ret_type,
-            args,
-            expr,
+            ..
         } => unreachable!(),
 
         SExpr::FuncCall { meta, func, values } => match *func {
@@ -325,7 +321,7 @@ fn lower_helper(
             linked_to,
         } => todo!(),
 
-        SExpr::StructDef { meta, name, fields } => todo!(),
+        SExpr::StructDef { .. } => todo!(),
 
         SExpr::StructSet { meta, name, values } => todo!(),
 
@@ -422,7 +418,7 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
                     args,
                     ..
                 } => {
-                let args: Vec<_> = args.iter().map(|(n, t)| (*n, convert_type(t))).collect();
+                let args: Vec<_> = args.iter().map(|(n, t)| (n.clone(), convert_type(t))).collect();
                 let func = if *name == "main" {
                     builder.new_function(name, Linkage::Public, &args, &convert_type(ret_type))
                 } else {
@@ -438,7 +434,7 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
                 linked_to,
                 ..
             } => {
-                let args: Vec<_> = args.iter().map(|(n, t)| (*n, convert_type(t))).collect();
+                let args: Vec<_> = args.iter().map(|(n, t)| (n.clone(), convert_type(t))).collect();
                 let func = builder.new_function(linked_to, Linkage::External, &args, &convert_type(ret_type));
                 helper_args.func_map.insert((*name).to_owned(), func);
             }
@@ -451,12 +447,13 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
         match sexpr {
             SExpr::FuncDef {
                 meta,
+                ann,
                 name,
                 ret_type,
                 args,
                 expr,
             } => {
-                let func = *helper_args.func_map.get(name).unwrap();
+                let func = *helper_args.func_map.get(&name).unwrap();
                 builder.switch_to_function(func);
                 let block = builder.push_block().unwrap();
                 builder.switch_to_block(block);
@@ -482,7 +479,7 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
                 args,
                 linked_to,
             } => (),
-            SExpr::StructDef { meta, name, fields } => (),
+            SExpr::StructDef { .. } => (),
             _ => (),
         }
     }
