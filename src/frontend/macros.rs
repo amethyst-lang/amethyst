@@ -1,4 +1,4 @@
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{hash_map::Entry, HashMap};
 
 use super::parsing::Ast;
 
@@ -45,7 +45,9 @@ impl<'a> PatternNode<'a> {
                             }
 
                             j += offset;
-                        } else { unreachable!() }
+                        } else {
+                            unreachable!()
+                        }
                     } else {
                         let a = &a[i];
                         let b = &b[j];
@@ -114,7 +116,10 @@ impl<'a> ReplacementNode<'a> {
                         let mut cont = true;
                         let mut count = 0;
                         while cont {
-                            let values: Vec<_> = v.iter().map(|v| v.replace_within_varpat(map, count, &mut cont)).collect();
+                            let values: Vec<_> = v
+                                .iter()
+                                .map(|v| v.replace_within_varpat(map, count, &mut cont))
+                                .collect();
                             if cont {
                                 vec.extend(values);
                             }
@@ -140,14 +145,19 @@ impl<'a> ReplacementNode<'a> {
                 }
             }
 
-            ReplacementNode::Attribute(v, a) => Ast::Attribute(0..0, Box::new(v.replace(map)), Box::new(a.replace(map))),
+            ReplacementNode::Attribute(v, a) => {
+                Ast::Attribute(0..0, Box::new(v.replace(map)), Box::new(a.replace(map)))
+            }
 
             ReplacementNode::VarPat(v) => {
                 let mut cont = true;
                 let mut count = 0;
                 let mut vec = Vec::new();
                 while cont {
-                    let values: Vec<_> = v.iter().map(|v| v.replace_within_varpat(map, count, &mut cont)).collect();
+                    let values: Vec<_> = v
+                        .iter()
+                        .map(|v| v.replace_within_varpat(map, count, &mut cont))
+                        .collect();
                     if cont {
                         vec.extend(values);
                     }
@@ -159,15 +169,23 @@ impl<'a> ReplacementNode<'a> {
         }
     }
 
-    fn replace_within_varpat(&self, map: &HashMap<String, Vec<Ast<'a>>>, count: usize, cont: &mut bool) -> Ast<'a> {
+    fn replace_within_varpat(
+        &self,
+        map: &HashMap<String, Vec<Ast<'a>>>,
+        count: usize,
+        cont: &mut bool,
+    ) -> Ast<'a> {
         match self {
             ReplacementNode::Literal(v) => v.clone(),
 
-            ReplacementNode::SExpr(v) => Ast::SExpr(0..0, v.iter().map(|v| v.replace_within_varpat(map, count, cont)).collect()),
+            ReplacementNode::SExpr(v) => Ast::SExpr(
+                0..0,
+                v.iter()
+                    .map(|v| v.replace_within_varpat(map, count, cont))
+                    .collect(),
+            ),
 
-            ReplacementNode::Symbol("#count") => {
-                Ast::Int(0..0, count as u64)
-            }
+            ReplacementNode::Symbol("#count") => Ast::Int(0..0, count as u64),
 
             ReplacementNode::Symbol(v) => {
                 if let Some(v) = map.get(*v) {
@@ -182,7 +200,11 @@ impl<'a> ReplacementNode<'a> {
                 }
             }
 
-            ReplacementNode::Attribute(v, a) => Ast::Attribute(0..0, Box::new(v.replace_within_varpat(map, count, cont)), Box::new(a.replace_within_varpat(map, count, cont))),
+            ReplacementNode::Attribute(v, a) => Ast::Attribute(
+                0..0,
+                Box::new(v.replace_within_varpat(map, count, cont)),
+                Box::new(a.replace_within_varpat(map, count, cont)),
+            ),
 
             ReplacementNode::VarPat(_) => unreachable!(),
         }
@@ -195,11 +217,9 @@ struct Macros<'a> {
 
 fn extract_pattern<'a>(ast: &Ast<'a>, has_var_pat: bool) -> PatternNode<'a> {
     match ast {
-        Ast::Int(_, _)
-        | Ast::Char(_, _)
-        | Ast::Float(_, _)
-        | Ast::Str(_, _)
-        | Ast::Key(_, _) => PatternNode::Literal(ast.clone()),
+        Ast::Int(_, _) | Ast::Char(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Key(_, _) => {
+            PatternNode::Literal(ast.clone())
+        }
 
         Ast::Symbol(_, s) => PatternNode::Symbol(*s),
         Ast::SymbolOwned(_, _) => todo!(),
@@ -213,17 +233,18 @@ fn extract_pattern<'a>(ast: &Ast<'a>, has_var_pat: bool) -> PatternNode<'a> {
             }
         }
 
-        Ast::Attribute(_, v, a) => PatternNode::Attribute(Box::new(extract_pattern(&**v, has_var_pat)), Box::new(extract_pattern(&**a, has_var_pat))),
+        Ast::Attribute(_, v, a) => PatternNode::Attribute(
+            Box::new(extract_pattern(&**v, has_var_pat)),
+            Box::new(extract_pattern(&**a, has_var_pat)),
+        ),
     }
 }
 
 fn extract_replacement<'a>(ast: &Ast<'a>, has_var_pat: bool) -> ReplacementNode<'a> {
     match ast {
-        Ast::Int(_, _)
-        | Ast::Char(_, _)
-        | Ast::Float(_, _)
-        | Ast::Str(_, _)
-        | Ast::Key(_, _) => ReplacementNode::Literal(ast.clone()),
+        Ast::Int(_, _) | Ast::Char(_, _) | Ast::Float(_, _) | Ast::Str(_, _) | Ast::Key(_, _) => {
+            ReplacementNode::Literal(ast.clone())
+        }
 
         Ast::Symbol(_, s) => ReplacementNode::Symbol(*s),
         Ast::SymbolOwned(_, _) => todo!(),
@@ -231,13 +252,25 @@ fn extract_replacement<'a>(ast: &Ast<'a>, has_var_pat: bool) -> ReplacementNode<
 
         Ast::SExpr(_, v) => {
             if !v.is_empty() && matches!(v[0], Ast::Symbol(_, "..")) && !has_var_pat {
-                ReplacementNode::VarPat(v[1..].iter().map(|v| extract_replacement(v, true)).collect())
+                ReplacementNode::VarPat(
+                    v[1..]
+                        .iter()
+                        .map(|v| extract_replacement(v, true))
+                        .collect(),
+                )
             } else {
-                ReplacementNode::SExpr(v.iter().map(|v| extract_replacement(v, has_var_pat)).collect())
+                ReplacementNode::SExpr(
+                    v.iter()
+                        .map(|v| extract_replacement(v, has_var_pat))
+                        .collect(),
+                )
             }
         }
 
-        Ast::Attribute(_, v, a) => ReplacementNode::Attribute(Box::new(extract_replacement(&**v, has_var_pat)), Box::new(extract_replacement(&**a, has_var_pat))),
+        Ast::Attribute(_, v, a) => ReplacementNode::Attribute(
+            Box::new(extract_replacement(&**v, has_var_pat)),
+            Box::new(extract_replacement(&**a, has_var_pat)),
+        ),
     }
 }
 
@@ -253,13 +286,23 @@ fn find_macros<'a>(ast: &Ast<'a>, macros: &mut HashMap<String, Macros<'a>>) {
                             Ast::Symbol(_, n) => n,
                             _ => return,
                         };
-                        let pattern = PatternNode::SExpr(v.iter().skip(1).map(|v| extract_pattern(v, false)).collect());
+                        let pattern = PatternNode::SExpr(
+                            v.iter()
+                                .skip(1)
+                                .map(|v| extract_pattern(v, false))
+                                .collect(),
+                        );
                         (name, pattern)
                     }
                     _ => return,
                 };
 
-                let replacement = ReplacementNode::SExpr([ReplacementNode::Literal(Ast::Symbol(0..0, "#inline"))].into_iter().chain(v[2..].iter().map(|v| extract_replacement(v, false))).collect());
+                let replacement = ReplacementNode::SExpr(
+                    [ReplacementNode::Literal(Ast::Symbol(0..0, "#inline"))]
+                        .into_iter()
+                        .chain(v[2..].iter().map(|v| extract_replacement(v, false)))
+                        .collect(),
+                );
                 match macros.entry(name.to_owned()) {
                     Entry::Occupied(mut v) => {
                         v.get_mut().pat_rep_pairs.push((pattern, replacement));
@@ -289,9 +332,7 @@ fn find_macros<'a>(ast: &Ast<'a>, macros: &mut HashMap<String, Macros<'a>>) {
 
 fn apply_macros<'a>(ast: &mut Ast<'a>, macros: &HashMap<String, Macros<'a>>) -> bool {
     match ast {
-        Ast::Quote(_, v) => {
-            apply_macros(v, macros)
-        }
+        Ast::Quote(_, v) => apply_macros(v, macros),
 
         Ast::SExpr(_, v) if !v.is_empty() && !matches!(v[0], Ast::Symbol(_, "defmacro")) => {
             let mut b = false;
@@ -320,9 +361,7 @@ fn apply_macros<'a>(ast: &mut Ast<'a>, macros: &HashMap<String, Macros<'a>>) -> 
             }
         }
 
-        Ast::Attribute(_, v, a) => {
-            apply_macros(v, macros) | apply_macros(a, macros)
-        }
+        Ast::Attribute(_, v, a) => apply_macros(v, macros) | apply_macros(a, macros),
 
         _ => false,
     }
@@ -400,7 +439,6 @@ fn perform_post_macro_transformations(ast: &mut Ast<'_>) {
             }
         }
         */
-
         Ast::SExpr(_, v) if !matches!(v.get(0), Some(Ast::Symbol(_, "defmacro"))) => {
             let mut includes = Vec::new();
             for (i, v) in v.iter_mut().enumerate() {

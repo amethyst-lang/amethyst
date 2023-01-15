@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use crate::frontend::ast_lowering::{SExpr, Type as SExprType};
 
 use codegem::ir::{
-    BasicBlockId, FunctionId, Module, ModuleBuilder, Operation, Terminator, ToIntegerOperation,
-    Type as IrType, Value, VariableId, Linkage,
+    BasicBlockId, FunctionId, Linkage, Module, ModuleBuilder, Operation, Terminator,
+    ToIntegerOperation, Type as IrType, Value, VariableId,
 };
 
 struct LowerHelperArgs {
@@ -145,9 +145,7 @@ fn lower_helper(
 
         SExpr::Type { meta, value } => lower_helper(builder, *value, args),
 
-        SExpr::FuncDef {
-            ..
-        } => unreachable!(),
+        SExpr::FuncDef { .. } => unreachable!(),
 
         SExpr::FuncCall { meta, func, values } => match *func {
             SExpr::Symbol { value, .. } if value == "+" => {
@@ -288,7 +286,8 @@ fn lower_helper(
                             .into_iter()
                             .flat_map(|v| lower_helper(builder, v, args))
                             .collect();
-                        return builder.push_instruction(&type_, Operation::CallIndirect(v, values));
+                        return builder
+                            .push_instruction(&type_, Operation::CallIndirect(v, values));
                     }
                 }
 
@@ -325,18 +324,17 @@ fn lower_helper(
 
         SExpr::StructSet { meta, name, values } => todo!(),
 
-        SExpr::Declare {
-            meta,
-            settings,
-            ..
-        } => {
+        SExpr::Declare { meta, settings, .. } => {
             let last_in_let = args.in_let;
             args.in_let = true;
             let mut built = None;
             for setting in settings {
                 let v = lower_helper(builder, setting, args);
                 if let Some(built_) = built {
-                    built = builder.push_instruction(&IrType::Integer(false, 1), Operation::BitOr(built_, v.unwrap()));
+                    built = builder.push_instruction(
+                        &IrType::Integer(false, 1),
+                        Operation::BitOr(built_, v.unwrap()),
+                    );
                 } else {
                     built = v;
                 }
@@ -346,16 +344,15 @@ fn lower_helper(
             built
         }
 
-        SExpr::Assign {
-            meta,
-            var,
-            value,
-        } => {
+        SExpr::Assign { meta, var, value } => {
             if let Some(v) = lower_helper(builder, *value, args) {
                 for scope in args.var_map.iter().rev() {
                     if let Some(var) = scope.get(&var) {
                         builder.push_instruction(&IrType::Void, Operation::SetVar(*var, v));
-                        return builder.push_instruction(&IrType::Integer(false, 1), Operation::Integer(false, vec![1]));
+                        return builder.push_instruction(
+                            &IrType::Integer(false, 1),
+                            Operation::Integer(false, vec![1]),
+                        );
                     }
                 }
 
@@ -363,12 +360,12 @@ fn lower_helper(
                     let variable = builder
                         .push_variable(&var, &convert_type(&meta.type_))
                         .unwrap();
-                    args.var_map
-                        .last_mut()
-                        .unwrap()
-                        .insert(var, variable);
+                    args.var_map.last_mut().unwrap().insert(var, variable);
                     builder.push_instruction(&IrType::Void, Operation::SetVar(variable, v));
-                    return builder.push_instruction(&IrType::Integer(false, 1), Operation::Integer(false, vec![1]));
+                    return builder.push_instruction(
+                        &IrType::Integer(false, 1),
+                        Operation::Integer(false, vec![1]),
+                    );
                 }
             }
 
@@ -413,16 +410,24 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
     for sexpr in sexprs.iter() {
         match sexpr {
             SExpr::FuncDef {
-                    name,
-                    ret_type,
-                    args,
-                    ..
-                } => {
-                let args: Vec<_> = args.iter().map(|(n, t)| (n.clone(), convert_type(t))).collect();
+                name,
+                ret_type,
+                args,
+                ..
+            } => {
+                let args: Vec<_> = args
+                    .iter()
+                    .map(|(n, t)| (n.clone(), convert_type(t)))
+                    .collect();
                 let func = if *name == "main" {
                     builder.new_function(name, Linkage::Public, &args, &convert_type(ret_type))
                 } else {
-                    builder.new_function(&format!("_amy_{}", name), Linkage::Private, &args, &convert_type(ret_type))
+                    builder.new_function(
+                        &format!("_amy_{}", name),
+                        Linkage::Private,
+                        &args,
+                        &convert_type(ret_type),
+                    )
                 };
                 helper_args.func_map.insert((*name).to_owned(), func);
             }
@@ -434,8 +439,16 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
                 linked_to,
                 ..
             } => {
-                let args: Vec<_> = args.iter().map(|(n, t)| (n.clone(), convert_type(t))).collect();
-                let func = builder.new_function(linked_to, Linkage::External, &args, &convert_type(ret_type));
+                let args: Vec<_> = args
+                    .iter()
+                    .map(|(n, t)| (n.clone(), convert_type(t)))
+                    .collect();
+                let func = builder.new_function(
+                    linked_to,
+                    Linkage::External,
+                    &args,
+                    &convert_type(ret_type),
+                );
                 helper_args.func_map.insert((*name).to_owned(), func);
             }
 

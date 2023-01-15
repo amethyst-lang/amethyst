@@ -1,5 +1,5 @@
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 //use std::fs::File;
 
 use clap::Parser;
@@ -20,7 +20,7 @@ struct Args {
     input_files: Vec<String>,
 
     #[arg(short, long, default_value_t = String::from("x64"), value_name = "Target arch")]
-    target: String
+    target: String,
 }
 
 fn main() {
@@ -74,4 +74,3 @@ fn main() {
     }
     */
 }
-

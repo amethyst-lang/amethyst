@@ -53,12 +53,17 @@ impl Type {
     pub fn is_subtype(&self, supertype: &Type) -> bool {
         match (self, supertype) {
             (Type::Int(s1, w1), Type::Int(s2, w2)) => s1 == s2 && w1 == w2,
-            (Type::F32, Type::F32)
-            | (Type::F64, Type::F64) => true,
-            (Type::Tuple(v1), Type::Tuple(v2)) => v1.len() == v2.len() && v1.iter().zip(v2.iter()).all(|(v1, v2)| v1.is_subtype(v2)),
+            (Type::F32, Type::F32) | (Type::F64, Type::F64) => true,
+            (Type::Tuple(v1), Type::Tuple(v2)) => {
+                v1.len() == v2.len() && v1.iter().zip(v2.iter()).all(|(v1, v2)| v1.is_subtype(v2))
+            }
             (Type::Pointer(_, v1), Type::Pointer(_, v2))
             | (Type::Slice(_, v1), Type::Slice(_, v2)) => v1.is_subtype(v2),
-            (Type::Function(a1, r1), Type::Function(a2, r2)) => r1.is_subtype(r2) && a1.len() == a2.len() && a1.iter().zip(a2.iter()).all(|(v1, v2)| v1.is_subtype(v2)),
+            (Type::Function(a1, r1), Type::Function(a2, r2)) => {
+                r1.is_subtype(r2)
+                    && a1.len() == a2.len()
+                    && a1.iter().zip(a2.iter()).all(|(v1, v2)| v1.is_subtype(v2))
+            }
 
             (Type::Union(v1), Type::Union(v2)) => {
                 let mut is_subset = true;
@@ -100,8 +105,7 @@ impl Type {
                 }
             }
 
-            (Type::Union(v), x)
-            | (x, Type::Union(v)) => v.iter().any(|v| v.is_subtype(x)),
+            (Type::Union(v), x) | (x, Type::Union(v)) => v.iter().any(|v| v.is_subtype(x)),
 
             _ => false,
         }
@@ -121,8 +125,7 @@ impl Type {
             Type::Pointer(_, v) => v.has_generic(),
             Type::Slice(_, v) => v.has_generic(),
 
-            Type::Struct(_, v)
-            | Type::Union(v) => {
+            Type::Struct(_, v) | Type::Union(v) => {
                 for v in v {
                     if v.has_generic() {
                         return true;
@@ -155,8 +158,7 @@ impl Type {
             Type::Pointer(_, v) => v.find_generics(generics),
             Type::Slice(_, v) => v.find_generics(generics),
 
-            Type::Struct(_, v)
-            | Type::Union(v) => {
+            Type::Struct(_, v) | Type::Union(v) => {
                 for v in v {
                     v.find_generics(generics);
                 }
@@ -194,8 +196,7 @@ impl Type {
             Type::Pointer(_, v) => v.replace_generics(type_var_counter, map),
             Type::Slice(_, v) => v.replace_generics(type_var_counter, map),
 
-            Type::Struct(_, v)
-            | Type::Union(v) => {
+            Type::Struct(_, v) | Type::Union(v) => {
                 for v in v {
                     v.replace_generics(type_var_counter, map);
                 }
@@ -726,7 +727,10 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     range,
                                     type_: Type::Unknown,
                                 },
-                                value: Box::new(lower_helper(sexpr.swap_remove(1), Annotations::default())?),
+                                value: Box::new(lower_helper(
+                                    sexpr.swap_remove(1),
+                                    Annotations::default(),
+                                )?),
                             }
                         } else {
                             return Err(LoweringError::InvalidLoop);
@@ -740,7 +744,10 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     range,
                                     type_: Type::Tuple(vec![]),
                                 },
-                                value: Some(Box::new(lower_helper(sexpr.swap_remove(1), Annotations::default())?)),
+                                value: Some(Box::new(lower_helper(
+                                    sexpr.swap_remove(1),
+                                    Annotations::default(),
+                                )?)),
                             }
                         } else if sexpr.len() == 1 {
                             SExpr::Break {
@@ -762,7 +769,10 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     range,
                                     type_: parse_type(sexpr.swap_remove(2))?,
                                 },
-                                value: Box::new(lower_helper(sexpr.swap_remove(1), Annotations::default())?),
+                                value: Box::new(lower_helper(
+                                    sexpr.swap_remove(1),
+                                    Annotations::default(),
+                                )?),
                             }
                         } else {
                             return Err(LoweringError::InvalidTypeSpecifier);
@@ -779,7 +789,8 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                             _ => return Err(LoweringError::InvalidDefun(String::from("unknown"))),
                         };
 
-                        let expr = lower_helper(sexpr.remove(sexpr.len() - 1), Annotations::default())?;
+                        let expr =
+                            lower_helper(sexpr.remove(sexpr.len() - 1), Annotations::default())?;
                         let ret_type = if let Ast::Symbol(_, ":") = sexpr[sexpr.len() - 2] {
                             sexpr.remove(sexpr.len() - 2);
                             parse_type(sexpr.remove(sexpr.len() - 1))?
@@ -895,15 +906,13 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     current_field_name = None;
                                 }
 
-                                None => {
-                                    match field {
-                                        Ast::Key(_, name) => {
-                                            current_field_name = Some(name.to_string());
-                                        }
-
-                                        _ => return Err(LoweringError::InvalidDefStruct),
+                                None => match field {
+                                    Ast::Key(_, name) => {
+                                        current_field_name = Some(name.to_string());
                                     }
-                                }
+
+                                    _ => return Err(LoweringError::InvalidDefStruct),
+                                },
                             }
                         }
 
@@ -933,19 +942,18 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                         for field in sexpr.into_iter().skip(1) {
                             match current_field_name {
                                 Some(name) => {
-                                    values.push((name, lower_helper(field, Annotations::default())?));
+                                    values
+                                        .push((name, lower_helper(field, Annotations::default())?));
                                     current_field_name = None;
                                 }
 
-                                None => {
-                                    match field {
-                                        Ast::Key(_, name) => {
-                                            current_field_name = Some(name.to_string());
-                                        }
-
-                                        _ => return Err(LoweringError::InvalidInst),
+                                None => match field {
+                                    Ast::Key(_, name) => {
+                                        current_field_name = Some(name.to_string());
                                     }
-                                }
+
+                                    _ => return Err(LoweringError::InvalidInst),
+                                },
                             }
                         }
 
@@ -971,7 +979,11 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     type_: Type::Unknown,
                                 },
                                 conditional: l.ends_with('?'),
-                                settings: sexpr.into_iter().skip(1).map(|v| lower_helper(v, Annotations::default())).collect::<Result<_, _>>()?,
+                                settings: sexpr
+                                    .into_iter()
+                                    .skip(1)
+                                    .map(|v| lower_helper(v, Annotations::default()))
+                                    .collect::<Result<_, _>>()?,
                             }
                         } else {
                             return Err(LoweringError::InvalidLet);
@@ -1094,7 +1106,9 @@ pub fn lower(asts: Vec<Ast<'_>>) -> Result<Vec<SExpr>, LoweringError> {
     let mut ann = Annotations::default();
     for ast in asts {
         match ast {
-            Ast::SExpr(_, v) if v.len() == 1 && matches!(v.get(0), Some(Ast::Symbol(_, "public"))) => {
+            Ast::SExpr(_, v)
+                if v.len() == 1 && matches!(v.get(0), Some(Ast::Symbol(_, "public"))) =>
+            {
                 ann.public = true;
             }
 

@@ -1,4 +1,7 @@
-use std::{collections::{hash_map::Entry, HashMap, HashSet}, path::{PathBuf, Path}};
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    path::{Path, PathBuf},
+};
 
 use super::ast_lowering::{Annotations, SExpr, Type};
 
@@ -408,7 +411,7 @@ fn traverse_sexpr(
                 scopes,
                 &mut break_type,
                 let_status,
-                    exports,
+                exports,
             )?;
 
             let t = match break_type {
@@ -869,13 +872,21 @@ fn traverse_sexpr(
                     Some(_) => todo!(),
 
                     None => {
-                        if let Some(exported) = exports.get(&Path::new(module_path).canonicalize().unwrap()) {
+                        if let Some(exported) =
+                            exports.get(&Path::new(module_path).canonicalize().unwrap())
+                        {
                             for func in exported.function_exports.iter() {
-                                func_map.last_mut().unwrap().insert(func.clone(), exported.func_map.get(func).unwrap().clone());
+                                func_map.last_mut().unwrap().insert(
+                                    func.clone(),
+                                    exported.func_map.get(func).unwrap().clone(),
+                                );
                             }
 
                             for struct_ in exported.struct_exports.iter() {
-                                struct_map.last_mut().unwrap().insert(struct_.clone(), exported.struct_map.get(struct_).unwrap().clone());
+                                struct_map.last_mut().unwrap().insert(
+                                    struct_.clone(),
+                                    exported.struct_map.get(struct_).unwrap().clone(),
+                                );
                             }
                         } else {
                             todo!("error handling: unknown module \"{}\"", module_path);
@@ -995,7 +1006,11 @@ fn apply_substitutions(sexpr: &mut SExpr, substitutions: &HashMap<u64, Type>) {
     }
 }
 
-pub fn check(name: &PathBuf, module: &mut Module, exports: &HashMap<PathBuf, ModuleExports>) -> Result<(), CorrectnessError> {
+pub fn check(
+    name: &PathBuf,
+    module: &mut Module,
+    exports: &HashMap<PathBuf, ModuleExports>,
+) -> Result<(), CorrectnessError> {
     let mut skip = 0;
     let mut done = HashSet::new();
 
@@ -1012,11 +1027,11 @@ pub fn check(name: &PathBuf, module: &mut Module, exports: &HashMap<PathBuf, Mod
         for sexpr in module.sexprs.iter_mut().skip(skip) {
             match sexpr {
                 SExpr::FuncDef {
-                            ret_type,
-                            args,
-                            expr,
-                            ..
-                        } => {
+                    ret_type,
+                    args,
+                    expr,
+                    ..
+                } => {
                     if args.iter().any(|(_, v)| v.has_generic()) || ret_type.has_generic() {
                         continue;
                     }
