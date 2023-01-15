@@ -12,6 +12,7 @@ pub enum Ast<'a> {
     Float(Range<usize>, f64),
     Str(Range<usize>, String),
     Symbol(Range<usize>, &'a str),
+    SymbolOwned(Range<usize>, String),
     Key(Range<usize>, &'a str),
 
     Quote(Range<usize>, Box<Ast<'a>>),
@@ -28,6 +29,7 @@ impl<'a> PartialEq for Ast<'a> {
             (Self::Float(_, l1), Self::Float(_, r1)) => l1 == r1,
             (Self::Str(_, l1), Self::Str(_, r1)) => l1 == r1,
             (Self::Symbol(_, l1), Self::Symbol(_, r1)) => l1 == r1,
+            (Self::SymbolOwned(_, l1), Self::SymbolOwned(_, r1)) => l1 == r1,
             (Self::Key(_, l1), Self::Key(_, r1)) => l1 == r1,
             (Self::Quote(_, l1), Self::Quote(_, r1)) => l1 == r1,
             (Self::SExpr(_, l1), Self::SExpr(_, r1)) => l1 == r1,
@@ -45,6 +47,7 @@ impl<'a> Ast<'a> {
             | Ast::Float(s, _)
             | Ast::Str(s, _)
             | Ast::Symbol(s, _)
+            | Ast::SymbolOwned(s, _)
             | Ast::Key(s, _)
             | Ast::Quote(s, _)
             | Ast::SExpr(s, _)

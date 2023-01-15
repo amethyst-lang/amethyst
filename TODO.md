@@ -1,7 +1,7 @@
 # Things to do:
  - Expand macro capabilities
  - Typeclasses
- - Linear types
+ - Linear types for resources and allocators
  - Lifetimes for pointers/slices
  - Modules
  - Capabilities

@@ -221,14 +221,6 @@ impl<'a> Type<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub enum LValue<'a> {
-    Symbol(&'a str),
-    Attribute(Box<LValue<'a>>, &'a str),
-    Deref(Box<LValue<'a>>),
-    Get(Box<LValue<'a>>, Box<SExpr<'a>>),
-}
-
-#[derive(Debug, Clone)]
 pub enum SExpr<'a> {
     Int {
         meta: Metadata<'a>,
@@ -244,7 +236,7 @@ pub enum SExpr<'a> {
     },
     Symbol {
         meta: Metadata<'a>,
-        value: &'a str,
+        value: String,
     },
 
     Tuple {
@@ -318,14 +310,13 @@ pub enum SExpr<'a> {
 
     Declare {
         meta: Metadata<'a>,
-        mutable: bool,
-        variable: &'a str,
-        value: Box<SExpr<'a>>,
+        conditional: bool,
+        settings: Vec<SExpr<'a>>,
     },
 
     Assign {
         meta: Metadata<'a>,
-        lvalue: LValue<'a>,
+        var: String,
         value: Box<SExpr<'a>>,
     },
 
@@ -348,7 +339,7 @@ pub enum SExpr<'a> {
 
     Ref {
         meta: Metadata<'a>,
-        value: Box<LValue<'a>>,
+        value: Box<SExpr<'a>>,
     },
 
     Deref {
@@ -571,6 +562,14 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
         },
 
         Ast::Symbol(range, value) => SExpr::Symbol {
+            meta: Metadata {
+                range,
+                type_: Type::Unknown,
+            },
+            value: value.to_string(),
+        },
+
+        Ast::SymbolOwned(range, value) => SExpr::Symbol {
             meta: Metadata {
                 range,
                 type_: Type::Unknown,
@@ -921,61 +920,42 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                         }
                     }
 
-                    Ast::Symbol(_, "let") => {
-                        if sexpr.len() == 4 {
-                            match (&sexpr[1], &sexpr[2]) {
-                                (&Ast::Symbol(_, variable), &Ast::Symbol(_, "=")) => {
-                                    SExpr::Declare {
-                                        meta: Metadata {
-                                            range,
-                                            type_: Type::Unknown,
-                                        },
-                                        mutable: false,
-                                        variable,
-                                        value: Box::new(lower_helper(sexpr.remove(3))?),
-                                    }
-                                }
-
-                                _ => return Err(LoweringError::InvalidLet),
-                            }
-                        } else if sexpr.len() == 5 {
-                            match (&sexpr[1], &sexpr[2], &sexpr[3]) {
-                                (
-                                    &Ast::Symbol(_, "mut"),
-                                    &Ast::Symbol(_, variable),
-                                    &Ast::Symbol(_, "="),
-                                ) => SExpr::Declare {
-                                    meta: Metadata {
-                                        range,
-                                        type_: Type::Unknown,
-                                    },
-                                    mutable: true,
-                                    variable,
-                                    value: Box::new(lower_helper(sexpr.remove(4))?),
+                    Ast::Symbol(_, l @ ("let" | "let?")) => {
+                        if sexpr.len() > 1 {
+                            SExpr::Declare {
+                                meta: Metadata {
+                                    range,
+                                    type_: Type::Unknown,
                                 },
-
-                                _ => return Err(LoweringError::InvalidLet),
+                                conditional: l.ends_with('?'),
+                                settings: sexpr.into_iter().skip(1).map(lower_helper).collect::<Result<_, _>>()?,
                             }
                         } else {
                             return Err(LoweringError::InvalidLet);
                         }
                     }
 
-                    Ast::Symbol(_, "set") => {
-                        if sexpr.len() == 4 {
-                            match &sexpr[2] {
-                                Ast::Symbol(_, "=") => {
-                                    let value = lower_helper(sexpr.swap_remove(3))?;
-                                    let lvalue = lvalue_creator(sexpr.swap_remove(1))?;
-                                    SExpr::Assign {
-                                        meta: Metadata {
-                                            range,
-                                            type_: Type::Unknown,
-                                        },
-                                        lvalue,
-                                        value: Box::new(value),
-                                    }
-                                }
+                    Ast::Symbol(_, "=") => {
+                        if sexpr.len() == 3 {
+                            let value = lower_helper(sexpr.swap_remove(2))?;
+                            match sexpr.swap_remove(1) {
+                                Ast::Symbol(_, var) => SExpr::Assign {
+                                    meta: Metadata {
+                                        range,
+                                        type_: Type::Unknown,
+                                    },
+                                    var: var.to_string(),
+                                    value: Box::new(value),
+                                },
+
+                                Ast::SymbolOwned(_, var) => SExpr::Assign {
+                                    meta: Metadata {
+                                        range,
+                                        type_: Type::Unknown,
+                                    },
+                                    var,
+                                    value: Box::new(value),
+                                },
 
                                 _ => return Err(LoweringError::InvalidSet),
                             }
@@ -1020,7 +1000,7 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                     range,
                     type_: Type::Unknown,
                 },
-                value: Box::new(lvalue_creator(*value)?),
+                value: Box::new(lower_helper(*value)?),
             },
 
             Ast::Symbol(_, "*") => SExpr::Deref {
@@ -1063,33 +1043,6 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
     };
 
     Ok(sexpr)
-}
-
-fn lvalue_creator(ast: Ast<'_>) -> Result<LValue<'_>, LoweringError> {
-    match ast {
-        Ast::Symbol(_, sym) => Ok(LValue::Symbol(sym)),
-
-        Ast::SExpr(_, mut v) => {
-            let first = v.remove(0);
-            match first {
-                Ast::Symbol(_, "get") if v.len() == 2 => {
-                    let index = lower_helper(v.remove(1))?;
-                    let slice = lvalue_creator(v.remove(0))?;
-                    Ok(LValue::Get(Box::new(slice), Box::new(index)))
-                }
-
-                _ => Err(LoweringError::InvalidLvalue),
-            }
-        }
-
-        Ast::Attribute(_, top, attr) => match *attr {
-            Ast::Symbol(_, "*") => Ok(LValue::Deref(Box::new(lvalue_creator(*top)?))),
-            Ast::Symbol(_, attr) => Ok(LValue::Attribute(Box::new(lvalue_creator(*top)?), attr)),
-            _ => Err(LoweringError::InvalidAttribute),
-        },
-
-        _ => Err(LoweringError::InvalidLvalue),
-    }
 }
 
 pub fn lower(asts: Vec<Ast<'_>>) -> Result<Vec<SExpr<'_>>, LoweringError> {

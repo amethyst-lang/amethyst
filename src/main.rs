@@ -25,7 +25,6 @@ fn main() {
 
     let mut asts = TopParser::new().parse(&contents).unwrap();
     macros::execute_macros(&mut asts);
-    //println!("{:#?}", &asts[3..]);
     let mut sexprs = ast_lowering::lower(asts).unwrap();
     let mut func_map = correctness::create_default_signatures();
     correctness::extract_signatures(&sexprs, &mut func_map);
