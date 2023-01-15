@@ -144,8 +144,8 @@ fn traverse_sexpr(
     type_var_counter: &mut u64,
     substitutions: &mut HashMap<u64, Type>,
     coercions: &mut HashMap<u64, FloatOrInt>,
-    func_map: &mut HashMap<String, Signature>,
-    struct_map: &mut HashMap<String, Struct>,
+    func_map: &mut Vec<HashMap<String, Signature>>,
+    struct_map: &mut Vec<HashMap<String, Struct>>,
     monomorphisms: &mut Vec<(Type, usize)>,
     scopes: &mut Vec<HashMap<String, (Type, LetStatus)>>,
     break_type: &mut Option<Type>,
@@ -184,7 +184,16 @@ fn traverse_sexpr(
 
                 substitute(&mut meta.type_, var_type, substitutions, coercions)?;
                 Ok(())
-            } else if let Some(func) = func_map.get(value) {
+            } else if let Some(func) = {
+                let mut var = None;
+                for scope in func_map.iter().rev() {
+                    if let Some(v) = scope.get(value) {
+                        var = Some(v);
+                        break;
+                    }
+                }
+                var
+            } {
                 substitute(
                     &mut meta.type_,
                     &Type::Function(func.arg_types.clone(), Box::new(func.ret_type.clone())),
@@ -238,6 +247,8 @@ fn traverse_sexpr(
             if !matches!(let_status, LetStatus::Conditional) {
                 scopes.push(HashMap::new());
             }
+            func_map.push(HashMap::new());
+            struct_map.push(HashMap::new());
             for value in values.iter_mut() {
                 traverse_sexpr(
                     value,
@@ -266,6 +277,8 @@ fn traverse_sexpr(
             if !matches!(let_status, LetStatus::Conditional) {
                 scopes.pop();
             }
+            func_map.pop();
+            struct_map.pop();
             Ok(())
         }
 
@@ -274,6 +287,8 @@ fn traverse_sexpr(
                 if !matches!(let_status, LetStatus::Conditional) {
                     scopes.push(HashMap::new());
                 }
+                func_map.push(HashMap::new());
+                struct_map.push(HashMap::new());
                 traverse_sexpr(
                     cond,
                     type_var_counter,
@@ -334,12 +349,16 @@ fn traverse_sexpr(
                 if !matches!(let_status, LetStatus::Conditional) {
                     scopes.pop();
                 }
+                func_map.pop();
+                struct_map.pop();
             }
 
             if let Some(elsy) = elsy {
                 if !matches!(let_status, LetStatus::Conditional) {
                     scopes.push(HashMap::new());
                 }
+                func_map.push(HashMap::new());
+                struct_map.push(HashMap::new());
                 traverse_sexpr(
                     &mut **elsy,
                     type_var_counter,
@@ -362,6 +381,8 @@ fn traverse_sexpr(
                 if !matches!(let_status, LetStatus::Conditional) {
                     scopes.pop();
                 }
+                func_map.pop();
+                struct_map.pop();
             } else if meta.type_ != Type::Tuple(vec![]) {
                 todo!("error handling");
             }
@@ -373,6 +394,8 @@ fn traverse_sexpr(
             if !matches!(let_status, LetStatus::Conditional) {
                 scopes.push(HashMap::new());
             }
+            func_map.push(HashMap::new());
+            struct_map.push(HashMap::new());
             let mut break_type = Some(Type::Unknown);
             traverse_sexpr(
                 &mut **value,
@@ -397,6 +420,8 @@ fn traverse_sexpr(
             if !matches!(let_status, LetStatus::Conditional) {
                 scopes.pop();
             }
+            func_map.pop();
+            struct_map.pop();
 
             Ok(())
         }
@@ -505,7 +530,16 @@ fn traverse_sexpr(
         SExpr::StructDef { .. } => Ok(()),
 
         SExpr::StructSet { meta, name, values } => {
-            if let Some(struct_) = struct_map.get(name) {
+            if let Some(struct_) = {
+                let mut var = None;
+                for scope in struct_map.iter().rev() {
+                    if let Some(v) = scope.get(name) {
+                        var = Some(v);
+                        break;
+                    }
+                }
+                var
+            } {
                 let struct_ = struct_.clone();
                 let mut map = HashMap::new();
                 let mut generics = vec![];
@@ -697,7 +731,16 @@ fn traverse_sexpr(
                         },
 
                         Type::Struct(name, generics) => {
-                            if let Some(struct_) = struct_map.get(&name) {
+                            if let Some(struct_) = {
+                                let mut var = None;
+                                for scope in struct_map.iter().rev() {
+                                    if let Some(v) = scope.get(&name) {
+                                        var = Some(v);
+                                        break;
+                                    }
+                                }
+                                var
+                            } {
                                 let mut map = struct_
                                     .generics
                                     .iter()
@@ -828,11 +871,11 @@ fn traverse_sexpr(
                     None => {
                         if let Some(exported) = exports.get(&Path::new(module_path).canonicalize().unwrap()) {
                             for func in exported.function_exports.iter() {
-                                func_map.insert(func.clone(), exported.func_map.get(func).unwrap().clone());
+                                func_map.last_mut().unwrap().insert(func.clone(), exported.func_map.get(func).unwrap().clone());
                             }
 
                             for struct_ in exported.struct_exports.iter() {
-                                struct_map.insert(struct_.clone(), exported.struct_map.get(struct_).unwrap().clone());
+                                struct_map.last_mut().unwrap().insert(struct_.clone(), exported.struct_map.get(struct_).unwrap().clone());
                             }
                         } else {
                             todo!("error handling: unknown module \"{}\"", module_path);
@@ -957,8 +1000,8 @@ pub fn check(name: &PathBuf, module: &mut Module, exports: &HashMap<PathBuf, Mod
     let mut done = HashSet::new();
 
     let this_module = exports.get(name).unwrap();
-    let mut func_map = this_module.func_map.clone();
-    let mut struct_map = this_module.struct_map.clone();
+    let mut func_map = vec![this_module.func_map.clone()];
+    let mut struct_map = vec![this_module.struct_map.clone()];
 
     while {
         let mut monomorphisms = vec![];

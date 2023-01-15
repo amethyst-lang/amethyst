@@ -18,6 +18,7 @@ use amethyst::parser::TopParser;
 struct Args {
     #[arg(value_name = "Input files")]
     input_files: Vec<String>,
+
     #[arg(short, long, default_value_t = String::from("x64"), value_name = "Target arch")]
     target: String
 }
