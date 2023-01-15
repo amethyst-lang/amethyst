@@ -384,6 +384,8 @@ fn lower_helper(
         SExpr::SizeOf { meta, type_ } => todo!(),
         SExpr::Ref { meta, value } => todo!(),
         SExpr::Deref { meta, value } => todo!(),
+
+        SExpr::Import { .. } => None,
     }
 }
 

@@ -383,10 +383,11 @@ fn perform_post_macro_transformations(ast: &mut Ast<'_>) {
         Ast::Quote(_, v) => perform_post_macro_transformations(v),
 
         Ast::SExpr(s, v) if v.len() == 2 && matches!(v.get(0), Some(Ast::Symbol(_, "#quote"))) => {
-            let v = v.remove(1);
+            let v = v.swap_remove(1);
             *ast = Ast::Quote(s.clone(), Box::new(v));
         }
 
+        /*
         Ast::SExpr(s, v) if v.len() == 3 && matches!(v.get(0), Some(Ast::Symbol(_, "#concat"))) => {
             match (&v[1], &v[2]) {
                 (Ast::Symbol(_, a), Ast::Symbol(_, b)) => *ast = Ast::SymbolOwned(s.clone(), format!("{}{}", a, b)),
@@ -398,6 +399,7 @@ fn perform_post_macro_transformations(ast: &mut Ast<'_>) {
                 _ => (),
             }
         }
+        */
 
         Ast::SExpr(_, v) if !matches!(v.get(0), Some(Ast::Symbol(_, "defmacro"))) => {
             let mut includes = Vec::new();

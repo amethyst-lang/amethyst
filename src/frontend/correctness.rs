@@ -784,6 +784,8 @@ fn traverse_sexpr<'a>(
             let t = Type::Pointer(false, Box::new(meta.type_.clone()));
             substitute(&mut value.meta_mut().type_, &t, substitutions, coercions)
         }
+
+        SExpr::Import { .. } => todo!(),
     }
 }
 

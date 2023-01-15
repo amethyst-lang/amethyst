@@ -1,8 +1,8 @@
 # Things to do:
+ - Modules
  - Typeclasses
  - Linear types for resources and allocators
  - Lifetimes for pointers/slices
- - Modules
  - Capabilities
  - Standard library
      - Steal stuff from APL

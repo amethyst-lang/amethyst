@@ -346,6 +346,11 @@ pub enum SExpr<'a> {
         meta: Metadata<'a>,
         value: Box<SExpr<'a>>,
     },
+
+    Import {
+        meta: Metadata<'a>,
+        imports: Vec<(Option<&'a str>, String)>,
+    },
 }
 
 impl<'a> SExpr<'a> {
@@ -373,7 +378,8 @@ impl<'a> SExpr<'a> {
             | SExpr::SliceGet { meta, .. }
             | SExpr::SizeOf { meta, .. }
             | SExpr::Ref { meta, .. }
-            | SExpr::Deref { meta, .. } => meta,
+            | SExpr::Deref { meta, .. }
+            | SExpr::Import { meta, .. } => meta,
         }
     }
 
@@ -401,7 +407,8 @@ impl<'a> SExpr<'a> {
             | SExpr::SliceGet { meta, .. }
             | SExpr::SizeOf { meta, .. }
             | SExpr::Ref { meta, .. }
-            | SExpr::Deref { meta, .. } => meta,
+            | SExpr::Deref { meta, .. }
+            | SExpr::Import { meta, .. } => meta,
         }
     }
 }
@@ -422,6 +429,7 @@ pub enum LoweringError {
     InvalidInst,
     InvalidLvalue,
     InvalidSizeOf,
+    InvalidImport,
 }
 
 fn parse_type(ast: Ast<'_>) -> Result<Type<'_>, LoweringError> {
@@ -597,6 +605,32 @@ fn lower_helper(ast: Ast<'_>) -> Result<SExpr<'_>, LoweringError> {
                             type_: Type::Tuple(vec![]),
                         },
                     },
+
+                    Ast::Symbol(_, "import") => {
+                        let mut tag = None;
+                        let mut imports = Vec::new();
+
+                        for ast in sexpr.into_iter().skip(1) {
+                            match ast {
+                                Ast::Str(_, s) => {
+                                    imports.push((tag, s));
+                                    tag = None;
+                                }
+
+                                Ast::Key(_, s) if tag.is_none() => tag = Some(s),
+
+                                _ => return Err(LoweringError::InvalidImport),
+                            }
+                        }
+
+                        SExpr::Import {
+                            meta: Metadata {
+                                range,
+                                type_: Type::Tuple(vec![]),
+                            },
+                            imports,
+                        }
+                    }
 
                     Ast::Symbol(_, "tuple") => SExpr::Tuple {
                         meta: Metadata {
