@@ -224,8 +224,6 @@ fn traverse_sexpr(
                 for module_scope in module_map.iter().rev() {
                     if let Some(modu) = module_scope.get(module_name).and_then(|v| exports.get(v)) {
                         module = Some(modu);
-                    } else {
-                        todo!("error handling: unresolved module {}", module_name);
                     }
                 }
             }
@@ -284,6 +282,7 @@ fn traverse_sexpr(
             }
             func_map.push(HashMap::new());
             struct_map.push(HashMap::new());
+            module_map.push(HashMap::new());
             for value in values.iter_mut() {
                 traverse_sexpr(
                     value,
@@ -315,6 +314,7 @@ fn traverse_sexpr(
             }
             func_map.pop();
             struct_map.pop();
+            module_map.pop();
             Ok(())
         }
 
@@ -325,6 +325,7 @@ fn traverse_sexpr(
                 }
                 func_map.push(HashMap::new());
                 struct_map.push(HashMap::new());
+                module_map.push(HashMap::new());
                 traverse_sexpr(
                     cond,
                     type_var_counter,
@@ -389,6 +390,7 @@ fn traverse_sexpr(
                 }
                 func_map.pop();
                 struct_map.pop();
+                module_map.pop();
             }
 
             if let Some(elsy) = elsy {
@@ -397,6 +399,7 @@ fn traverse_sexpr(
                 }
                 func_map.push(HashMap::new());
                 struct_map.push(HashMap::new());
+                module_map.push(HashMap::new());
                 traverse_sexpr(
                     &mut **elsy,
                     type_var_counter,
@@ -422,6 +425,7 @@ fn traverse_sexpr(
                 }
                 func_map.pop();
                 struct_map.pop();
+                module_map.pop();
             } else if meta.type_ != Type::Tuple(vec![]) {
                 todo!("error handling");
             }
@@ -435,6 +439,7 @@ fn traverse_sexpr(
             }
             func_map.push(HashMap::new());
             struct_map.push(HashMap::new());
+            module_map.push(HashMap::new());
             let mut break_type = Some(Type::Unknown);
             traverse_sexpr(
                 &mut **value,
@@ -462,6 +467,7 @@ fn traverse_sexpr(
             }
             func_map.pop();
             struct_map.pop();
+            module_map.pop();
 
             Ok(())
         }
@@ -585,7 +591,21 @@ fn traverse_sexpr(
                     }
                     var
                 } else {
-                    todo!()
+                    let mut module = None;
+                    for module_name in name[..name.len() - 1].iter() {
+                        module = None;
+                        for module_scope in module_map.iter().rev() {
+                            if let Some(modu) = module_scope.get(module_name).and_then(|v| exports.get(v)) {
+                                module = Some(modu);
+                            }
+                        }
+                    }
+
+                    if let Some(module) = module {
+                        module.struct_map.get(name.last().unwrap())
+                    } else {
+                        todo!("error handling: unresolved module {}", name[0]);
+                    }
                 }
             } {
                 let struct_ = struct_.clone();
@@ -794,7 +814,21 @@ fn traverse_sexpr(
                                     }
                                     var
                                 } else {
-                                    todo!()
+                                    let mut module = None;
+                                    for module_name in name[..name.len() - 1].iter() {
+                                        module = None;
+                                        for module_scope in module_map.iter().rev() {
+                                            if let Some(modu) = module_scope.get(module_name).and_then(|v| exports.get(v)) {
+                                                module = Some(modu);
+                                            }
+                                        }
+                                    }
+
+                                    if let Some(module) = module {
+                                        module.struct_map.get(name.last().unwrap())
+                                    } else {
+                                        todo!("error handling: unresolved module {}", name[0]);
+                                    }
                                 }
                             } {
                                 let mut map = struct_
@@ -1111,6 +1145,9 @@ pub fn check(
                             .unwrap()
                             .insert(arg.to_string(), (type_.clone(), LetStatus::Direct));
                     }
+                    func_map.push(HashMap::new());
+                    struct_map.push(HashMap::new());
+                    module_map.push(HashMap::new());
 
                     traverse_sexpr(
                         expr,
@@ -1162,6 +1199,10 @@ pub fn check(
                     }
 
                     apply_substitutions(expr, &substitutions);
+
+                    func_map.pop();
+                    struct_map.pop();
+                    module_map.pop();
                 }
 
                 SExpr::Import { .. } => {
