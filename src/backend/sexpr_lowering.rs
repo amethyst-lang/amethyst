@@ -39,6 +39,8 @@ fn lower_helper(
             None
         }
 
+        SExpr::ModuleAccess { meta, value } => todo!(),
+
         SExpr::Tuple { meta, tuple } => todo!(),
 
         SExpr::Seq { meta, values } => {

@@ -66,8 +66,12 @@ Str: Ast<'input> = {
 SymbolRaw =
     <r#"[^`1234567890\[\]:\\;',\.(){}"\s][^`\[\]:\\;',\.@(){}"\s]*|:|\.\."#>;
 
-Symbol: Ast<'input> =
-    <s:@L> <v:SymbolRaw> <e:@R> => Ast::Symbol(s..e, v);
+Symbol: Ast<'input> = {
+    <s:@L> <x:SymbolRaw> <mut xs:("::" <SymbolRaw>)*> <e:@R> => {
+        xs.insert(0, x);
+        Ast::Symbol(s..e, xs)
+    }
+}
 
 KeyRaw =
     <r#":[^`1234567890\[\]:\\;',\.#(){}"\s][^`\[\]:\\;',\.@#(){}"\s]*"#>;

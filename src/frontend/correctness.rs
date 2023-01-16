@@ -154,6 +154,7 @@ fn traverse_sexpr(
     break_type: &mut Option<Type>,
     let_status: LetStatus,
     exports: &HashMap<PathBuf, ModuleExports>,
+    module_map: &mut Vec<HashMap<String, PathBuf>>,
 ) -> Result<(), CorrectnessError> {
     //println!("{:?}: {:?}\n", sexpr.meta().range, sexpr);
 
@@ -216,6 +217,36 @@ fn traverse_sexpr(
             }
         }
 
+        SExpr::ModuleAccess { meta, value } => {
+            let mut module = None;
+            for module_name in value[..value.len() - 1].iter() {
+                module = None;
+                for module_scope in module_map.iter().rev() {
+                    if let Some(modu) = module_scope.get(module_name).and_then(|v| exports.get(v)) {
+                        module = Some(modu);
+                    } else {
+                        todo!("error handling: unresolved module {}", module_name);
+                    }
+                }
+            }
+
+            if let Some(module) = module {
+                let value = value.last().unwrap();
+                if let Some(func) = module.func_map.get(value) {
+                    substitute(
+                        &mut meta.type_,
+                        &Type::Function(func.arg_types.clone(), Box::new(func.ret_type.clone())),
+                        substitutions,
+                        coercions,
+                    )
+                } else {
+                    todo!("error handling: unresolved value {}", value);
+                }
+            } else {
+                unreachable!("no module entries");
+            }
+        }
+
         SExpr::Tuple { meta, tuple } => {
             for value in tuple.iter_mut() {
                 traverse_sexpr(
@@ -230,6 +261,7 @@ fn traverse_sexpr(
                     break_type,
                     let_status,
                     exports,
+                    module_map,
                 )?;
             }
 
@@ -265,6 +297,7 @@ fn traverse_sexpr(
                     break_type,
                     let_status,
                     exports,
+                    module_map,
                 )?;
             }
 
@@ -304,6 +337,7 @@ fn traverse_sexpr(
                     break_type,
                     let_status,
                     exports,
+                    module_map,
                 )?;
 
                 for (_, let_status) in scopes.last_mut().unwrap().values_mut() {
@@ -322,6 +356,7 @@ fn traverse_sexpr(
                     break_type,
                     let_status,
                     exports,
+                    module_map,
                 )?;
 
                 match &cond.meta().type_ {
@@ -374,6 +409,7 @@ fn traverse_sexpr(
                     break_type,
                     let_status,
                     exports,
+                    module_map,
                 )?;
                 substitute(
                     &mut meta.type_,
@@ -412,6 +448,7 @@ fn traverse_sexpr(
                 &mut break_type,
                 let_status,
                 exports,
+                module_map,
             )?;
 
             let t = match break_type {
@@ -443,6 +480,7 @@ fn traverse_sexpr(
                     break_type,
                     let_status,
                     exports,
+                    module_map,
                 )?;
                 if let Some(type_) = break_type {
                     substitute(type_, &value.meta().type_, substitutions, coercions)
@@ -469,6 +507,7 @@ fn traverse_sexpr(
                 break_type,
                 let_status,
                 exports,
+                module_map,
             )?;
             substitute(
                 &mut value.meta_mut().type_,
@@ -493,6 +532,7 @@ fn traverse_sexpr(
                 break_type,
                 let_status,
                 exports,
+                module_map,
             )?;
 
             for value in values.iter_mut() {
@@ -508,6 +548,7 @@ fn traverse_sexpr(
                     break_type,
                     let_status,
                     exports,
+                    module_map,
                 )?;
             }
 
@@ -534,14 +575,18 @@ fn traverse_sexpr(
 
         SExpr::StructSet { meta, name, values } => {
             if let Some(struct_) = {
-                let mut var = None;
-                for scope in struct_map.iter().rev() {
-                    if let Some(v) = scope.get(name) {
-                        var = Some(v);
-                        break;
+                if name.len() == 1 {
+                    let mut var = None;
+                    for scope in struct_map.iter().rev() {
+                        if let Some(v) = scope.get(&name[0]) {
+                            var = Some(v);
+                            break;
+                        }
                     }
+                    var
+                } else {
+                    todo!()
                 }
-                var
             } {
                 let struct_ = struct_.clone();
                 let mut map = HashMap::new();
@@ -569,6 +614,7 @@ fn traverse_sexpr(
                         break_type,
                         let_status,
                         exports,
+                        module_map,
                     )?;
                     if let Some((_, typ)) = struct_.fields.iter().find(|(v, _)| v == field) {
                         let mut typ = typ.clone();
@@ -622,6 +668,7 @@ fn traverse_sexpr(
                         LetStatus::Direct
                     },
                     exports,
+                    module_map,
                 )?;
                 substitute(
                     &mut meta.type_,
@@ -646,6 +693,7 @@ fn traverse_sexpr(
                 break_type,
                 let_status,
                 exports,
+                module_map,
             )?;
             substitute(
                 &mut meta.type_,
@@ -689,6 +737,7 @@ fn traverse_sexpr(
                 break_type,
                 let_status,
                 exports,
+                module_map,
             )?;
 
             match &top.meta().type_ {
@@ -735,14 +784,18 @@ fn traverse_sexpr(
 
                         Type::Struct(name, generics) => {
                             if let Some(struct_) = {
-                                let mut var = None;
-                                for scope in struct_map.iter().rev() {
-                                    if let Some(v) = scope.get(&name) {
-                                        var = Some(v);
-                                        break;
+                                if name.len() == 1 {
+                                    let mut var = None;
+                                    for scope in struct_map.iter().rev() {
+                                        if let Some(v) = scope.get(&name[0]) {
+                                            var = Some(v);
+                                            break;
+                                        }
                                     }
+                                    var
+                                } else {
+                                    todo!()
                                 }
-                                var
                             } {
                                 let mut map = struct_
                                     .generics
@@ -793,6 +846,7 @@ fn traverse_sexpr(
                 break_type,
                 let_status,
                 exports,
+                module_map,
             )?;
 
             traverse_sexpr(
@@ -807,6 +861,7 @@ fn traverse_sexpr(
                 break_type,
                 let_status,
                 exports,
+                module_map,
             )?;
 
             substitute(
@@ -843,6 +898,7 @@ fn traverse_sexpr(
                 break_type,
                 let_status,
                 exports,
+                module_map,
             )?;
             let t = Type::Pointer(false, Box::new(value.meta().type_.clone()));
             substitute(&mut meta.type_, &t, substitutions, coercions)
@@ -861,6 +917,7 @@ fn traverse_sexpr(
                 break_type,
                 let_status,
                 exports,
+                module_map,
             )?;
             let t = Type::Pointer(false, Box::new(meta.type_.clone()));
             substitute(&mut value.meta_mut().type_, &t, substitutions, coercions)
@@ -869,7 +926,14 @@ fn traverse_sexpr(
         SExpr::Import { imports, .. } => {
             for (named_as, module_path) in imports {
                 match named_as {
-                    Some(_) => todo!(),
+                    Some(name) => {
+                        let path = Path::new(module_path).canonicalize().unwrap();
+                        if exports.get(&path).is_some() {
+                            module_map.last_mut().unwrap().insert(name.to_string(), path);
+                        } else {
+                            todo!("error handling: unknown module {}", module_path);
+                        }
+                    }
 
                     None => {
                         if let Some(exported) =
@@ -1017,6 +1081,7 @@ pub fn check(
     let this_module = exports.get(name).unwrap();
     let mut func_map = vec![this_module.func_map.clone()];
     let mut struct_map = vec![this_module.struct_map.clone()];
+    let mut module_map = vec![HashMap::new()];
 
     while {
         let mut monomorphisms = vec![];
@@ -1056,6 +1121,7 @@ pub fn check(
                         &mut None,
                         LetStatus::NoLet,
                         exports,
+                        &mut module_map,
                     )?;
 
                     substitute(
@@ -1108,6 +1174,7 @@ pub fn check(
                         &mut None,
                         LetStatus::NoLet,
                         exports,
+                        &mut module_map,
                     )?;
                 }
 

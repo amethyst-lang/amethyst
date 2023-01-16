@@ -11,7 +11,7 @@ pub enum Ast<'a> {
     Char(Range<usize>, u8),
     Float(Range<usize>, f64),
     Str(Range<usize>, String),
-    Symbol(Range<usize>, &'a str),
+    Symbol(Range<usize>, Vec<&'a str>),
     SymbolOwned(Range<usize>, String),
     Key(Range<usize>, &'a str),
 
