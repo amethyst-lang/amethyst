@@ -24,7 +24,7 @@ fn lower_helper(
     let type_ = convert_type(&sexpr.meta().type_);
     match sexpr {
         SExpr::Int { meta, value } => {
-            builder.push_instruction(&type_, value.to_integer_operation())
+            builder.push_instruction(value.to_integer_operation())
         }
 
         SExpr::Float { meta, value } => todo!(),
@@ -33,7 +33,7 @@ fn lower_helper(
         SExpr::Symbol { meta, value } => {
             for scope in args.var_map.iter().rev() {
                 if let Some(var) = scope.get(&value) {
-                    return builder.push_instruction(&type_, Operation::GetVar(*var));
+                    return builder.push_instruction(Operation::GetVar(*var));
                 }
             }
             None
@@ -91,7 +91,7 @@ fn lower_helper(
             if mapping.is_empty() {
                 None
             } else {
-                builder.push_instruction(&type_, Operation::Phi(mapping))
+                builder.push_instruction(Operation::Phi(mapping))
             }
         }
 
@@ -121,7 +121,7 @@ fn lower_helper(
                 } else if mappings.len() == 1 {
                     Some(mappings[0].1)
                 } else {
-                    builder.push_instruction(&type_, Operation::Phi(mappings))
+                    builder.push_instruction(Operation::Phi(mappings))
                 }
             } else {
                 unreachable!();
@@ -153,7 +153,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Add(values[0], values[1]))
+                builder.push_instruction(Operation::Add(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "-" => {
@@ -161,7 +161,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Sub(values[0], values[1]))
+                builder.push_instruction(Operation::Sub(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "*" => {
@@ -169,7 +169,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Mul(values[0], values[1]))
+                builder.push_instruction(Operation::Mul(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "/" => {
@@ -177,7 +177,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Div(values[0], values[1]))
+                builder.push_instruction(Operation::Div(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "%" => {
@@ -185,7 +185,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Mod(values[0], values[1]))
+                builder.push_instruction(Operation::Mod(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "<<" => {
@@ -193,7 +193,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Bsl(values[0], values[1]))
+                builder.push_instruction(Operation::Bsl(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == ">>" => {
@@ -201,7 +201,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Bsr(values[0], values[1]))
+                builder.push_instruction(Operation::Bsr(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "==" => {
@@ -209,7 +209,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Eq(values[0], values[1]))
+                builder.push_instruction(Operation::Eq(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "!=" => {
@@ -217,7 +217,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Ne(values[0], values[1]))
+                builder.push_instruction(Operation::Ne(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "<" => {
@@ -225,7 +225,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Lt(values[0], values[1]))
+                builder.push_instruction(Operation::Lt(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "<=" => {
@@ -233,7 +233,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Le(values[0], values[1]))
+                builder.push_instruction(Operation::Le(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == ">" => {
@@ -241,7 +241,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Gt(values[0], values[1]))
+                builder.push_instruction(Operation::Gt(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == ">=" => {
@@ -249,7 +249,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::Ge(values[0], values[1]))
+                builder.push_instruction(Operation::Ge(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "&" => {
@@ -257,7 +257,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::BitAnd(values[0], values[1]))
+                builder.push_instruction(Operation::BitAnd(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "|" => {
@@ -265,7 +265,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::BitOr(values[0], values[1]))
+                builder.push_instruction(Operation::BitOr(values[0], values[1]))
             }
 
             SExpr::Symbol { value, .. } if value == "^" => {
@@ -273,21 +273,21 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::BitXor(values[0], values[1]))
+                builder.push_instruction(Operation::BitXor(values[0], values[1]))
             }
 
             SExpr::Symbol { meta, value } => {
                 for scope in args.var_map.iter().rev() {
                     if let Some(var) = scope.get(&value) {
                         let v = builder
-                            .push_instruction(&convert_type(&meta.type_), Operation::GetVar(*var))
+                            .push_instruction(Operation::GetVar(*var))
                             .unwrap();
                         let values: Vec<_> = values
                             .into_iter()
                             .flat_map(|v| lower_helper(builder, v, args))
                             .collect();
                         return builder
-                            .push_instruction(&type_, Operation::CallIndirect(v, values));
+                            .push_instruction(Operation::CallIndirect(v, values));
                     }
                 }
 
@@ -296,7 +296,7 @@ fn lower_helper(
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
                 if let Some(func) = args.func_map.get(&value) {
-                    builder.push_instruction(&type_, Operation::Call(*func, values))
+                    builder.push_instruction(Operation::Call(*func, values))
                 } else {
                     None
                 }
@@ -308,7 +308,7 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(&type_, Operation::CallIndirect(f, values))
+                builder.push_instruction(Operation::CallIndirect(f, values))
             }
         },
 
@@ -332,7 +332,6 @@ fn lower_helper(
                 let v = lower_helper(builder, setting, args);
                 if let Some(built_) = built {
                     built = builder.push_instruction(
-                        &IrType::Integer(false, 1),
                         Operation::BitOr(built_, v.unwrap()),
                     );
                 } else {
@@ -348,10 +347,9 @@ fn lower_helper(
             if let Some(v) = lower_helper(builder, *value, args) {
                 for scope in args.var_map.iter().rev() {
                     if let Some(var) = scope.get(&var) {
-                        builder.push_instruction(&IrType::Void, Operation::SetVar(*var, v));
+                        builder.push_instruction(Operation::SetVar(*var, v));
                         return builder.push_instruction(
-                            &IrType::Integer(false, 1),
-                            Operation::Integer(false, vec![1]),
+                            true.to_integer_operation(),
                         );
                     }
                 }
@@ -361,10 +359,9 @@ fn lower_helper(
                         .push_variable(&var, &convert_type(&meta.type_))
                         .unwrap();
                     args.var_map.last_mut().unwrap().insert(var, variable);
-                    builder.push_instruction(&IrType::Void, Operation::SetVar(variable, v));
+                    builder.push_instruction(Operation::SetVar(variable, v));
                     return builder.push_instruction(
-                        &IrType::Integer(false, 1),
-                        Operation::Integer(false, vec![1]),
+                        true.to_integer_operation(),
                     );
                 }
             }
