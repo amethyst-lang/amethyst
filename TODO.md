@@ -1,5 +1,4 @@
 # Things to do:
- - Modules
  - Typeclasses
  - Linear types for resources and allocators
  - Lifetimes for pointers/slices
