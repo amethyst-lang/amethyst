@@ -452,7 +452,9 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
         Ast::Symbol(_, f) if f.len() == 1 && f[0] == "f32" => Ok(Type::F32),
         Ast::Symbol(_, f) if f.len() == 1 && f[0] == "f64" => Ok(Type::F64),
 
-        Ast::Symbol(_, int) if int.len() == 1 && int[0].starts_with('i') || int[0].starts_with('u') => {
+        Ast::Symbol(_, int)
+            if int.len() == 1 && int[0].starts_with('i') || int[0].starts_with('u') =>
+        {
             if let Ok(v) = int[0][1..].parse() {
                 Ok(Type::Int(int[0].starts_with('i'), v))
             } else {
@@ -460,7 +462,10 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
             }
         }
 
-        Ast::Symbol(_, v) => Ok(Type::Struct(v.into_iter().map(|v| v.to_string()).collect(), vec![])),
+        Ast::Symbol(_, v) => Ok(Type::Struct(
+            v.into_iter().map(|v| v.to_string()).collect(),
+            vec![],
+        )),
 
         Ast::SExpr(_, v) if v.is_empty() => Ok(Type::Tuple(vec![])),
 
@@ -495,7 +500,9 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
 
                     if ast.len() == 3 {
                         match &ast[1] {
-                            Ast::Symbol(_, v) if v.len() == 1 && v[0] == ":" => Ok(Type::Function(args, Box::new(parse_type(ast.remove(2))?))),
+                            Ast::Symbol(_, v) if v.len() == 1 && v[0] == ":" => {
+                                Ok(Type::Function(args, Box::new(parse_type(ast.remove(2))?)))
+                            }
                             _ => Err(LoweringError::InvalidType),
                         }
                     } else if ast.len() == 1 {
@@ -799,18 +806,19 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
 
                         for arg in sexpr.into_iter().skip(2) {
                             match arg {
-                                Ast::SExpr(_, mut arg) if arg.len() == 2 => {
-                                    match &arg[0] {
-                                        Ast::Symbol(_, name) if name.len() == 1 => {
-                                            args.push((name[0].to_string(), parse_type(arg.remove(1))?));
-                                        }
-                                        _ => {
-                                                                            return Err(LoweringError::InvalidDefun(String::from(
-                                                                                name,
-                                                                            )));
-                                                                        }
+                                Ast::SExpr(_, mut arg) if arg.len() == 2 => match &arg[0] {
+                                    Ast::Symbol(_, name) if name.len() == 1 => {
+                                        args.push((
+                                            name[0].to_string(),
+                                            parse_type(arg.remove(1))?,
+                                        ));
                                     }
-                                }
+                                    _ => {
+                                        return Err(LoweringError::InvalidDefun(String::from(
+                                            name,
+                                        )));
+                                    }
+                                },
 
                                 _ => return Err(LoweringError::InvalidDefun(String::from(name))),
                             }
@@ -859,18 +867,19 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
 
                         for arg in sexpr.into_iter().skip(2) {
                             match arg {
-                                Ast::SExpr(_, mut arg) if arg.len() == 2 => {
-                                    match &arg[0] {
-                                        Ast::Symbol(_, name) if name.len() == 1 => {
-                                            args.push((name[0].to_string(), parse_type(arg.remove(1))?));
-                                        }
-                                        _ => {
-                                            return Err(LoweringError::InvalidDefun(String::from(
-                                                name,
-                                            )));
-                                        }
+                                Ast::SExpr(_, mut arg) if arg.len() == 2 => match &arg[0] {
+                                    Ast::Symbol(_, name) if name.len() == 1 => {
+                                        args.push((
+                                            name[0].to_string(),
+                                            parse_type(arg.remove(1))?,
+                                        ));
                                     }
-                                }
+                                    _ => {
+                                        return Err(LoweringError::InvalidDefun(String::from(
+                                            name,
+                                        )));
+                                    }
+                                },
 
                                 _ => return Err(LoweringError::InvalidDefun(String::from(name))),
                             }
@@ -927,7 +936,10 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                         SExpr::StructDef {
                             meta: Metadata {
                                 range,
-                                type_: Type::Struct(name.iter().map(|v| v.to_string()).collect(), generics),
+                                type_: Type::Struct(
+                                    name.iter().map(|v| v.to_string()).collect(),
+                                    generics,
+                                ),
                             },
                             ann,
                             name: name.into_iter().map(|v| v.to_string()).collect(),
@@ -1111,7 +1123,8 @@ pub fn lower(asts: Vec<Ast<'_>>) -> Result<Vec<SExpr>, LoweringError> {
     for ast in asts {
         match ast {
             Ast::SExpr(_, v)
-                if v.len() == 1 && matches!(v.get(0), Some(Ast::Symbol(_, v)) if v.len() == 0 && v[0] == "public") =>
+                if v.len() == 1
+                    && matches!(v.get(0), Some(Ast::Symbol(_, v)) if v.len() == 0 && v[0] == "public") =>
             {
                 ann.public = true;
             }

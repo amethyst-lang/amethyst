@@ -23,9 +23,7 @@ fn lower_helper(
 ) -> Option<Value> {
     let type_ = convert_type(&sexpr.meta().type_);
     match sexpr {
-        SExpr::Int { meta, value } => {
-            builder.push_instruction(value.to_integer_operation())
-        }
+        SExpr::Int { meta, value } => builder.push_instruction(value.to_integer_operation()),
 
         SExpr::Float { meta, value } => todo!(),
         SExpr::Str { meta, value } => todo!(),
@@ -281,15 +279,12 @@ fn lower_helper(
             SExpr::Symbol { meta, value } => {
                 for scope in args.var_map.iter().rev() {
                     if let Some(var) = scope.get(&value) {
-                        let v = builder
-                            .push_instruction(Operation::GetVar(*var))
-                            .unwrap();
+                        let v = builder.push_instruction(Operation::GetVar(*var)).unwrap();
                         let values: Vec<_> = values
                             .into_iter()
                             .flat_map(|v| lower_helper(builder, v, args))
                             .collect();
-                        return builder
-                            .push_instruction(Operation::CallIndirect(v, values));
+                        return builder.push_instruction(Operation::CallIndirect(v, values));
                     }
                 }
 
@@ -333,9 +328,7 @@ fn lower_helper(
             for setting in settings {
                 let v = lower_helper(builder, setting, args);
                 if let Some(built_) = built {
-                    built = builder.push_instruction(
-                        Operation::BitOr(built_, v.unwrap()),
-                    );
+                    built = builder.push_instruction(Operation::BitOr(built_, v.unwrap()));
                 } else {
                     built = v;
                 }
@@ -350,9 +343,7 @@ fn lower_helper(
                 for scope in args.var_map.iter().rev() {
                     if let Some(var) = scope.get(&var) {
                         builder.push_instruction(Operation::SetVar(*var, v));
-                        return builder.push_instruction(
-                            true.to_integer_operation(),
-                        );
+                        return builder.push_instruction(true.to_integer_operation());
                     }
                 }
 
@@ -362,9 +353,7 @@ fn lower_helper(
                         .unwrap();
                     args.var_map.last_mut().unwrap().insert(var, variable);
                     builder.push_instruction(Operation::SetVar(variable, v));
-                    return builder.push_instruction(
-                        true.to_integer_operation(),
-                    );
+                    return builder.push_instruction(true.to_integer_operation());
                 }
             }
 

@@ -929,7 +929,10 @@ fn traverse_sexpr(
                     Some(name) => {
                         let path = Path::new(module_path).canonicalize().unwrap();
                         if exports.get(&path).is_some() {
-                            module_map.last_mut().unwrap().insert(name.to_string(), path);
+                            module_map
+                                .last_mut()
+                                .unwrap()
+                                .insert(name.to_string(), path);
                         } else {
                             todo!("error handling: unknown module {}", module_path);
                         }
