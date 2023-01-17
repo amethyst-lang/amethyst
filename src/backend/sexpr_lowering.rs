@@ -276,6 +276,14 @@ fn lower_helper(
                 builder.push_instruction(Operation::BitXor(values[0], values[1])).unwrap()
             }
 
+            SExpr::Symbol { value, .. } if value == "ptr-set" => {
+                let values: Vec<_> = values
+                    .into_iter()
+                    .flat_map(|v| lower_helper(builder, v, args))
+                    .collect();
+                builder.push_instruction(Operation::Store(values[0], values[1])).unwrap()
+            }
+
             SExpr::Symbol { meta, value } => {
                 for scope in args.var_map.iter().rev() {
                     if let Some(var) = scope.get(&value) {
@@ -339,6 +347,7 @@ fn lower_helper(
         }
 
         SExpr::Assign { meta, var, value } => {
+            let type_ = value.meta().type_.clone();
             if let Some(v) = lower_helper(builder, *value, args) {
                 for scope in args.var_map.iter().rev() {
                     if let Some(var) = scope.get(&var) {
@@ -349,7 +358,7 @@ fn lower_helper(
 
                 if args.in_let {
                     let variable = builder
-                        .push_variable(&var, &convert_type(&meta.type_))
+                        .push_variable(&var, &convert_type(&type_))
                         .unwrap();
                     args.var_map.last_mut().unwrap().insert(var, variable);
                     builder.push_instruction(Operation::SetVar(variable, v));
@@ -364,7 +373,12 @@ fn lower_helper(
         SExpr::SliceGet { meta, top, index } => todo!(),
         SExpr::SizeOf { meta, type_ } => todo!(),
         SExpr::Ref { meta, value } => todo!(),
-        SExpr::Deref { meta, value } => todo!(),
+
+        SExpr::Deref { meta, value } => {
+            let value = lower_helper(builder, *value, args).unwrap();
+            builder.push_instruction(Operation::Load(value)).unwrap();
+            builder.push_instruction(true.to_integer_operation()).unwrap()
+        }
 
         SExpr::Import { .. } => None,
     }
@@ -377,7 +391,7 @@ fn convert_type(type_: &SExprType) -> IrType {
         SExprType::F64 => todo!(),
         SExprType::Tuple(v) if v.is_empty() => IrType::Void,
         SExprType::Tuple(_) => todo!(),
-        SExprType::Pointer(_, _) => todo!(),
+        SExprType::Pointer(_, v) => IrType::Pointer(Box::new(convert_type(&**v))),
         SExprType::Slice(_, _) => todo!(),
         SExprType::Struct(_, _) => todo!(),
         SExprType::Function(_, _) => todo!(),

@@ -167,6 +167,9 @@ fn traverse_sexpr(
         *t = Type::TypeVariable(*type_var_counter);
         coercions.insert(*type_var_counter, FloatOrInt::Float);
         *type_var_counter += 1;
+    } else {
+        *t = Type::TypeVariable(*type_var_counter);
+        *type_var_counter += 1;
     }
 
     match sexpr {
@@ -1595,6 +1598,18 @@ fn create_default_signatures() -> HashMap<String, Signature> {
         Signature {
             arg_types: vec![Type::Int(false, 64)],
             ret_type: Type::Slice(true, Box::new(Type::Generic("a".to_string()))),
+            index: None,
+            linkage: SignatureLinkage::Builtin,
+        },
+    );
+    map.insert(
+        "ptr-set".to_string(),
+        Signature {
+            arg_types: vec![
+                Type::Pointer(true, Box::new(Type::Generic("a".to_string()))),
+                Type::Generic("a".to_string()),
+            ],
+            ret_type: Type::Int(false, 1),
             index: None,
             linkage: SignatureLinkage::Builtin,
         },
