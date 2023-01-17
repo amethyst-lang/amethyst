@@ -1,16 +1,14 @@
 use std::collections::HashMap;
 use std::path::Path;
-//use std::fs::File;
+use std::fs::File;
 
 use clap::Parser;
-/*
 use codegem::arch::rv64::RvSelector;
 use codegem::arch::urcl::UrclSelector;
 use codegem::arch::x64::X64Selector;
 use codegem::regalloc::RegAlloc;
 
 use amethyst::backend::sexpr_lowering;
-*/
 use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
 
@@ -42,8 +40,8 @@ fn main() {
         correctness::check(name, module, &exports).unwrap();
     }
 
-    /*
-    let ir = sexpr_lowering::lower(sexprs);
+    // TODO: modules
+    let ir = sexpr_lowering::lower(modules.remove(0).1.sexprs);
 
     match args.target.as_str() {
         "x64" => {
@@ -72,5 +70,4 @@ fn main() {
             std::process::exit(1);
         }
     }
-    */
 }

@@ -1,5 +1,5 @@
 # Things to do:
- - Typeclasses
+ - Trait
  - Linear types for resources and allocators
  - Lifetimes for pointers/slices
  - Capabilities
