@@ -281,7 +281,8 @@ fn lower_helper(
                     .into_iter()
                     .flat_map(|v| lower_helper(builder, v, args))
                     .collect();
-                builder.push_instruction(Operation::Store(values[0], values[1])).unwrap()
+                builder.push_instruction(Operation::Store(values[0], values[1]));
+                builder.push_instruction(true.to_integer_operation()).unwrap()
             }
 
             SExpr::Symbol { meta, value } => {
@@ -376,8 +377,7 @@ fn lower_helper(
 
         SExpr::Deref { meta, value } => {
             let value = lower_helper(builder, *value, args).unwrap();
-            builder.push_instruction(Operation::Load(value)).unwrap();
-            builder.push_instruction(true.to_integer_operation()).unwrap()
+            builder.push_instruction(Operation::Load(value)).unwrap()
         }
 
         SExpr::Import { .. } => None,
