@@ -23,7 +23,7 @@ fn lower_helper(
 ) -> Option<Value> {
     let type_ = convert_type(&sexpr.meta().type_);
     match sexpr {
-        SExpr::Int { meta, value } => builder.push_instruction(value.to_integer_operation()).unwrap(),
+        SExpr::Int { meta, value } => builder.push_instruction(value.to_integer_operation_as(convert_type(&meta.type_))).unwrap(),
 
         SExpr::Float { meta, value } => todo!(),
         SExpr::Str { meta, value } => todo!(),
@@ -485,5 +485,5 @@ pub fn lower(sexprs: Vec<SExpr>) -> Module {
         }
     }
 
-    builder.build()
+    builder.build().unwrap()
 }
