@@ -14,6 +14,7 @@ pub struct Metadata {
 #[derive(Debug, Clone, Default)]
 pub struct Annotations {
     pub public: bool,
+    pub generics: Vec<(String, ())>,
 }
 
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
@@ -447,7 +448,7 @@ pub enum LoweringError {
     InvalidImport,
 }
 
-fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
+fn parse_type(ast: Ast<'_>, ann: &Annotations) -> Result<Type, LoweringError> {
     match ast {
         Ast::Symbol(_, f) if f.len() == 1 && f[0] == "f32" => Ok(Type::F32),
         Ast::Symbol(_, f) if f.len() == 1 && f[0] == "f64" => Ok(Type::F64),
@@ -462,6 +463,10 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
             }
         }
 
+        Ast::Symbol(_, mut v) if v.len() == 1 && ann.generics.iter().any(|(n, _)| n == v[0]) => {
+            Ok(Type::Generic(v.remove(0).to_string()))
+        }
+
         Ast::Symbol(_, v) => Ok(Type::Struct(
             v.into_iter().map(|v| v.to_string()).collect(),
             vec![],
@@ -472,7 +477,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
         Ast::SExpr(_, mut ast) => match &ast[0] {
             Ast::Symbol(_, v) if v.len() == 1 && v[0] == "*" => {
                 if ast.len() == 2 {
-                    Ok(Type::Pointer(false, Box::new(parse_type(ast.remove(1))?)))
+                    Ok(Type::Pointer(false, Box::new(parse_type(ast.remove(1), ann)?)))
                 } else {
                     Err(LoweringError::InvalidType)
                 }
@@ -480,7 +485,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
 
             Ast::Symbol(_, v) if v.len() == 1 && v[0] == "@" => {
                 if ast.len() == 2 {
-                    Ok(Type::Slice(false, Box::new(parse_type(ast.remove(1))?)))
+                    Ok(Type::Slice(false, Box::new(parse_type(ast.remove(1), ann)?)))
                 } else {
                     Err(LoweringError::InvalidType)
                 }
@@ -491,7 +496,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
                     let args = if let Ast::SExpr(_, v) = ast.remove(1) {
                         let mut args = vec![];
                         for v in v {
-                            args.push(parse_type(v)?);
+                            args.push(parse_type(v, ann)?);
                         }
                         args
                     } else {
@@ -501,7 +506,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
                     if ast.len() == 3 {
                         match &ast[1] {
                             Ast::Symbol(_, v) if v.len() == 1 && v[0] == ":" => {
-                                Ok(Type::Function(args, Box::new(parse_type(ast.remove(2))?)))
+                                Ok(Type::Function(args, Box::new(parse_type(ast.remove(2), ann)?)))
                             }
                             _ => Err(LoweringError::InvalidType),
                         }
@@ -518,14 +523,14 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
             Ast::Symbol(_, v) if v.len() == 1 && v[0] == "union" => Ok(Type::Union(
                 ast.into_iter()
                     .skip(1)
-                    .map(parse_type)
+                    .map(|v| parse_type(v, ann))
                     .collect::<Result<_, _>>()?,
             )),
 
             Ast::Symbol(_, v) if v.len() == 1 && v[0] == "tuple" => Ok(Type::Tuple(
                 ast.into_iter()
                     .skip(1)
-                    .map(parse_type)
+                    .map(|v| parse_type(v, ann))
                     .collect::<Result<_, _>>()?,
             )),
 
@@ -533,7 +538,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
                 v.into_iter().map(|v| v.to_string()).collect(),
                 ast.into_iter()
                     .skip(1)
-                    .map(parse_type)
+                    .map(|v| parse_type(v, ann))
                     .collect::<Result<_, _>>()?,
             )),
 
@@ -544,7 +549,7 @@ fn parse_type(ast: Ast<'_>) -> Result<Type, LoweringError> {
     }
 }
 
-fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> {
+fn lower_helper(ast: Ast<'_>, ann: &Annotations) -> Result<SExpr, LoweringError> {
     let sexpr = match ast {
         Ast::Int(range, value) => SExpr::Int {
             meta: Metadata {
@@ -651,7 +656,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                         tuple: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(|v| lower_helper(v, Annotations::default()))
+                            .map(|v| lower_helper(v, ann))
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
@@ -663,7 +668,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                         values: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(|v| lower_helper(v, Annotations::default()))
+                            .map(|v| lower_helper(v, ann))
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
 
@@ -675,7 +680,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                         values: sexpr
                             .into_iter()
                             .skip(1)
-                            .map(|v| lower_helper(v, Annotations::default()))
+                            .map(|v| lower_helper(v, ann))
                             .chain([Ok(SExpr::Nil {
                                 meta: Metadata {
                                     range,
@@ -689,7 +694,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                         let elsy = if matches!(sexpr.last(), Some(Ast::SExpr(_, v)) if v.len() == 2 && matches!(v[0], Ast::Key(_, "else")))
                         {
                             if let Ast::SExpr(_, mut v) = sexpr.remove(sexpr.len() - 1) {
-                                Some(Box::new(lower_helper(v.remove(1), Annotations::default())?))
+                                Some(Box::new(lower_helper(v.remove(1), ann)?))
                             } else {
                                 unreachable!()
                             }
@@ -712,8 +717,8 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                 .skip(1)
                                 .map(|v| match v {
                                     Ast::SExpr(_, mut v) if v.len() == 2 => Ok((
-                                        lower_helper(v.swap_remove(0), Annotations::default())?,
-                                        lower_helper(v.remove(0), Annotations::default())?,
+                                        lower_helper(v.swap_remove(0), ann)?,
+                                        lower_helper(v.remove(0), ann)?,
                                     )),
 
                                     _ => Err(LoweringError::InvalidCondBranch),
@@ -732,7 +737,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                 },
                                 value: Box::new(lower_helper(
                                     sexpr.swap_remove(1),
-                                    Annotations::default(),
+                                    ann,
                                 )?),
                             }
                         } else {
@@ -749,7 +754,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                 },
                                 value: Some(Box::new(lower_helper(
                                     sexpr.swap_remove(1),
-                                    Annotations::default(),
+                                    ann,
                                 )?)),
                             }
                         } else if sexpr.len() == 1 {
@@ -770,11 +775,11 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                             SExpr::Type {
                                 meta: Metadata {
                                     range,
-                                    type_: parse_type(sexpr.swap_remove(2))?,
+                                    type_: parse_type(sexpr.swap_remove(2), ann)?,
                                 },
                                 value: Box::new(lower_helper(
                                     sexpr.swap_remove(1),
-                                    Annotations::default(),
+                                    ann,
                                 )?),
                             }
                         } else {
@@ -793,11 +798,11 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                         };
 
                         let expr =
-                            lower_helper(sexpr.remove(sexpr.len() - 1), Annotations::default())?;
+                            lower_helper(sexpr.remove(sexpr.len() - 1), ann)?;
                         let ret_type = match &sexpr[sexpr.len() - 2] {
                             Ast::Symbol(_, v) if v.len() == 1 && v[0] == ":" => {
                                 sexpr.remove(sexpr.len() - 2);
-                                parse_type(sexpr.remove(sexpr.len() - 1))?
+                                parse_type(sexpr.remove(sexpr.len() - 1), ann)?
                             }
                             _ => Type::Tuple(vec![]),
                         };
@@ -810,7 +815,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     Ast::Symbol(_, name) if name.len() == 1 => {
                                         args.push((
                                             name[0].to_string(),
-                                            parse_type(arg.remove(1))?,
+                                            parse_type(arg.remove(1), ann)?,
                                         ));
                                     }
                                     _ => {
@@ -832,7 +837,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     Box::new(ret_type.clone()),
                                 ),
                             },
-                            ann,
+                            ann: ann.clone(),
                             name: name.to_string(),
                             ret_type,
                             args,
@@ -858,7 +863,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                         let ret_type = match &sexpr[sexpr.len() - 2] {
                             Ast::Symbol(_, v) if v.len() == 1 && v[0] == ":" => {
                                 sexpr.remove(sexpr.len() - 2);
-                                parse_type(sexpr.remove(sexpr.len() - 1))?
+                                parse_type(sexpr.remove(sexpr.len() - 1), ann)?
                             }
                             _ => Type::Tuple(vec![]),
                         };
@@ -871,7 +876,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     Ast::Symbol(_, name) if name.len() == 1 => {
                                         args.push((
                                             name[0].to_string(),
-                                            parse_type(arg.remove(1))?,
+                                            parse_type(arg.remove(1), ann)?,
                                         ));
                                     }
                                     _ => {
@@ -913,7 +918,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                         for field in sexpr.into_iter().skip(1) {
                             match current_field_name {
                                 Some(name) => {
-                                    let type_ = parse_type(field)?;
+                                    let type_ = parse_type(field, ann)?;
                                     type_.find_generics(&mut generics);
                                     fields.push((name, type_));
                                     current_field_name = None;
@@ -941,7 +946,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     generics,
                                 ),
                             },
-                            ann,
+                            ann: ann.clone(),
                             name: name.into_iter().map(|v| v.to_string()).collect(),
                             fields,
                         }
@@ -959,7 +964,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                             match current_field_name {
                                 Some(name) => {
                                     values
-                                        .push((name, lower_helper(field, Annotations::default())?));
+                                        .push((name, lower_helper(field, ann)?));
                                     current_field_name = None;
                                 }
 
@@ -998,7 +1003,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                 settings: sexpr
                                     .into_iter()
                                     .skip(1)
-                                    .map(|v| lower_helper(v, Annotations::default()))
+                                    .map(|v| lower_helper(v, ann))
                                     .collect::<Result<_, _>>()?,
                             }
                         } else {
@@ -1008,7 +1013,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
 
                     Ast::Symbol(_, v) if v.len() == 1 && v[0] == "=" => {
                         if sexpr.len() == 3 {
-                            let value = lower_helper(sexpr.swap_remove(2), Annotations::default())?;
+                            let value = lower_helper(sexpr.swap_remove(2), ann)?;
                             match sexpr.swap_remove(1) {
                                 Ast::Symbol(_, var) if var.len() == 1 => SExpr::Assign {
                                     meta: Metadata {
@@ -1042,7 +1047,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                                     range,
                                     type_: Type::UnknownInt,
                                 },
-                                type_: parse_type(sexpr.remove(1))?,
+                                type_: parse_type(sexpr.remove(1), ann)?,
                             }
                         } else {
                             return Err(LoweringError::InvalidSizeOf);
@@ -1055,10 +1060,10 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                             range,
                             type_: Type::Unknown,
                         },
-                        func: Box::new(lower_helper(sexpr.remove(0), Annotations::default())?),
+                        func: Box::new(lower_helper(sexpr.remove(0), ann)?),
                         values: sexpr
                             .into_iter()
-                            .map(|v| lower_helper(v, Annotations::default()))
+                            .map(|v| lower_helper(v, ann))
                             .collect::<Result<Vec<SExpr>, LoweringError>>()?,
                     },
                 }
@@ -1071,7 +1076,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                     range,
                     type_: Type::Unknown,
                 },
-                value: Box::new(lower_helper(*value, Annotations::default())?),
+                value: Box::new(lower_helper(*value, ann)?),
             },
 
             Ast::Symbol(_, v) if v.len() == 1 && v[0] == "*" => SExpr::Deref {
@@ -1079,7 +1084,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                     range,
                     type_: Type::Unknown,
                 },
-                value: Box::new(lower_helper(*value, Annotations::default())?),
+                value: Box::new(lower_helper(*value, ann)?),
             },
 
             Ast::Symbol(_, attr) if attr.len() == 1 => SExpr::Attribute {
@@ -1087,7 +1092,7 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                     range,
                     type_: Type::Unknown,
                 },
-                top: Box::new(lower_helper(*value, Annotations::default())?),
+                top: Box::new(lower_helper(*value, ann)?),
                 attr: attr[0].to_string(),
             },
 
@@ -1096,8 +1101,8 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                     range,
                     type_: Type::Unknown,
                 },
-                top: Box::new(lower_helper(*value, Annotations::default())?),
-                index: Box::new(lower_helper(v.remove(0), Annotations::default())?),
+                top: Box::new(lower_helper(*value, ann)?),
+                index: Box::new(lower_helper(v.remove(0), ann)?),
             },
 
             v @ Ast::SExpr(_, _) => SExpr::SliceGet {
@@ -1105,8 +1110,8 @@ fn lower_helper(ast: Ast<'_>, ann: Annotations) -> Result<SExpr, LoweringError> 
                     range,
                     type_: Type::Unknown,
                 },
-                top: Box::new(lower_helper(*value, Annotations::default())?),
-                index: Box::new(lower_helper(v, Annotations::default())?),
+                top: Box::new(lower_helper(*value, ann)?),
+                index: Box::new(lower_helper(v, ann)?),
             },
 
             _ => unreachable!("parser emits only symbols or s expressions"),
@@ -1124,13 +1129,25 @@ pub fn lower(asts: Vec<Ast<'_>>) -> Result<Vec<SExpr>, LoweringError> {
         match ast {
             Ast::SExpr(_, v)
                 if v.len() == 1
-                    && matches!(v.get(0), Some(Ast::Symbol(_, v)) if v.len() == 0 && v[0] == "public") =>
+                    && matches!(v.get(0), Some(Ast::Symbol(_, v)) if v.len() == 1 && v[0] == "public") =>
             {
                 ann.public = true;
             }
 
+            Ast::SExpr(_, v) if v.len() > 1 && matches!(v.get(0), Some(Ast::Symbol(_, v)) if v.len() == 1 && v[0] == "generic") => {
+                for v in v.iter().skip(1) {
+                    match v {
+                        Ast::Symbol(_, g) if g.len() == 1 => {
+                            ann.generics.push((g[0].to_string(), ()));
+                        }
+
+                        _ => todo!("error handling"),
+                    }
+                }
+            }
+
             _ => {
-                sexprs.push(lower_helper(ast, ann)?);
+                sexprs.push(lower_helper(ast, &ann)?);
                 ann = Annotations::default();
             }
         }
