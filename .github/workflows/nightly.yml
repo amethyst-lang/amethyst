@@ -1,0 +1,49 @@
+name: Nightly
+
+on:
+  push:
+    branches: 
+    - 'main'
+
+jobs:
+  nightly:
+    name: Deploy nightly
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Build
+      run: cp scripts/Cargo.toml .
+    
+    - name: Build
+      run: cargo build --release
+
+    - name: Build asset
+      run: |
+        7z a amethyst-nightly.zip target/release/amethyst*
+
+    - name: Set tag
+      if: ${{ matrix.os == 'ubuntu-latest' }}
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git tag -f -a nightly -m "Nightly update"
+        git push origin -f --follow-tags nightly
+
+    - name: Deploy release
+      uses: WebFreak001/deploy-nightly@v1.1.0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: https://uploads.github.com/repos/amethyst-lang/amethyst/releases/90475610/assets{?name,label}
+        release_id: 90475610
+        asset_path: ./amethyst-nightly.zip
+        asset_name: amethyst-nightly-${{matrix.os}}-$$.zip
+        asset_content_type: application/zip
+        max_releases: 1
