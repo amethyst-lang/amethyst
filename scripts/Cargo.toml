@@ -1,0 +1,15 @@
+[package]
+name = "amethyst"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.0.32", features = ["derive"] }
+lalrpop-util = { version = "0.19.6", features = ["std", "lexer"] }
+codegem = { git = "https://github.com/code-gem/codegem" }
+
+[build-dependencies]
+lalrpop = "0.19.6"
