@@ -19,9 +19,6 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Build
-      run: cp scripts/Cargo.toml .
-    
-    - name: Build
       run: cargo build --release
 
     - name: Build asset
