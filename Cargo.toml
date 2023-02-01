@@ -9,8 +9,7 @@ build = "build.rs"
 [dependencies]
 clap = { version = "4.0.32", features = ["derive"] }
 lalrpop-util = { version = "0.19.6", features = ["std", "lexer"] }
-codegem = { path = "../codegem" }
-# codegem = "*"
+inkwell = { git = "https://github.com/TheDan64/inkwell", features = ["llvm15-0"] }
 
 [build-dependencies]
 lalrpop = "0.19.6"
