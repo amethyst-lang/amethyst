@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
-use inkwell::{context::Context, builder::Builder, passes::PassManager, values::FunctionValue, module::{Module, Linkage}, types::{FunctionType, BasicMetadataTypeEnum}};
+use inkwell::{context::Context, builder::Builder, passes::PassManager, values::{FunctionValue, BasicMetadataValueEnum, BasicValueEnum}, module::{Module, Linkage}, types::{FunctionType, BasicMetadataTypeEnum}};
 
 use crate::frontend::ast_lowering::{SExpr, Type as SExprType};
 
 pub struct Compiler<'ctx> {
     context: &'ctx Context,
     builder: Builder<'ctx>,
-    module: Module<'ctx>,
+    pub module: Module<'ctx>,
     func_map: HashMap<String, FunctionValue<'ctx>>,
+    current_func: Option<FunctionValue<'ctx>>,
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -33,16 +34,20 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn mangle_func_name(&self, name: &str) -> String {
-        format!("_amy_{}", name)
+        if name == "main" {
+            "main".to_string()
+        } else {
+            format!("_amy_{}", name)
+        }
     }
 
-    pub fn lower(sexprs: Vec<SExpr>) {
-        let context = Context::create();
+    pub fn lower(context: &'ctx Context, sexprs: Vec<SExpr>) -> Self {
         let mut compiler = Compiler {
-            context: &context,
+            context,
             builder: context.create_builder(),
             module: context.create_module("uwu"),
             func_map: HashMap::new(),
+            current_func: None,
         };
 
         for sexpr in sexprs.iter() {
@@ -59,7 +64,7 @@ impl<'ctx> Compiler<'ctx> {
                         BasicMetadataTypeEnum::VectorType(v) => v.fn_type(&arg_types, false),
                         BasicMetadataTypeEnum::MetadataType(v) => v.fn_type(&arg_types, false),
                     };
-                    let func = compiler.module.add_function(&compiler.mangle_func_name(name), type_, Some(Linkage::Common));
+                    let func = compiler.module.add_function(&compiler.mangle_func_name(name), type_, None);
                     compiler.func_map.insert(name.clone(), func);
                 }
 
@@ -85,11 +90,64 @@ impl<'ctx> Compiler<'ctx> {
 
         for sexpr in sexprs {
             match sexpr {
-                SExpr::FuncDef { meta, ann, name, ret_type, args, expr } => {
+                SExpr::FuncDef { name, ret_type, expr, .. } => {
+                    let func = *compiler.func_map.get(&name).unwrap();
+                    let block = compiler.context.append_basic_block(func, "entry");
+                    compiler.builder.position_at_end(block);
+                    compiler.current_func = Some(func);
+                    let v = compiler.lower_helper(*expr);
+                    match ret_type {
+                        SExprType::Tuple(v) if v.is_empty() => (),
+                        _ => {
+                            compiler.builder.build_return(Some(&v));
+                        }
+                    }
+                    compiler.current_func = None;
                 }
 
                 _ => (),
             }
+        }
+
+        compiler.module.verify().expect("must not fail");
+        compiler
+    }
+
+    fn lower_helper(&self, expr: SExpr) -> BasicValueEnum {
+        match expr {
+            SExpr::Int { meta, value } => match (self.convert_type(&meta.type_), meta.type_) {
+                (BasicMetadataTypeEnum::IntType(t), SExprType::Int(signed, _)) => t.const_int(value, signed).into(),
+                _ => unreachable!(),
+            },
+
+            SExpr::Float { meta, value } => match self.convert_type(&meta.type_) {
+                BasicMetadataTypeEnum::FloatType(t) => t.const_float(value).into(),
+                _ => unreachable!(),
+            },
+
+            SExpr::Str { meta, value } => todo!(),
+            SExpr::Symbol { meta, value } => todo!(),
+            SExpr::ModuleAccess { meta, value } => todo!(),
+            SExpr::Tuple { meta, tuple } => todo!(),
+            SExpr::Seq { meta, values } => todo!(),
+            SExpr::Cond { meta, values, elsy } => todo!(),
+            SExpr::Loop { meta, value } => todo!(),
+            SExpr::Break { meta, value } => todo!(),
+            SExpr::Nil { meta } => todo!(),
+            SExpr::Type { meta, value } => todo!(),
+            SExpr::FuncDef { meta, ann, name, ret_type, args, expr } => todo!(),
+            SExpr::FuncCall { meta, func, values } => todo!(),
+            SExpr::FuncExtern { meta, name, ret_type, args, linked_to } => todo!(),
+            SExpr::StructDef { meta, ann, name, fields } => todo!(),
+            SExpr::StructSet { meta, name, values } => todo!(),
+            SExpr::Declare { meta, conditional, settings } => todo!(),
+            SExpr::Assign { meta, var, value } => todo!(),
+            SExpr::Attribute { meta, top, attr } => todo!(),
+            SExpr::SliceGet { meta, top, index } => todo!(),
+            SExpr::SizeOf { meta, type_ } => todo!(),
+            SExpr::Ref { meta, value } => todo!(),
+            SExpr::Deref { meta, value } => todo!(),
+            SExpr::Import { meta, imports } => todo!(),
         }
     }
 }
