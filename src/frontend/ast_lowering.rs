@@ -477,7 +477,10 @@ fn parse_type(ast: Ast<'_>, ann: &Annotations) -> Result<Type, LoweringError> {
         Ast::SExpr(_, mut ast) => match &ast[0] {
             Ast::Symbol(_, v) if v.len() == 1 && v[0] == "*" => {
                 if ast.len() == 2 {
-                    Ok(Type::Pointer(false, Box::new(parse_type(ast.remove(1), ann)?)))
+                    Ok(Type::Pointer(
+                        false,
+                        Box::new(parse_type(ast.remove(1), ann)?),
+                    ))
                 } else {
                     Err(LoweringError::InvalidType)
                 }
@@ -485,7 +488,10 @@ fn parse_type(ast: Ast<'_>, ann: &Annotations) -> Result<Type, LoweringError> {
 
             Ast::Symbol(_, v) if v.len() == 1 && v[0] == "@" => {
                 if ast.len() == 2 {
-                    Ok(Type::Slice(false, Box::new(parse_type(ast.remove(1), ann)?)))
+                    Ok(Type::Slice(
+                        false,
+                        Box::new(parse_type(ast.remove(1), ann)?),
+                    ))
                 } else {
                     Err(LoweringError::InvalidType)
                 }
@@ -505,9 +511,10 @@ fn parse_type(ast: Ast<'_>, ann: &Annotations) -> Result<Type, LoweringError> {
 
                     if ast.len() == 3 {
                         match &ast[1] {
-                            Ast::Symbol(_, v) if v.len() == 1 && v[0] == ":" => {
-                                Ok(Type::Function(args, Box::new(parse_type(ast.remove(2), ann)?)))
-                            }
+                            Ast::Symbol(_, v) if v.len() == 1 && v[0] == ":" => Ok(Type::Function(
+                                args,
+                                Box::new(parse_type(ast.remove(2), ann)?),
+                            )),
                             _ => Err(LoweringError::InvalidType),
                         }
                     } else if ast.len() == 1 {
@@ -735,10 +742,7 @@ fn lower_helper(ast: Ast<'_>, ann: &Annotations) -> Result<SExpr, LoweringError>
                                     range,
                                     type_: Type::Unknown,
                                 },
-                                value: Box::new(lower_helper(
-                                    sexpr.swap_remove(1),
-                                    ann,
-                                )?),
+                                value: Box::new(lower_helper(sexpr.swap_remove(1), ann)?),
                             }
                         } else {
                             return Err(LoweringError::InvalidLoop);
@@ -752,10 +756,7 @@ fn lower_helper(ast: Ast<'_>, ann: &Annotations) -> Result<SExpr, LoweringError>
                                     range,
                                     type_: Type::Tuple(vec![]),
                                 },
-                                value: Some(Box::new(lower_helper(
-                                    sexpr.swap_remove(1),
-                                    ann,
-                                )?)),
+                                value: Some(Box::new(lower_helper(sexpr.swap_remove(1), ann)?)),
                             }
                         } else if sexpr.len() == 1 {
                             SExpr::Break {
@@ -777,10 +778,7 @@ fn lower_helper(ast: Ast<'_>, ann: &Annotations) -> Result<SExpr, LoweringError>
                                     range,
                                     type_: parse_type(sexpr.swap_remove(2), ann)?,
                                 },
-                                value: Box::new(lower_helper(
-                                    sexpr.swap_remove(1),
-                                    ann,
-                                )?),
+                                value: Box::new(lower_helper(sexpr.swap_remove(1), ann)?),
                             }
                         } else {
                             return Err(LoweringError::InvalidTypeSpecifier);
@@ -797,8 +795,7 @@ fn lower_helper(ast: Ast<'_>, ann: &Annotations) -> Result<SExpr, LoweringError>
                             _ => return Err(LoweringError::InvalidDefun(String::from("unknown"))),
                         };
 
-                        let expr =
-                            lower_helper(sexpr.remove(sexpr.len() - 1), ann)?;
+                        let expr = lower_helper(sexpr.remove(sexpr.len() - 1), ann)?;
                         let ret_type = match &sexpr[sexpr.len() - 2] {
                             Ast::Symbol(_, v) if v.len() == 1 && v[0] == ":" => {
                                 sexpr.remove(sexpr.len() - 2);
@@ -963,8 +960,7 @@ fn lower_helper(ast: Ast<'_>, ann: &Annotations) -> Result<SExpr, LoweringError>
                         for field in sexpr.into_iter().skip(1) {
                             match current_field_name {
                                 Some(name) => {
-                                    values
-                                        .push((name, lower_helper(field, ann)?));
+                                    values.push((name, lower_helper(field, ann)?));
                                     current_field_name = None;
                                 }
 
@@ -1134,7 +1130,10 @@ pub fn lower(asts: Vec<Ast<'_>>) -> Result<Vec<SExpr>, LoweringError> {
                 ann.public = true;
             }
 
-            Ast::SExpr(_, v) if v.len() > 1 && matches!(v.get(0), Some(Ast::Symbol(_, v)) if v.len() == 1 && v[0] == "generic") => {
+            Ast::SExpr(_, v)
+                if v.len() > 1
+                    && matches!(v.get(0), Some(Ast::Symbol(_, v)) if v.len() == 1 && v[0] == "generic") =>
+            {
                 for v in v.iter().skip(1) {
                     match v {
                         Ast::Symbol(_, g) if g.len() == 1 => {

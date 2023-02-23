@@ -598,7 +598,9 @@ fn traverse_sexpr(
                     for module_name in name[..name.len() - 1].iter() {
                         module = None;
                         for module_scope in module_map.iter().rev() {
-                            if let Some(modu) = module_scope.get(module_name).and_then(|v| exports.get(v)) {
+                            if let Some(modu) =
+                                module_scope.get(module_name).and_then(|v| exports.get(v))
+                            {
                                 module = Some(modu);
                             }
                         }
@@ -821,7 +823,10 @@ fn traverse_sexpr(
                                     for module_name in name[..name.len() - 1].iter() {
                                         module = None;
                                         for module_scope in module_map.iter().rev() {
-                                            if let Some(modu) = module_scope.get(module_name).and_then(|v| exports.get(v)) {
+                                            if let Some(modu) = module_scope
+                                                .get(module_name)
+                                                .and_then(|v| exports.get(v))
+                                            {
                                                 module = Some(modu);
                                             }
                                         }

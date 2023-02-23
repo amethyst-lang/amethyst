@@ -8,9 +8,11 @@ use clap::Parser;
 //use amethyst::backend::sexpr_lowering;
 use amethyst::frontend::{ast_lowering, correctness, macros};
 use amethyst::parser::TopParser;
-use inkwell::OptimizationLevel;
 use inkwell::context::Context;
-use inkwell::targets::{TargetMachine, TargetTriple, Target, InitializationConfig, RelocMode, CodeModel, FileType};
+use inkwell::targets::{
+    CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple,
+};
+use inkwell::OptimizationLevel;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -45,11 +47,25 @@ fn main() {
     let compiler = Compiler::lower(&context, modules.remove(0).1.sexprs);
     println!("{}", compiler.module.to_string());
 
-    let triple = args.target.map(|v| TargetTriple::create(&v)).unwrap_or_else(TargetMachine::get_default_triple);
+    let triple = args
+        .target
+        .map(|v| TargetTriple::create(&v))
+        .unwrap_or_else(TargetMachine::get_default_triple);
     Target::initialize_all(&InitializationConfig::default());
     let target = Target::from_triple(&triple).expect("must be valid");
-    let machine = target.create_target_machine(&triple, "generic", "", OptimizationLevel::Default, RelocMode::Default, CodeModel::Default).expect("oh no");
+    let machine = target
+        .create_target_machine(
+            &triple,
+            "generic",
+            "",
+            OptimizationLevel::Default,
+            RelocMode::Default,
+            CodeModel::Default,
+        )
+        .expect("oh no");
     //compiler.module.set_data_layout(); // TODO: figure this out
     compiler.module.set_triple(&triple);
-    machine.write_to_file(&compiler.module, FileType::Object, &Path::new("a.o")).expect("must work");
+    machine
+        .write_to_file(&compiler.module, FileType::Object, Path::new("a.o"))
+        .expect("must work");
 }
