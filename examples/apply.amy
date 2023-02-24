@@ -1,8 +1,0 @@
-(defun main : i32
-    (apply succ 68))
-
-(defun succ (x i32) : i32
-    (+ x 1))
-
-(defun apply (f (fn (i32) : i32)) (x i32) : i32
-    (f x))

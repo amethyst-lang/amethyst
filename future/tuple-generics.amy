@@ -1,9 +1,0 @@
-(defun print
-    (args 'args)
-:where
-    ('args (tuple 'elem))
-    ('elem Display)
-(seqn
-    // all tuples where their elements share a trait can be treated as iterators
-    (for arg :in args (seqn
-        (Display.print arg)))))

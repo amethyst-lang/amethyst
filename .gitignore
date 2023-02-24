@@ -4,3 +4,7 @@ a.out
 *.o
 *.s
 *.urcl
+
+# Added by cargo
+
+/target

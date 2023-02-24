@@ -2,14 +2,7 @@
 name = "amethyst"
 version = "0.1.0"
 edition = "2021"
-build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.0.32", features = ["derive"] }
-lalrpop-util = { version = "0.19.6", features = ["std", "lexer"] }
-inkwell = { git = "https://github.com/TheDan64/inkwell", features = ["llvm15-0"] }
-
-[build-dependencies]
-lalrpop = "0.19.6"

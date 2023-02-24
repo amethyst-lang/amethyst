@@ -1,6 +1,0 @@
-(defun main : i32
-    (seq
-        (id 4.3)
-        (id 1)))
-
-(defun id (a 'a) : 'a a)

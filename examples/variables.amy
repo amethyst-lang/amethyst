@@ -1,5 +1,0 @@
-(defun main (_a i32) (_b i32) : i32
-    (seq
-        (let n = 67)
-        (set n = (+ n 2))
-        n))
