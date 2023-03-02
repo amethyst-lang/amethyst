@@ -1,22 +1,24 @@
 #[derive(Copy, Clone, Debug)]
 pub enum Token<'a> {
     Invalid(&'a str),
-    Number(u128),
+    Integer(u128),
     // Bool(bool),
     Plus,
     Minus,
     Astrisk,
     Slash,
+    LParen,
+    RParen,
 }
 
 pub struct Lexer<'a> {
     contents: &'a str,
-    prev_tokens: Vec<Token<'a>>,
+    prev_tokens: Vec<(Token<'a>, usize)>,
     token_index: usize,
     pos: usize,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct LexerState {
     token_index: usize,
     pos: usize,
@@ -44,10 +46,18 @@ impl<'a> Lexer<'a> {
         self.pos = state.pos;
     }
 
+    pub fn peek(&mut self) -> Option<Token<'a>> {
+        let state = self.push();
+        let token = self.lex();
+        self.pop(state);
+        token
+    }
+
     pub fn lex(&mut self) -> Option<Token<'a>> {
-        if let Some(token) = self.prev_tokens.get(self.token_index) {
+        if let Some(&(token, pos)) = self.prev_tokens.get(self.token_index) {
             self.token_index += 1;
-            Some(*token)
+            self.pos = pos;
+            Some(token)
         } else {
             let mut final_pos = self.pos;
 
@@ -64,7 +74,7 @@ impl<'a> Lexer<'a> {
                     State::Initial => {
                         match c {
                             '0'..='9' => state = State::Number,
-                            '+' | '-' | '*' | '/' => state = State::SingleChar,
+                            '+' | '-' | '*' | '/' | '(' | ')' => state = State::SingleChar,
                             ' ' | '\t' | '\n' | '\r' => self.pos += c.len_utf8(),
                             _ => state = State::Invalid,
                         }
@@ -96,17 +106,19 @@ impl<'a> Lexer<'a> {
             let token = match state {
                 State::Initial => unreachable!(),
                 State::Invalid => Token::Invalid(s),
-                State::Number => Token::Number(s.parse().unwrap()),
+                State::Number => Token::Integer(s.parse().unwrap()),
                 State::SingleChar => match s {
                     "+" => Token::Plus,
                     "-" => Token::Minus,
                     "*" => Token::Astrisk,
                     "/" => Token::Slash,
+                    "(" => Token::LParen,
+                    ")" => Token::RParen,
                     _ => unreachable!(),
                 },
             };
 
-            self.prev_tokens.push(token);
+            self.prev_tokens.push((token, final_pos));
             self.token_index += 1;
             Some(token)
         }

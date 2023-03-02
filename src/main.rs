@@ -1,8 +1,8 @@
 use amethyst::lexer::Lexer;
+use amethyst::parse;
 
 fn main() {
-    let mut lexer = Lexer::new("13 + 2 * 3 / 4 - 56");
-    while let Some(token) = lexer.lex() {
-        println!("{:?}", token);
-    }
+    let mut lexer = Lexer::new("2 * (3 + 4)");
+    let ast = parse::parse(&mut lexer).expect("should work");
+    println!("{:?}", ast);
 }
