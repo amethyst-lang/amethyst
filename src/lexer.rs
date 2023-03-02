@@ -13,6 +13,10 @@ pub enum Token<'a> {
     Let,
     In,
     Mut,
+    If,
+    Then,
+    Else,
+    End,
     Symbol(&'a str),
 }
 
@@ -132,10 +136,14 @@ impl<'a> Lexer<'a> {
                     _ => unreachable!(),
                 },
                 State::Symbol => match s {
-                    "true" | "false" => Token::Bool(s.parse().unwrap()),
+                    "true" | "false" => Token::Bool(s == "true"),
                     "let" => Token::Let,
                     "in" => Token::In,
                     "mut" => Token::Mut,
+                    "if" => Token::If,
+                    "then" => Token::Then,
+                    "else" => Token::Else,
+                    "end" => Token::End,
                     _ => Token::Symbol(s),
                 },
             };

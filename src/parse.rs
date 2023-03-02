@@ -25,7 +25,13 @@ pub enum Ast {
         symbol: String,
         value: Box<Ast>,
         context: Box<Ast>,
-    }
+    },
+
+    If {
+        cond: Box<Ast>,
+        then: Box<Ast>,
+        elsy: Box<Ast>,
+    },
 }
 
 #[derive(Debug)]
@@ -150,8 +156,38 @@ fn parse_let(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     }
 }
 
+fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    if let Some(Token::If) = lexer.peek() {
+        lexer.lex();
+        let cond = parse_addsub(lexer)?;
+        if try_token!(lexer, Some(Token::Then)).is_none() {
+            return Err(ParseError::InvalidLet);
+        }
+
+        let then = parse_top(lexer)?;
+        if try_token!(lexer, Some(Token::Else)).is_none() {
+            return Err(ParseError::InvalidLet);
+        }
+
+        let elsy = parse_top(lexer)?;
+
+        Ok(Ast::If {
+            cond: Box::new(cond),
+            then: Box::new(then),
+            elsy: Box::new(elsy),
+        })
+    } else {
+        Err(ParseError::NotStarted)
+    }
+}
+
 fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     match parse_let(lexer) {
+        v @ Ok(_) => return v,
+        Err(ParseError::NotStarted) => (),
+        e => return e,
+    }
+    match parse_if(lexer) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e => return e,
