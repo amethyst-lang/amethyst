@@ -13,12 +13,15 @@ pub enum Ast {
     Integer(u128),
     Bool(bool),
     Symbol(String),
+
     Binary {
         op: BinaryOp,
         left: Box<Ast>,
         right: Box<Ast>,
     },
+
     Let {
+        mutable: bool,
         symbol: String,
         value: Box<Ast>,
         context: Box<Ast>,
@@ -116,6 +119,11 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_let(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     if let Some(Token::Let) = lexer.peek() {
         lexer.lex();
+        let mutable = matches!(lexer.peek(), Some(Token::Mut));
+        if mutable {
+            lexer.lex();
+        }
+
         let symbol = match try_token!(lexer, Some(Token::Symbol(_))) {
             Some(Token::Symbol(v)) => v.to_string(),
             _ => return Err(ParseError::InvalidLet),
@@ -132,6 +140,7 @@ fn parse_let(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 
         let context = parse_top(lexer)?;
         Ok(Ast::Let {
+            mutable,
             symbol,
             value: Box::new(value),
             context: Box::new(context),

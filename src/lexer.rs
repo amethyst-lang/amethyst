@@ -12,6 +12,7 @@ pub enum Token<'a> {
     RParen,
     Let,
     In,
+    Mut,
     Symbol(&'a str),
 }
 
@@ -134,6 +135,7 @@ impl<'a> Lexer<'a> {
                     "true" | "false" => Token::Bool(s.parse().unwrap()),
                     "let" => Token::Let,
                     "in" => Token::In,
+                    "mut" => Token::Mut,
                     _ => Token::Symbol(s),
                 },
             };
