@@ -20,6 +20,11 @@ pub enum Ast {
         right: Box<Ast>,
     },
 
+    FuncCall {
+        func: Box<Ast>,
+        args: Vec<Ast>,
+    },
+
     Let {
         mutable: bool,
         symbol: String,
@@ -72,7 +77,7 @@ fn parse_value(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         Some(Token::Bool(b)) => Ok(Ast::Bool(b)),
         Some(Token::Symbol(s)) => Ok(Ast::Symbol(s.to_string())),
         Some(Token::LParen) => {
-            let value = parse_addsub(lexer)?;
+            let value = parse_top(lexer)?;
             if let Some(Token::RParen) = lexer.lex() {
                 Ok(value)
             } else {
@@ -84,11 +89,31 @@ fn parse_value(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     }
 }
 
+fn parse_func_call(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    let func = parse_value(lexer)?;
+    let mut args = Vec::new();
+    let mut state = lexer.push();
+    while let Ok(arg) = parse_value(lexer) {
+        args.push(arg);
+        state = lexer.push();
+    }
+    lexer.pop(state);
+
+    if args.is_empty() {
+        Ok(func)
+    } else {
+        Ok(Ast::FuncCall {
+            func: Box::new(func),
+            args,
+        })
+    }
+}
+
 fn parse_muldiv(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
-    let mut top = parse_value(lexer)?;
+    let mut top = parse_func_call(lexer)?;
     while let Some(token) = try_token!(lexer, Some(Token::Astrisk | Token::Slash)) {
-        let right = try_clean!(parse_value(lexer), lexer, state, ParseError::InvalidInfix);
+        let right = try_clean!(parse_func_call(lexer), lexer, state, ParseError::InvalidInfix);
         top = Ast::Binary {
             op: match token {
                 Token::Astrisk => BinaryOp::Mul,

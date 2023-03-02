@@ -8,6 +8,7 @@ pub enum Token<'a> {
     Astrisk,
     Slash,
     Equals,
+    Pipe,
     LParen,
     RParen,
     Let,
@@ -16,6 +17,9 @@ pub enum Token<'a> {
     If,
     Then,
     Else,
+    Match,
+    With,
+    To,
     End,
     Symbol(&'a str),
 }
@@ -84,7 +88,7 @@ impl<'a> Lexer<'a> {
                     State::Initial => {
                         match c {
                             '0'..='9' => state = State::Number,
-                            '+' | '-' | '*' | '/' | '(' | ')' | '=' => state = State::SingleChar,
+                            '+' | '-' | '*' | '/' | '(' | ')' | '=' | '|' => state = State::SingleChar,
                             ' ' | '\t' | '\n' | '\r' => self.pos += c.len_utf8(),
                             'a'..='z' | 'A'..='Z' | '_' => state = State::Symbol,
                             _ => state = State::Invalid,
@@ -133,6 +137,7 @@ impl<'a> Lexer<'a> {
                     "(" => Token::LParen,
                     ")" => Token::RParen,
                     "=" => Token::Equals,
+                    "|" => Token::Pipe,
                     _ => unreachable!(),
                 },
                 State::Symbol => match s {
@@ -143,6 +148,9 @@ impl<'a> Lexer<'a> {
                     "if" => Token::If,
                     "then" => Token::Then,
                     "else" => Token::Else,
+                    "match" => Token::Match,
+                    "with" => Token::With,
+                    "to" => Token::To,
                     "end" => Token::End,
                     _ => Token::Symbol(s),
                 },

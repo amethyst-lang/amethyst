@@ -1,3 +1,4 @@
+/*
 struct Pair[A, B] {
     a: A,
     b: B,
@@ -82,3 +83,19 @@ fn fib(n: i32) -> i32 {
         fib(n - 1) + fib(n - 2)
     }
 }
+*/
+
+let fib (n: i32) -> i32 =
+    if n < 2 then
+        n
+    else
+        fib (n - 1) + fib (n - 2)
+
+forall (t: type)
+let get (v: Vec t) (i: usize) -> t
+    where i < length v
+=
+    (* blablabla *)
+
+forall (n: i32)
+let addn (m: i32) -> i32 = n + m
