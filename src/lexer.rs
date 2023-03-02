@@ -2,13 +2,17 @@
 pub enum Token<'a> {
     Invalid(&'a str),
     Integer(u128),
-    // Bool(bool),
+    Bool(bool),
     Plus,
     Minus,
     Astrisk,
     Slash,
+    Equals,
     LParen,
     RParen,
+    Let,
+    In,
+    Symbol(&'a str),
 }
 
 pub struct Lexer<'a> {
@@ -66,6 +70,7 @@ impl<'a> Lexer<'a> {
                 Invalid,
                 Number,
                 SingleChar,
+                Symbol,
             }
 
             let mut state = State::Initial;
@@ -74,8 +79,9 @@ impl<'a> Lexer<'a> {
                     State::Initial => {
                         match c {
                             '0'..='9' => state = State::Number,
-                            '+' | '-' | '*' | '/' | '(' | ')' => state = State::SingleChar,
+                            '+' | '-' | '*' | '/' | '(' | ')' | '=' => state = State::SingleChar,
                             ' ' | '\t' | '\n' | '\r' => self.pos += c.len_utf8(),
+                            'a'..='z' | 'A'..='Z' | '_' => state = State::Symbol,
                             _ => state = State::Invalid,
                         }
                     }
@@ -90,6 +96,13 @@ impl<'a> Lexer<'a> {
                     }
 
                     State::SingleChar => break,
+
+                    State::Symbol => {
+                        match c {
+                            'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => (),
+                            _ => break,
+                        }
+                    }
                 }
 
                 final_pos += c.len_utf8();
@@ -114,7 +127,14 @@ impl<'a> Lexer<'a> {
                     "/" => Token::Slash,
                     "(" => Token::LParen,
                     ")" => Token::RParen,
+                    "=" => Token::Equals,
                     _ => unreachable!(),
+                },
+                State::Symbol => match s {
+                    "true" | "false" => Token::Bool(s.parse().unwrap()),
+                    "let" => Token::Let,
+                    "in" => Token::In,
+                    _ => Token::Symbol(s),
                 },
             };
 

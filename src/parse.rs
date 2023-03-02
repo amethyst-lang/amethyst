@@ -11,19 +11,27 @@ pub enum BinaryOp {
 #[derive(Debug)]
 pub enum Ast {
     Integer(u128),
-    //Bool(bool),
+    Bool(bool),
+    Symbol(String),
     Binary {
         op: BinaryOp,
         left: Box<Ast>,
         right: Box<Ast>,
     },
+    Let {
+        symbol: String,
+        value: Box<Ast>,
+        context: Box<Ast>,
+    }
 }
 
 #[derive(Debug)]
 pub enum ParseError {
+    NotStarted,
     InvalidValue,
     UnclosedBracket,
     InvalidInfix,
+    InvalidLet,
 }
 
 macro_rules! try_token {
@@ -52,6 +60,8 @@ macro_rules! try_clean {
 fn parse_value(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     match lexer.lex() {
         Some(Token::Integer(n)) => Ok(Ast::Integer(n)),
+        Some(Token::Bool(b)) => Ok(Ast::Bool(b)),
+        Some(Token::Symbol(s)) => Ok(Ast::Symbol(s.to_string())),
         Some(Token::LParen) => {
             let value = parse_addsub(lexer)?;
             if let Some(Token::RParen) = lexer.lex() {
@@ -103,6 +113,43 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     Ok(top)
 }
 
-pub fn parse(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+fn parse_let(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    if let Some(Token::Let) = lexer.peek() {
+        lexer.lex();
+        let symbol = match try_token!(lexer, Some(Token::Symbol(_))) {
+            Some(Token::Symbol(v)) => v.to_string(),
+            _ => return Err(ParseError::InvalidLet),
+        };
+
+        if try_token!(lexer, Some(Token::Equals)).is_none() {
+            return Err(ParseError::InvalidLet);
+        }
+
+        let value = parse_addsub(lexer)?;
+        if try_token!(lexer, Some(Token::In)).is_none() {
+            return Err(ParseError::InvalidLet);
+        }
+
+        let context = parse_top(lexer)?;
+        Ok(Ast::Let {
+            symbol,
+            value: Box::new(value),
+            context: Box::new(context),
+        })
+    } else {
+        Err(ParseError::NotStarted)
+    }
+}
+
+fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    match parse_let(lexer) {
+        v @ Ok(_) => return v,
+        Err(ParseError::NotStarted) => (),
+        e => return e,
+    }
     parse_addsub(lexer)
+}
+
+pub fn parse(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    parse_top(lexer)
 }
