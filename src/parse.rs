@@ -4,7 +4,6 @@ use crate::lexer::{Lexer, Token};
 
 #[derive(Debug)]
 pub enum BaseType {
-    Unknown,
     Bool,
     I8,
     I16,
@@ -22,7 +21,6 @@ pub enum BaseType {
 impl Display for BaseType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BaseType::Unknown => write!(f, "<unknown>"),
             BaseType::Bool => write!(f, "bool"),
             BaseType::I8 => write!(f, "i8"),
             BaseType::I16 => write!(f, "i16"),
@@ -50,6 +48,7 @@ impl Display for BaseType {
 
 #[derive(Debug)]
 pub enum Type {
+    Unknown,
     Base(BaseType),
     Func(Box<Type>, Box<Type>),
     Refined(BaseType, Box<Ast>),
@@ -60,6 +59,7 @@ pub enum Type {
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Unknown => write!(f, "<unknown>"),
             Type::Base(b) => write!(f, "{}", b),
             Type::Func(a, r) => write!(f, "({} -> {})", a, r),
             Type::Refined(t, v) => write!(f, "{{ {} : {} }}", t, v),
@@ -108,12 +108,18 @@ pub enum Ast {
     Let {
         mutable: bool,
         symbol: String,
+        args: Vec<(String, Type)>,
+        ret_type: Type,
         value: Box<Ast>,
         context: Box<Ast>,
     },
 
     TopLet {
         symbol: String,
+        generics: Vec<String>,
+        dep_values: Vec<(String, Type)>,
+        args: Vec<(String, Type)>,
+        ret_type: Type,
         value: Box<Ast>,
     },
 
@@ -140,9 +146,50 @@ impl Display for Ast {
                 Ok(())
             }
 
-            Ast::Let { mutable, symbol, value, context } => write!(f, "let{} {} = {} in {}", if *mutable { " mut" } else { "" }, symbol, value, context),
+            Ast::Let { mutable, symbol, args, ret_type, value, context } => {
+                write!(f, "let ")?;
+                if *mutable {
+                    write!(f, "mut ")?;
+                }
+                write!(f, "{}", symbol)?;
+                for (arg, type_) in args {
+                    write!(f, " ({}: {})", arg, type_)?;
+                }
 
-            Ast::TopLet { symbol, value } => write!(f, "let {} = {}", symbol, value),
+                if args.is_empty() {
+                    write!(f, ": {}", ret_type)?;
+                } else {
+                    write!(f, " -> {}", ret_type)?;
+                }
+
+                write!(f, " = {} in {}", value, context)
+            }
+
+            Ast::TopLet { symbol, generics, dep_values, args, ret_type, value } => {
+                if !generics.is_empty() || !dep_values.is_empty() {
+                    write!(f, "forall")?;
+                    for generic in generics {
+                        write!(f, " ({}: type)", generic)?;
+                    }
+                    for (value, type_) in dep_values {
+                        write!(f, " ({}: {})", value, type_)?;
+                    }
+                    writeln!(f)?;
+                }
+
+                write!(f, "let {}", symbol)?;
+                for (arg, type_) in args {
+                    write!(f, " ({}: {})", arg, type_)?;
+                }
+
+                if args.is_empty() {
+                    write!(f, ": {}", ret_type)?;
+                } else {
+                    write!(f, " -> {}", ret_type)?;
+                }
+
+                write!(f, " = {}", value)
+            }
 
             Ast::If { cond, then, elsy } => write!(f, "(if {} then {} else {})", cond, then, elsy),
         }
@@ -270,6 +317,13 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool) -> Result<Ast, ParseError> 
             _ => return Err(ParseError::InvalidLet),
         };
 
+        let mut args = Vec::new();
+
+        // TODO: args annotated with types
+        while let Some(Token::Symbol(s)) = try_token!(lexer, Some(Token::Symbol(_))) {
+            args.push((s.to_string(), Type::Unknown));
+        }
+
         if try_token!(lexer, Some(Token::Equals)).is_none() {
             return Err(ParseError::InvalidLet);
         }
@@ -279,6 +333,10 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool) -> Result<Ast, ParseError> 
             if top_level && !mutable {
                 return Ok(Ast::TopLet {
                     symbol,
+                    generics: Vec::new(), // TODO
+                    dep_values: Vec::new(), // TODO
+                    args,
+                    ret_type: Type::Unknown, // TODO
                     value: Box::new(value),
                 });
             } else {
@@ -290,6 +348,8 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool) -> Result<Ast, ParseError> 
         Ok(Ast::Let {
             mutable,
             symbol,
+            args,
+            ret_type: Type::Unknown, // TODO
             value: Box::new(value),
             context: Box::new(context),
         })
