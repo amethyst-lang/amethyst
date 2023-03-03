@@ -9,8 +9,14 @@ pub enum Token<'a> {
     Slash,
     Equals,
     Pipe,
+    Colon,
+    Arrow,
     LParen,
     RParen,
+    LBrack,
+    RBrack,
+    LBrace,
+    RBrace,
     Let,
     In,
     Mut,
@@ -80,6 +86,7 @@ impl<'a> Lexer<'a> {
                 Number,
                 SingleChar,
                 Symbol,
+                Minus,
             }
 
             let mut state = State::Initial;
@@ -88,7 +95,8 @@ impl<'a> Lexer<'a> {
                     State::Initial => {
                         match c {
                             '0'..='9' => state = State::Number,
-                            '+' | '-' | '*' | '/' | '(' | ')' | '=' | '|' => state = State::SingleChar,
+                            '+' | '*' | '/' | '(' | ')' | '[' | ']' | '{' | '}' | '=' | '|' | ':' => state = State::SingleChar,
+                            '-' => state = State::Minus,
                             ' ' | '\t' | '\n' | '\r' => self.pos += c.len_utf8(),
                             'a'..='z' | 'A'..='Z' | '_' => state = State::Symbol,
                             _ => state = State::Invalid,
@@ -109,6 +117,13 @@ impl<'a> Lexer<'a> {
                     State::Symbol => {
                         match c {
                             'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => (),
+                            _ => break,
+                        }
+                    }
+
+                    State::Minus => {
+                        match c {
+                            '>' => state = State::SingleChar,
                             _ => break,
                         }
                     }
@@ -136,8 +151,14 @@ impl<'a> Lexer<'a> {
                     "/" => Token::Slash,
                     "(" => Token::LParen,
                     ")" => Token::RParen,
+                    "[" => Token::LBrack,
+                    "]" => Token::RBrack,
+                    "{" => Token::LBrace,
+                    "}" => Token::RBrace,
                     "=" => Token::Equals,
                     "|" => Token::Pipe,
+                    ":" => Token::Colon,
+                    "->" => Token::Arrow,
                     _ => unreachable!(),
                 },
                 State::Symbol => match s {
@@ -154,6 +175,7 @@ impl<'a> Lexer<'a> {
                     "end" => Token::End,
                     _ => Token::Symbol(s),
                 },
+                State::Minus => Token::Minus,
             };
 
             self.prev_tokens.push((token, final_pos));

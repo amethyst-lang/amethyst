@@ -203,6 +203,8 @@ pub enum ParseError {
     UnclosedBracket,
     InvalidInfix,
     InvalidLet,
+    InvalidType,
+    InvalidArg,
 }
 
 macro_rules! try_token {
@@ -226,6 +228,122 @@ macro_rules! try_clean {
             }
         }
     }
+}
+
+fn parse_base_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
+    let state = lexer.push();
+    match lexer.lex() {
+        Some(Token::Symbol("bool")) => Ok(Type::Base(BaseType::Bool)),
+        Some(Token::Symbol("i8")) => Ok(Type::Base(BaseType::I8)),
+        Some(Token::Symbol("i16")) => Ok(Type::Base(BaseType::I16)),
+        Some(Token::Symbol("i32")) => Ok(Type::Base(BaseType::I32)),
+        Some(Token::Symbol("i64")) => Ok(Type::Base(BaseType::I64)),
+        Some(Token::Symbol("u8")) => Ok(Type::Base(BaseType::U8)),
+        Some(Token::Symbol("u16")) => Ok(Type::Base(BaseType::U16)),
+        Some(Token::Symbol("u32")) => Ok(Type::Base(BaseType::U32)),
+        Some(Token::Symbol("u64")) => Ok(Type::Base(BaseType::U64)),
+        Some(Token::Symbol("f32")) => Ok(Type::Base(BaseType::F32)),
+        Some(Token::Symbol("f64")) => Ok(Type::Base(BaseType::F64)),
+        Some(Token::Symbol(s)) if generics.iter().any(|v| v.as_str() == s) => Ok(Type::Generic(s.to_string())),
+
+        Some(Token::LParen) => {
+            let type_ = parse_type(lexer, generics)?;
+            if let Some(Token::RParen) = lexer.lex() {
+                Ok(type_)
+            } else {
+                Err(ParseError::UnclosedBracket)
+            }
+        }
+
+        Some(Token::LBrace) => {
+            lexer.pop(state);
+            parse_refinement_type(lexer, generics)
+        }
+
+        _ => {
+            lexer.pop(state);
+            Err(ParseError::NotStarted)
+        }
+    }
+}
+
+fn parse_child_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
+    match parse_base_type(lexer, generics) {
+        v @ Ok(_) => return v,
+        Err(ParseError::NotStarted) => (),
+        e @ Err(_) => return e,
+    }
+
+    if let Some(Token::Symbol(s)) = try_token!(lexer, Some(Token::Symbol(_))) {
+        Ok(Type::Base(BaseType::Named(s.to_string(), Vec::new(), Vec::new())))
+    } else {
+        Err(ParseError::InvalidType)
+    }
+}
+
+fn parse_parametarised_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
+    match parse_base_type(lexer, generics) {
+        v @ Ok(_) => return v,
+        Err(ParseError::NotStarted) => (),
+        e @ Err(_) => return e,
+    }
+
+    match lexer.lex() {
+        Some(Token::Symbol(s)) => {
+            let mut parameters = Vec::new();
+            let mut state = lexer.push();
+            while let Ok(param) = parse_child_type(lexer, generics) {
+                parameters.push(param);
+                state = lexer.push();
+            }
+            lexer.pop(state);
+
+            Ok(Type::Base(BaseType::Named(s.to_string(), parameters, Vec::new())))
+        }
+
+        _ => Err(ParseError::InvalidType)
+    }
+}
+
+fn parse_refinement_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
+    if try_token!(lexer, Some(Token::LBrace)).is_some() {
+        let base = match parse_parametarised_type(lexer, generics)? {
+            Type::Base(v) => v,
+            _ => return Err(ParseError::InvalidType),
+        };
+
+        if try_token!(lexer, Some(Token::Colon)).is_none() {
+            return Err(ParseError::UnclosedBracket);
+        }
+
+        let constraint = parse_expr(lexer)?;
+
+        if try_token!(lexer, Some(Token::RBrace)).is_none() {
+            return Err(ParseError::UnclosedBracket);
+        }
+
+        Ok(Type::Refined(base, Box::new(constraint)))
+    } else {
+        Err(ParseError::NotStarted)
+    }
+}
+
+fn parse_func_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
+    let mut top = parse_parametarised_type(lexer, generics)?;
+    let mut nodes = Vec::new();
+    while try_token!(lexer, Some(Token::Arrow)).is_some() {
+        nodes.push(top);
+        top = parse_parametarised_type(lexer, generics)?;
+    }
+    for node in nodes.into_iter().rev() {
+        top = Type::Func(Box::new(node), Box::new(top));
+    }
+
+    Ok(top)
+}
+
+fn parse_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
+    parse_func_type(lexer, generics)
 }
 
 fn parse_value(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
@@ -304,6 +422,29 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     Ok(top)
 }
 
+fn parse_argument(lexer: &mut Lexer<'_>) -> Result<(String, Type), ParseError> {
+    if let Some(Token::Symbol(s)) = try_token!(lexer, Some(Token::Symbol(_))) {
+        Ok((s.to_string(), Type::Unknown))
+    } else if try_token!(lexer, Some(Token::LParen)).is_some() {
+        if let Some(Token::Symbol(arg)) = try_token!(lexer, Some(Token::Symbol(_))) {
+            if try_token!(lexer, Some(Token::Colon)).is_none() {
+                return Err(ParseError::InvalidArg);
+            }
+
+            let type_ = parse_type(lexer, &[])?;
+            if try_token!(lexer, Some(Token::RParen)).is_none() {
+                return Err(ParseError::InvalidArg);
+            }
+
+            Ok((arg.to_string(), type_))
+        } else {
+            Err(ParseError::InvalidArg)
+        }
+    } else {
+        Err(ParseError::NotStarted)
+    }
+}
+
 fn parse_let(lexer: &mut Lexer<'_>, top_level: bool) -> Result<Ast, ParseError> {
     if let Some(Token::Let) = lexer.peek() {
         lexer.lex();
@@ -320,9 +461,19 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool) -> Result<Ast, ParseError> 
         let mut args = Vec::new();
 
         // TODO: args annotated with types
-        while let Some(Token::Symbol(s)) = try_token!(lexer, Some(Token::Symbol(_))) {
-            args.push((s.to_string(), Type::Unknown));
+        loop {
+            match parse_argument(lexer) {
+                Ok(v) => args.push(v),
+                Err(ParseError::NotStarted) => break,
+                Err(e) => return Err(e),
+            }
         }
+
+        let ret_type = if if args.is_empty() { try_token!(lexer, Some(Token::Colon)) } else { try_token!(lexer, Some(Token::Arrow)) }.is_some() {
+            parse_type(lexer, &[])?
+        } else {
+            Type::Unknown
+        };
 
         if try_token!(lexer, Some(Token::Equals)).is_none() {
             return Err(ParseError::InvalidLet);
@@ -336,7 +487,7 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool) -> Result<Ast, ParseError> 
                     generics: Vec::new(), // TODO
                     dep_values: Vec::new(), // TODO
                     args,
-                    ret_type: Type::Unknown, // TODO
+                    ret_type,
                     value: Box::new(value),
                 });
             } else {
@@ -349,7 +500,7 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool) -> Result<Ast, ParseError> 
             mutable,
             symbol,
             args,
-            ret_type: Type::Unknown, // TODO
+            ret_type,
             value: Box::new(value),
             context: Box::new(context),
         })
