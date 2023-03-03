@@ -422,16 +422,20 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     Ok(top)
 }
 
-fn parse_argument(lexer: &mut Lexer<'_>) -> Result<(String, Type), ParseError> {
+fn parse_argument(lexer: &mut Lexer<'_>, allow_type: bool, generics: &[String]) -> Result<(String, Option<Type>), ParseError> {
     if let Some(Token::Symbol(s)) = try_token!(lexer, Some(Token::Symbol(_))) {
-        Ok((s.to_string(), Type::Unknown))
+        Ok((s.to_string(), None))
     } else if try_token!(lexer, Some(Token::LParen)).is_some() {
         if let Some(Token::Symbol(arg)) = try_token!(lexer, Some(Token::Symbol(_))) {
             if try_token!(lexer, Some(Token::Colon)).is_none() {
                 return Err(ParseError::InvalidArg);
             }
 
-            let type_ = parse_type(lexer, &[])?;
+            let type_ = if allow_type && try_token!(lexer, Some(Token::Type)).is_some() {
+                None
+            } else {
+                Some(parse_type(lexer, generics)?)
+            };
             if try_token!(lexer, Some(Token::RParen)).is_none() {
                 return Err(ParseError::InvalidArg);
             }
@@ -440,70 +444,6 @@ fn parse_argument(lexer: &mut Lexer<'_>) -> Result<(String, Type), ParseError> {
         } else {
             Err(ParseError::InvalidArg)
         }
-    } else {
-        Err(ParseError::NotStarted)
-    }
-}
-
-fn parse_let(lexer: &mut Lexer<'_>, top_level: bool) -> Result<Ast, ParseError> {
-    if let Some(Token::Let) = lexer.peek() {
-        lexer.lex();
-        let mutable = matches!(lexer.peek(), Some(Token::Mut));
-        if mutable {
-            lexer.lex();
-        }
-
-        let symbol = match try_token!(lexer, Some(Token::Symbol(_))) {
-            Some(Token::Symbol(v)) => v.to_string(),
-            _ => return Err(ParseError::InvalidLet),
-        };
-
-        let mut args = Vec::new();
-
-        // TODO: args annotated with types
-        loop {
-            match parse_argument(lexer) {
-                Ok(v) => args.push(v),
-                Err(ParseError::NotStarted) => break,
-                Err(e) => return Err(e),
-            }
-        }
-
-        let ret_type = if if args.is_empty() { try_token!(lexer, Some(Token::Colon)) } else { try_token!(lexer, Some(Token::Arrow)) }.is_some() {
-            parse_type(lexer, &[])?
-        } else {
-            Type::Unknown
-        };
-
-        if try_token!(lexer, Some(Token::Equals)).is_none() {
-            return Err(ParseError::InvalidLet);
-        }
-
-        let value = parse_addsub(lexer)?;
-        if try_token!(lexer, Some(Token::In)).is_none() {
-            if top_level && !mutable {
-                return Ok(Ast::TopLet {
-                    symbol,
-                    generics: Vec::new(), // TODO
-                    dep_values: Vec::new(), // TODO
-                    args,
-                    ret_type,
-                    value: Box::new(value),
-                });
-            } else {
-                return Err(ParseError::InvalidLet);
-            }
-        }
-
-        let context = parse_expr(lexer)?;
-        Ok(Ast::Let {
-            mutable,
-            symbol,
-            args,
-            ret_type,
-            value: Box::new(value),
-            context: Box::new(context),
-        })
     } else {
         Err(ParseError::NotStarted)
     }
@@ -534,8 +474,94 @@ fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     }
 }
 
+fn parse_let(lexer: &mut Lexer<'_>, top_level: bool, generics: &[String]) -> Result<Ast, ParseError> {
+    if let Some(Token::Let) = lexer.peek() {
+        lexer.lex();
+        let mutable = matches!(lexer.peek(), Some(Token::Mut));
+        if mutable {
+            lexer.lex();
+        }
+
+        let symbol = match try_token!(lexer, Some(Token::Symbol(_))) {
+            Some(Token::Symbol(v)) => v.to_string(),
+            _ => return Err(ParseError::InvalidLet),
+        };
+
+        let mut args = Vec::new();
+
+        // TODO: args annotated with types
+        loop {
+            match parse_argument(lexer, false, generics) {
+                Ok((arg, Some(t))) => args.push((arg, t)),
+                Ok((arg, None)) => args.push((arg, Type::Unknown)),
+                Err(ParseError::NotStarted) => break,
+                Err(e) => return Err(e),
+            }
+        }
+
+        let ret_type = if if args.is_empty() { try_token!(lexer, Some(Token::Colon)) } else { try_token!(lexer, Some(Token::Arrow)) }.is_some() {
+            parse_type(lexer, generics)?
+        } else {
+            Type::Unknown
+        };
+
+        if try_token!(lexer, Some(Token::Equals)).is_none() {
+            return Err(ParseError::InvalidLet);
+        }
+
+        let value = parse_addsub(lexer)?;
+        if try_token!(lexer, Some(Token::In)).is_none() {
+            if top_level && !mutable {
+                return Ok(Ast::TopLet {
+                    symbol,
+                    generics: generics.to_vec(),
+                    dep_values: Vec::new(), // TODO
+                    args,
+                    ret_type,
+                    value: Box::new(value),
+                });
+            } else {
+                return Err(ParseError::InvalidLet);
+            }
+        } else if top_level {
+            return Err(ParseError::InvalidLet);
+        }
+
+        let context = parse_expr(lexer)?;
+        Ok(Ast::Let {
+            mutable,
+            symbol,
+            args,
+            ret_type,
+            value: Box::new(value),
+            context: Box::new(context),
+        })
+    } else {
+        Err(ParseError::NotStarted)
+    }
+}
+
+// TODO: dependent values
+fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    if try_token!(lexer, Some(Token::Forall)).is_some() {
+        let mut generics = Vec::new();
+        loop {
+            match parse_argument(lexer, true, &[]) {
+                Ok((generic, None)) => generics.push(generic.to_string()),
+                Ok(_) => todo!(),
+                Err(ParseError::NotStarted) => break,
+                Err(e) => return Err(e),
+            }
+        }
+
+        parse_let(lexer, true, &generics)
+    } else {
+        Err(ParseError::NotStarted)
+    }
+}
+
 fn parse_expr(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    match parse_let(lexer, false) {
+    match parse_let(lexer, false, &[]) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e => return e,
@@ -549,7 +575,12 @@ fn parse_expr(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 }
 
 fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    parse_let(lexer, true)
+    match parse_forall(lexer) {
+        v @ Ok(_) => return v,
+        Err(ParseError::NotStarted) => (),
+        e @ Err(_) => return e,
+    }
+    parse_let(lexer, true, &[])
 }
 
 pub fn parse(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {

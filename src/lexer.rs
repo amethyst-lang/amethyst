@@ -27,6 +27,8 @@ pub enum Token<'a> {
     With,
     To,
     End,
+    Forall,
+    Type,
     Symbol(&'a str),
 }
 
@@ -173,6 +175,8 @@ impl<'a> Lexer<'a> {
                     "with" => Token::With,
                     "to" => Token::To,
                     "end" => Token::End,
+                    "forall" => Token::Forall,
+                    "type" => Token::Type,
                     _ => Token::Symbol(s),
                 },
                 State::Minus => Token::Minus,
