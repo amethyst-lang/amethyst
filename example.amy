@@ -99,3 +99,13 @@ let get (v: Vec t) (i: usize) -> t
 
 forall (n: i32)
 let addn (m: i32) -> i32 = n + m
+
+forall (a: type) (b: type)
+record Pair
+    = a a
+    * b b
+
+datatype Expr
+    = Int i32
+    | Add (Box Expr) (Box Expr)
+    | Sub (Box Expr) (Box Expr)

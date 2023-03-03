@@ -7,6 +7,7 @@ pub enum Token<'a> {
     Minus,
     Astrisk,
     Slash,
+    Percent,
     Equals,
     Pipe,
     Colon,
@@ -17,6 +18,14 @@ pub enum Token<'a> {
     RBrack,
     LBrace,
     RBrace,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+    LogicalAnd,
+    LogicalOr,
     Let,
     In,
     Mut,
@@ -89,6 +98,9 @@ impl<'a> Lexer<'a> {
                 SingleChar,
                 Symbol,
                 Minus,
+                AppendEq,
+                Not,
+                Double,
             }
 
             let mut state = State::Initial;
@@ -97,7 +109,10 @@ impl<'a> Lexer<'a> {
                     State::Initial => {
                         match c {
                             '0'..='9' => state = State::Number,
-                            '+' | '*' | '/' | '(' | ')' | '[' | ']' | '{' | '}' | '=' | '|' | ':' => state = State::SingleChar,
+                            '+' | '*' | '/' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' => state = State::SingleChar,
+                            '|' | '&' => state = State::Double,
+                            '<' | '>' | '=' => state = State::AppendEq,
+                            '!' => state = State::Not,
                             '-' => state = State::Minus,
                             ' ' | '\t' | '\n' | '\r' => self.pos += c.len_utf8(),
                             'a'..='z' | 'A'..='Z' | '_' => state = State::Symbol,
@@ -129,6 +144,27 @@ impl<'a> Lexer<'a> {
                             _ => break,
                         }
                     }
+
+                    State::AppendEq => {
+                        state = State::SingleChar;
+                        if c != '=' {
+                            break;
+                        }
+                    }
+
+                    State::Not => {
+                        match c {
+                            '=' => state = State::SingleChar,
+                            _ => state = State::Invalid,
+                        }
+                    }
+
+                    State::Double => {
+                        state = State::SingleChar;
+                        if c != self.contents[self.pos..self.pos].chars().next().unwrap() {
+                            break;
+                        }
+                    }
                 }
 
                 final_pos += c.len_utf8();
@@ -143,7 +179,7 @@ impl<'a> Lexer<'a> {
 
             let s = &self.contents[initial_pos..final_pos];
             let token = match state {
-                State::Initial => unreachable!(),
+                State::Initial | State::AppendEq | State::Not | State::Double => unreachable!(),
                 State::Invalid => Token::Invalid(s),
                 State::Number => Token::Integer(s.parse().unwrap()),
                 State::SingleChar => match s {
@@ -151,17 +187,27 @@ impl<'a> Lexer<'a> {
                     "-" => Token::Minus,
                     "*" => Token::Astrisk,
                     "/" => Token::Slash,
+                    "%" => Token::Percent,
                     "(" => Token::LParen,
                     ")" => Token::RParen,
                     "[" => Token::LBrack,
                     "]" => Token::RBrack,
                     "{" => Token::LBrace,
                     "}" => Token::RBrace,
-                    "=" => Token::Equals,
                     "|" => Token::Pipe,
                     ":" => Token::Colon,
                     "->" => Token::Arrow,
-                    _ => unreachable!(),
+                    "=" => Token::Equals,
+                    "==" => Token::Eq,
+                    ">=" => Token::Ge,
+                    "<=" => Token::Le,
+                    ">" => Token::Gt,
+                    "<" => Token::Lt,
+                    "!=" => Token::Ne,
+                    "&" => Token::Invalid(s),
+                    "&&" => Token::LogicalAnd,
+                    "||" => Token::LogicalOr,
+                    _ => unreachable!("{:?}", s),
                 },
                 State::Symbol => match s {
                     "true" | "false" => Token::Bool(s == "true"),

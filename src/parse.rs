@@ -75,6 +75,15 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Mod,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+    LogicalAnd,
+    LogicalOr,
 }
 
 impl Display for BinaryOp {
@@ -84,6 +93,15 @@ impl Display for BinaryOp {
             BinaryOp::Sub => write!(f, "-"),
             BinaryOp::Mul => write!(f, "*"),
             BinaryOp::Div => write!(f, "/"),
+            BinaryOp::Mod => write!(f, "%"),
+            BinaryOp::Lt => write!(f, "<"),
+            BinaryOp::Le => write!(f, "<="),
+            BinaryOp::Gt => write!(f, ">"),
+            BinaryOp::Ge => write!(f, ">="),
+            BinaryOp::Eq => write!(f, "=="),
+            BinaryOp::Ne => write!(f, "!="),
+            BinaryOp::LogicalAnd => write!(f, "&&"),
+            BinaryOp::LogicalOr => write!(f, "||"),
         }
     }
 }
@@ -205,6 +223,7 @@ pub enum ParseError {
     InvalidLet,
     InvalidType,
     InvalidArg,
+    InvalidIf
 }
 
 macro_rules! try_token {
@@ -387,12 +406,13 @@ fn parse_func_call(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_muldiv(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_func_call(lexer)?;
-    while let Some(token) = try_token!(lexer, Some(Token::Astrisk | Token::Slash)) {
+    while let Some(token) = try_token!(lexer, Some(Token::Astrisk | Token::Slash | Token::Percent)) {
         let right = try_clean!(parse_func_call(lexer), lexer, state, ParseError::InvalidInfix);
         top = Ast::Binary {
             op: match token {
                 Token::Astrisk => BinaryOp::Mul,
                 Token::Slash => BinaryOp::Div,
+                Token::Percent => BinaryOp::Mod,
                 _ => unreachable!(),
             },
             left: Box::new(top),
@@ -414,6 +434,59 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
                 Token::Minus => BinaryOp::Sub,
                 _ => unreachable!(),
             },
+            left: Box::new(top),
+            right: Box::new(right),
+        };
+    }
+
+    Ok(top)
+}
+
+fn parse_compare(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    let state = lexer.push();
+    let mut top = parse_addsub(lexer)?;
+    while let Some(token) = try_token!(lexer, Some(Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Eq | Token::Ne)) {
+        let right = try_clean!(parse_addsub(lexer), lexer, state, ParseError::InvalidInfix);
+        top = Ast::Binary {
+            op: match token {
+                Token::Lt => BinaryOp::Lt,
+                Token::Le => BinaryOp::Le,
+                Token::Gt => BinaryOp::Gt,
+                Token::Ge => BinaryOp::Ge,
+                Token::Eq => BinaryOp::Eq,
+                Token::Ne => BinaryOp::Ne,
+                _ => unreachable!(),
+            },
+            left: Box::new(top),
+            right: Box::new(right),
+        };
+    }
+
+    Ok(top)
+}
+
+fn parse_and(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    let state = lexer.push();
+    let mut top = parse_compare(lexer)?;
+    while try_token!(lexer, Some(Token::LogicalAnd)).is_some() {
+        let right = try_clean!(parse_compare(lexer), lexer, state, ParseError::InvalidInfix);
+        top = Ast::Binary {
+            op: BinaryOp::LogicalAnd,
+            left: Box::new(top),
+            right: Box::new(right),
+        };
+    }
+
+    Ok(top)
+}
+
+fn parse_or(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    let state = lexer.push();
+    let mut top = parse_and(lexer)?;
+    while try_token!(lexer, Some(Token::LogicalOr)).is_some() {
+        let right = try_clean!(parse_and(lexer), lexer, state, ParseError::InvalidInfix);
+        top = Ast::Binary {
+            op: BinaryOp::LogicalAnd,
             left: Box::new(top),
             right: Box::new(right),
         };
@@ -450,16 +523,15 @@ fn parse_argument(lexer: &mut Lexer<'_>, allow_type: bool, generics: &[String]) 
 }
 
 fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    if let Some(Token::If) = lexer.peek() {
-        lexer.lex();
-        let cond = parse_addsub(lexer)?;
+    if try_token!(lexer, Some(Token::If)).is_some() {
+        let cond = parse_or(lexer)?;
         if try_token!(lexer, Some(Token::Then)).is_none() {
-            return Err(ParseError::InvalidLet);
+            return Err(ParseError::InvalidIf);
         }
 
         let then = parse_expr(lexer)?;
         if try_token!(lexer, Some(Token::Else)).is_none() {
-            return Err(ParseError::InvalidLet);
+            return Err(ParseError::InvalidIf);
         }
 
         let elsy = parse_expr(lexer)?;
@@ -509,7 +581,7 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool, generics: &[String]) -> Res
             return Err(ParseError::InvalidLet);
         }
 
-        let value = parse_addsub(lexer)?;
+        let value = parse_expr(lexer)?;
         if try_token!(lexer, Some(Token::In)).is_none() {
             if top_level && !mutable {
                 return Ok(Ast::TopLet {
@@ -571,7 +643,7 @@ fn parse_expr(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         Err(ParseError::NotStarted) => (),
         e => return e,
     }
-    parse_addsub(lexer)
+    parse_or(lexer)
 }
 
 fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
