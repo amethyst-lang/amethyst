@@ -1,4 +1,73 @@
+use std::fmt::Display;
+
 use crate::lexer::{Lexer, Token};
+
+#[derive(Debug)]
+pub enum BaseType {
+    Unknown,
+    Bool,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
+    F64,
+    Named(String, Vec<Type>, Vec<Ast>),
+}
+
+impl Display for BaseType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BaseType::Unknown => write!(f, "<unknown>"),
+            BaseType::Bool => write!(f, "bool"),
+            BaseType::I8 => write!(f, "i8"),
+            BaseType::I16 => write!(f, "i16"),
+            BaseType::I32 => write!(f, "i32"),
+            BaseType::I64 => write!(f, "i64"),
+            BaseType::U8 => write!(f, "u8"),
+            BaseType::U16 => write!(f, "u16"),
+            BaseType::U32 => write!(f, "u32"),
+            BaseType::U64 => write!(f, "u64"),
+            BaseType::F32 => write!(f, "f32"),
+            BaseType::F64 => write!(f, "f64"),
+            BaseType::Named(name, tparams, vparams) => {
+                write!(f, "{}", name)?;
+                for tparam in tparams {
+                    write!(f, " {}", tparam)?;
+                }
+                for vparam in vparams {
+                    write!(f, " {}", vparam)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Type {
+    Base(BaseType),
+    Func(Box<Type>, Box<Type>),
+    Refined(BaseType, Box<Ast>),
+    Generic(String),
+    TypeVar(usize),
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Base(b) => write!(f, "{}", b),
+            Type::Func(a, r) => write!(f, "({} -> {})", a, r),
+            Type::Refined(t, v) => write!(f, "{{ {} : {} }}", t, v),
+            Type::Generic(g) => write!(f, "{}", g),
+            Type::TypeVar(v) => write!(f, "${}", v),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum BinaryOp {
@@ -6,6 +75,17 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
+}
+
+impl Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BinaryOp::Add => write!(f, "+"),
+            BinaryOp::Sub => write!(f, "-"),
+            BinaryOp::Mul => write!(f, "*"),
+            BinaryOp::Div => write!(f, "/"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -32,11 +112,41 @@ pub enum Ast {
         context: Box<Ast>,
     },
 
+    TopLet {
+        symbol: String,
+        value: Box<Ast>,
+    },
+
     If {
         cond: Box<Ast>,
         then: Box<Ast>,
         elsy: Box<Ast>,
     },
+}
+
+impl Display for Ast {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Ast::Integer(n) => write!(f, "{}", n),
+            Ast::Bool(b) => write!(f, "{}", b),
+            Ast::Symbol(s) => write!(f, "{}", s),
+            Ast::Binary { op, left, right } => write!(f, "({} {} {})", left, op, right),
+
+            Ast::FuncCall { func, args } => {
+                write!(f, "{}", func)?;
+                for arg in args {
+                    write!(f, " {}", arg)?;
+                }
+                Ok(())
+            }
+
+            Ast::Let { mutable, symbol, value, context } => write!(f, "let{} {} = {} in {}", if *mutable { " mut" } else { "" }, symbol, value, context),
+
+            Ast::TopLet { symbol, value } => write!(f, "let {} = {}", symbol, value),
+
+            Ast::If { cond, then, elsy } => write!(f, "(if {} then {} else {})", cond, then, elsy),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -77,7 +187,7 @@ fn parse_value(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         Some(Token::Bool(b)) => Ok(Ast::Bool(b)),
         Some(Token::Symbol(s)) => Ok(Ast::Symbol(s.to_string())),
         Some(Token::LParen) => {
-            let value = parse_top(lexer)?;
+            let value = parse_expr(lexer)?;
             if let Some(Token::RParen) = lexer.lex() {
                 Ok(value)
             } else {
@@ -147,7 +257,7 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     Ok(top)
 }
 
-fn parse_let(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+fn parse_let(lexer: &mut Lexer<'_>, top_level: bool) -> Result<Ast, ParseError> {
     if let Some(Token::Let) = lexer.peek() {
         lexer.lex();
         let mutable = matches!(lexer.peek(), Some(Token::Mut));
@@ -166,10 +276,17 @@ fn parse_let(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 
         let value = parse_addsub(lexer)?;
         if try_token!(lexer, Some(Token::In)).is_none() {
-            return Err(ParseError::InvalidLet);
+            if top_level && !mutable {
+                return Ok(Ast::TopLet {
+                    symbol,
+                    value: Box::new(value),
+                });
+            } else {
+                return Err(ParseError::InvalidLet);
+            }
         }
 
-        let context = parse_top(lexer)?;
+        let context = parse_expr(lexer)?;
         Ok(Ast::Let {
             mutable,
             symbol,
@@ -189,12 +306,12 @@ fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             return Err(ParseError::InvalidLet);
         }
 
-        let then = parse_top(lexer)?;
+        let then = parse_expr(lexer)?;
         if try_token!(lexer, Some(Token::Else)).is_none() {
             return Err(ParseError::InvalidLet);
         }
 
-        let elsy = parse_top(lexer)?;
+        let elsy = parse_expr(lexer)?;
 
         Ok(Ast::If {
             cond: Box::new(cond),
@@ -206,8 +323,8 @@ fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     }
 }
 
-fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    match parse_let(lexer) {
+fn parse_expr(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    match parse_let(lexer, false) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e => return e,
@@ -218,6 +335,10 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         e => return e,
     }
     parse_addsub(lexer)
+}
+
+fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    parse_let(lexer, true)
 }
 
 pub fn parse(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
