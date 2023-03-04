@@ -230,7 +230,29 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             Ok(func)
         }
 
-        Ast::Let { .. } => todo!(),
+        Ast::Let { mutable: _, symbol, args, ret_type, value, context } => {
+            for (arg, type_) in args.iter() {
+                env.push_variable(arg, type_);
+            }
+            let mut r = typecheck_helper(env, value)?;
+
+            for _ in args.iter() {
+                env.pop_variable();
+            }
+
+            if !ret_type.equals_up_to_env(&mut r, env) {
+                return Err(());
+            }
+
+            for (_, arg_type) in args.iter().rev() {
+                r = Type::Func(Box::new(arg_type.clone()), Box::new(r));
+            }
+
+            env.push_variable(symbol, &r);
+            let t = typecheck_helper(env, context);
+            env.pop_variable();
+            t
+        }
 
         Ast::TopLet { args, ret_type, value, .. } => {
             for (arg, arg_type) in args.iter() {
