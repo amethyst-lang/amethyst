@@ -1,4 +1,4 @@
-use crate::parse::{Ast, Type, BaseType};
+use crate::parse::{Ast, Type, BaseType, BinaryOp};
 
 #[derive(Debug, Default)]
 struct Environment {
@@ -15,6 +15,10 @@ impl Environment {
 
     fn push_variable(&mut self, var: &str, type_: &Type) {
         self.variables.push((var.to_string(), type_.clone()));
+    }
+
+    fn pop_variable(&mut self) {
+        self.variables.pop();
     }
 
     fn find_variable(&mut self, var: &str) -> Option<&Type> {
@@ -166,17 +170,85 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
         Ast::Symbol(s) => env.find_variable(s).cloned().ok_or(()),
 
-        Ast::Binary { .. } => todo!(),
+        Ast::Binary { op, left, right } => {
+            let mut left = typecheck_helper(env, left)?;
+            let mut right = typecheck_helper(env, right)?;
 
-        Ast::FuncCall { .. } => todo!(),
+            match op {
+                BinaryOp::Add
+                | BinaryOp::Sub
+                | BinaryOp::Mul
+                | BinaryOp::Div
+                | BinaryOp::Mod => {
+                    if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env) && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env) {
+                        Ok(Type::Base(BaseType::I32))
+                    } else {
+                        Err(())
+                    }
+                }
+
+                BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge
+                | BinaryOp::Eq
+                | BinaryOp::Ne => {
+                    if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env) && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env) {
+                        Ok(Type::Base(BaseType::Bool))
+                    } else {
+                        Err(())
+                    }
+                }
+
+                BinaryOp::LogicalAnd
+                | BinaryOp::LogicalOr => {
+                    if left.equals_up_to_env(&mut Type::Base(BaseType::Bool), env) && right.equals_up_to_env(&mut Type::Base(BaseType::Bool), env) {
+                        Ok(Type::Base(BaseType::Bool))
+                    } else {
+                        Err(())
+                    }
+                }
+            }
+        }
+
+        Ast::FuncCall { func, args } => {
+            let mut func = typecheck_helper(env, func)?;
+            for arg in args {
+                let mut arg = typecheck_helper(env, arg)?;
+
+                if let Type::Func(mut a, r) = func {
+                    if a.equals_up_to_env(&mut arg, env) {
+                        func = *r;
+                    } else {
+                        return Err(());
+                    }
+                } else {
+                    return Err(());
+                }
+            }
+
+            Ok(func)
+        }
 
         Ast::Let { .. } => todo!(),
 
-        Ast::TopLet { symbol, args, ret_type, value, .. } => {
+        Ast::TopLet { args, ret_type, value, .. } => {
+            for (arg, arg_type) in args.iter() {
+                env.push_variable(arg, arg_type);
+            }
+
             let mut t = typecheck_helper(env, value)?;
+
+            for _ in args.iter() {
+                env.pop_variable();
+            }
+
             if !ret_type.equals_up_to_env(&mut t, env) {
                 Err(())
             } else {
+                for (_, arg) in args.iter().rev() {
+                    t = Type::Func(Box::new(arg.clone()), Box::new(t));
+                }
                 Ok(t) // TODO: actual type
             }
         }
