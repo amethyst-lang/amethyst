@@ -59,7 +59,7 @@ impl Type {
                 while let Type::TypeVar(x) = b {
                     let x = *x;
                     *b = env.substitutions[x].clone();
-                    if matches!(a, Type::TypeVar(y) if x == *y) {
+                    if matches!(b, Type::TypeVar(y) if x == *y) {
                         break;
                     }
                 }
@@ -242,7 +242,6 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             for _ in args.iter() {
                 env.pop_variable();
             }
-
             if !ret_type.equals_up_to_env(&mut t, env) {
                 Err(())
             } else {
