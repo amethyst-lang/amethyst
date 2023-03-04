@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::lexer::{Lexer, Token};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BaseType {
     Bool,
     I8,
@@ -46,7 +46,7 @@ impl Display for BaseType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Type {
     Unknown,
     Base(BaseType),
@@ -69,7 +69,7 @@ impl Display for Type {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -106,7 +106,7 @@ impl Display for BinaryOp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Ast {
     Integer(u128),
     Bool(bool),
@@ -655,6 +655,10 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     parse_let(lexer, true, &[])
 }
 
-pub fn parse(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    parse_top(lexer)
+pub fn parse(lexer: &mut Lexer<'_>) -> Result<Vec<Ast>, ParseError> {
+    let mut asts = Vec::new();
+    while lexer.peek().is_some() {
+        asts.push(parse_top(lexer)?);
+    }
+    Ok(asts)
 }
