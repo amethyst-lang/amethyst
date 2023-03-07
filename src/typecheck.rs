@@ -106,7 +106,11 @@ impl Type {
                     }
                 }
 
-                !matches!(self, Type::TypeVar(_))
+                if !matches!(self, Type::TypeVar(_)) {
+                    self.replace_type_vars(env)
+                } else {
+                    false
+                }
             }
         }
     }
@@ -216,11 +220,22 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             for arg in args {
                 let mut arg = typecheck_helper(env, arg)?;
 
-                if let Type::Func(mut a, r) = func {
-                    if a.equals_up_to_env(&mut arg, env) {
-                        func = *r;
+                if func.equals_up_to_env(&mut Type::Func(Box::new(env.new_type_var()), Box::new(env.new_type_var())), env) {
+                    while let Type::TypeVar(x) = func {
+                        let x = x;
+                        func = env.substitutions[x].clone();
+                        if matches!(func, Type::TypeVar(y) if x == y) {
+                            break;
+                        }
+                    }
+                    if let Type::Func(mut a, r) = func {
+                        if a.equals_up_to_env(&mut arg, env) {
+                            func = *r;
+                        } else {
+                            return Err(());
+                        }
                     } else {
-                        return Err(());
+                        unreachable!();
                     }
                 } else {
                     return Err(());
