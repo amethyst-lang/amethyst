@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::parse::{Ast, Type, BaseType, BinaryOp};
 
 #[derive(Debug, Default)]
@@ -112,6 +114,34 @@ impl Type {
                     false
                 }
             }
+        }
+    }
+
+    fn convert_type_vars_to_generics(&mut self, generics: &mut Vec<String>) {
+        match self {
+            Type::Base(BaseType::Named(_, params, _)) => {
+                for param in params {
+                    param.convert_type_vars_to_generics(generics)
+                }
+            }
+
+            Type::Func(a, r) => {
+                a.convert_type_vars_to_generics(generics);
+                r.convert_type_vars_to_generics(generics);
+            }
+
+            Type::Refined(_, _) => todo!(),
+
+            Type::TypeVar(t) => {
+                let g = format!("a{}", t);
+                if !generics.contains(&g) {
+                    generics.push(g.clone());
+                }
+
+                *self = Type::Generic(g);
+            }
+
+            _ => (),
         }
     }
 }
@@ -336,16 +366,13 @@ fn replace_type_vars(ast: &mut Ast, env: &Environment) -> Result<(), ()> {
             replace_type_vars(context, env)
         }
 
-        Ast::TopLet { args, ret_type, value, .. } => {
+        Ast::TopLet { args, ret_type, value, generics, .. } => {
             for (_, arg_type) in args.iter_mut() {
-                if !arg_type.replace_type_vars(env) {
-                    return Err(());
-                }
+                arg_type.replace_type_vars(env);
+                arg_type.convert_type_vars_to_generics(generics);
             }
-            if !ret_type.replace_type_vars(env) {
-                return Err(());
-            }
-
+            ret_type.replace_type_vars(env);
+            ret_type.convert_type_vars_to_generics(generics);
             replace_type_vars(value, env)
         }
 
@@ -378,9 +405,6 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
 
     for ast in asts.iter_mut() {
         typecheck_helper(&mut env, ast)?;
-    }
-
-    for ast in asts.iter_mut() {
         replace_type_vars(ast, &env)?;
     }
 
