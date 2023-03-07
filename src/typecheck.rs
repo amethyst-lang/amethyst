@@ -117,28 +117,30 @@ impl Type {
         }
     }
 
-    fn convert_type_vars_to_generics(&mut self, generics: &mut Vec<String>) {
+    fn convert_type_vars_to_generics(&mut self, env: &mut Environment, generics: &mut Vec<String>) {
         match self {
             Type::Base(BaseType::Named(_, params, _)) => {
                 for param in params {
-                    param.convert_type_vars_to_generics(generics)
+                    param.convert_type_vars_to_generics(env, generics)
                 }
             }
 
             Type::Func(a, r) => {
-                a.convert_type_vars_to_generics(generics);
-                r.convert_type_vars_to_generics(generics);
+                a.convert_type_vars_to_generics(env, generics);
+                r.convert_type_vars_to_generics(env, generics);
             }
 
             Type::Refined(_, _) => todo!(),
 
             Type::TypeVar(t) => {
+                let t = *t;
                 let g = format!("a{}", t);
                 if !generics.contains(&g) {
                     generics.push(g.clone());
                 }
 
                 *self = Type::Generic(g);
+                env.substitutions[t] = self.clone();
             }
 
             _ => (),
@@ -337,7 +339,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
     }
 }
 
-fn replace_type_vars(ast: &mut Ast, env: &Environment) -> Result<(), ()> {
+fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
     match ast {
         Ast::Binary { left, right, .. } => {
             replace_type_vars(left, env)?;
@@ -369,10 +371,10 @@ fn replace_type_vars(ast: &mut Ast, env: &Environment) -> Result<(), ()> {
         Ast::TopLet { args, ret_type, value, generics, .. } => {
             for (_, arg_type) in args.iter_mut() {
                 arg_type.replace_type_vars(env);
-                arg_type.convert_type_vars_to_generics(generics);
+                arg_type.convert_type_vars_to_generics(env, generics);
             }
             ret_type.replace_type_vars(env);
-            ret_type.convert_type_vars_to_generics(generics);
+            ret_type.convert_type_vars_to_generics(env, generics);
             replace_type_vars(value, env)
         }
 
@@ -405,7 +407,7 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
 
     for ast in asts.iter_mut() {
         typecheck_helper(&mut env, ast)?;
-        replace_type_vars(ast, &env)?;
+        replace_type_vars(ast, &mut env)?;
     }
 
     Ok(())
