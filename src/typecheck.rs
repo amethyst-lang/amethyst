@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
 use crate::parse::{Ast, Type, BaseType, BinaryOp};
 
@@ -25,6 +25,15 @@ impl Environment {
 
     fn find_variable(&mut self, var: &str) -> Option<&Type> {
         self.variables.iter().rev().find(|(v, _)| v == var).map(|(_, t)| t)
+    }
+
+    fn update_vars(&mut self) {
+        let mut temp = Vec::new();
+        std::mem::swap(&mut temp, &mut self.variables);
+        for (_, var) in temp.iter_mut() {
+            var.replace_type_vars(self);
+        }
+        std::mem::swap(&mut temp, &mut self.variables);
     }
 }
 
@@ -146,6 +155,38 @@ impl Type {
             _ => (),
         }
     }
+
+    fn convert_generics_to_type_vars(&mut self, env: &mut Environment, generics: &mut HashMap<String, Type>) {
+        match self {
+            Type::Base(BaseType::Named(_, params, _)) => {
+                for param in params {
+                    param.convert_generics_to_type_vars(env, generics)
+                }
+            }
+
+            Type::Func(a, r) => {
+                a.convert_generics_to_type_vars(env, generics);
+                r.convert_generics_to_type_vars(env, generics);
+            }
+
+            Type::Refined(_, _) => todo!(),
+
+            Type::Generic(g) => {
+                match generics.entry(g.to_string()) {
+                    Entry::Occupied(v) => {
+                        v.get().clone_into(self);
+                    }
+
+                    Entry::Vacant(v) => {
+                        *self = env.new_type_var();
+                        v.insert(self.clone());
+                    }
+                }
+            }
+
+            _ => (),
+        }
+    }
 }
 
 fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
@@ -249,6 +290,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
         Ast::FuncCall { func, args } => {
             let mut func = typecheck_helper(env, func)?;
+            let mut generics = HashMap::new();
             for arg in args {
                 let mut arg = typecheck_helper(env, arg)?;
 
@@ -260,6 +302,8 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                             break;
                         }
                     }
+                    func.convert_generics_to_type_vars(env, &mut generics);
+                    arg.convert_generics_to_type_vars(env, &mut HashMap::new());
                     if let Type::Func(mut a, r) = func {
                         if a.equals_up_to_env(&mut arg, env) {
                             func = *r;
@@ -408,6 +452,7 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
     for ast in asts.iter_mut() {
         typecheck_helper(&mut env, ast)?;
         replace_type_vars(ast, &mut env)?;
+        env.update_vars();
     }
 
     Ok(())
