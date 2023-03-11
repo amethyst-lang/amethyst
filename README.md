@@ -9,5 +9,5 @@ From the r/ProgLangs discord server:
  - safe: ~~damn how did you know i love rust~~ code should be as safe as possible without sacrificing any of the above points. whilst safety is a goal of amethyst, it is not the main goal (simplicity is)
 
 ## Cool, what does it look like?
-Check out the `examples/` folder for examples, or the `self-hosted-compiler/` folder for the self hosted compiler.
+Check out the `examples/` folder for examples.
 
