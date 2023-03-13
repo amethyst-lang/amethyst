@@ -54,6 +54,8 @@ impl Type {
             (Type::Base(BaseType::Named(n1, p1, _)), Type::Base(BaseType::Named(n2, p2, _))) => n1 == n2 && p1.iter_mut().zip(p2.iter_mut()).all(|(p1, p2)| p1.equals_up_to_env(p2, env)),
             (Type::Func(a1, r1), Type::Func(a2, r2)) => a1.equals_up_to_env(a2, env) && r1.equals_up_to_env(r2, env),
 
+            (Type::Generic(a), Type::Generic(b)) => a == b,
+
             (Type::TypeVar(a), Type::TypeVar(b)) if a == b => true,
 
             (a @ Type::TypeVar(_), b @ Type::TypeVar(_))
@@ -346,8 +348,11 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
         }
 
         Ast::TopLet { args, ret_type, value, .. } => {
+            let mut generics = HashMap::new();
             for (arg, arg_type) in args.iter() {
-                env.push_variable(arg, arg_type);
+                let mut arg_type = arg_type.clone();
+                arg_type.convert_generics_to_type_vars(env, &mut generics);
+                env.push_variable(arg, &arg_type);
             }
 
             let mut t = typecheck_helper(env, value)?;
@@ -355,6 +360,14 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             for _ in args.iter() {
                 env.pop_variable();
             }
+
+            for (g, mut t) in generics {
+                if !t.equals_up_to_env(&mut Type::Generic(g), env) {
+                    println!("{}", t);
+                    return Err(());
+                }
+            }
+
             if !ret_type.equals_up_to_env(&mut t, env) {
                 Err(())
             } else {
