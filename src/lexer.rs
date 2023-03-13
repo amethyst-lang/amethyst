@@ -161,7 +161,7 @@ impl<'a> Lexer<'a> {
 
                     State::Double => {
                         state = State::SingleChar;
-                        if c != self.contents[self.pos..self.pos].chars().next().unwrap() {
+                        if c != self.contents[self.pos..].chars().next().unwrap() {
                             break;
                         }
                     }

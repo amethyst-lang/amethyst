@@ -393,6 +393,8 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                 Err(())
             }
         }
+
+        Ast::DatatypeDefinition { .. } => Ok(Type::Unknown),
     }
 }
 

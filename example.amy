@@ -1,90 +1,3 @@
-/*
-struct Pair[A, B] {
-    a: A,
-    b: B,
-}
-
-enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-}
-
-datatype Expr[A, a: A] {
-    int: i64,
-    symbol: String
-    binary: (op: BinaryOp, left: Box[Expr, ..], right: Box[Expr, ..]),
-    func: (func: Box[Expr, ..], args: Vec[Expr, ..]),
-}
-
-datatype Option[T] {
-    some: T,
-    none: (),
-}
-
-datatype SumTypeExample {
-    // SumTypeExample::a(69)
-    a: i32,
-
-    // SumTypeExample::b(69, 420)
-    b: (i32, i32),
-
-    // SumTypeExample::c()
-    c: (),
-
-    // SumTypeExample::d(a: 69, b: 420)
-    // or
-    // SumTypeExample::d(69, 420)
-    // or
-    // SumTypeExample::d(b: 420, a: 69)
-    d: (a: i32, b: i32),
-}
-
-struct Vec[T, A: Alloc, a: A] {
-    internal: Slice[A, a],
-    len: usize,
-}
-
-impl[T, A: Alloc, a: A] Vec[T, A, a] {
-    fn new() -> Self {
-        // `Self(Slice[..]::empty(), 0)` also works
-        Self(internal: Slice[..]::empty(), len: 0)
-    }
-
-    fn push(self.&, val: T) {
-        // pushing stuff
-    }
-
-    fn get(self.&, index: usize) -> T.&
-        where index < self.*.len
-    {
-        self.*.internal.[index].&
-    }
-}
-
-fn map[T, U, A: Alloc, a: A](f: fn(T) -> U, list: Vec[T, A, a]) -> Vec[U, A, a] {
-    let new = Vec::new();
-    for v in list {
-        new.push(f(v));
-    }
-    new
-}
-
-struct LinearStruct: Linear {
-    a: i32,
-    b: i32,
-}
-
-fn fib(n: i32) -> i32 {
-    if n < 2 {
-        n
-    } else {
-        fib(n - 1) + fib(n - 2)
-    }
-}
-*/
-
 let fib (n: i32) -> i32 =
     if n < 2 then
         n
@@ -101,11 +14,14 @@ forall (n: i32)
 let addn (m: i32) -> i32 = n + m
 
 forall (a: type) (b: type)
-record Pair
-    = a a
-    * b b
+type Pair = Pair (a: a) (b: b)
 
-datatype Expr
+type Expr
     = Int i32
     | Add (Box Expr) (Box Expr)
     | Sub (Box Expr) (Box Expr)
+
+forall (a: type)
+type Option
+    = Some a
+    | None

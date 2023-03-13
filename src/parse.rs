@@ -146,6 +146,13 @@ pub enum Ast {
         then: Box<Ast>,
         elsy: Box<Ast>,
     },
+
+    DatatypeDefinition {
+        name: String,
+        generics: Vec<String>,
+        dep_values: Vec<(String, Type)>,
+        variants: Vec<(String, Vec<(Option<String>, Type)>)>,
+    },
 }
 
 impl Display for Ast {
@@ -210,6 +217,41 @@ impl Display for Ast {
             }
 
             Ast::If { cond, then, elsy } => write!(f, "(if {} then {} else {})", cond, then, elsy),
+
+            Ast::DatatypeDefinition { name, generics, dep_values, variants } => {
+                if !generics.is_empty() || !dep_values.is_empty() {
+                    write!(f, "forall")?;
+                    for generic in generics {
+                        write!(f, " ({}: type)", generic)?;
+                    }
+                    for (value, type_) in dep_values {
+                        write!(f, " ({}: {})", value, type_)?;
+                    }
+                    writeln!(f)?;
+                }
+
+                writeln!(f, "type {}", name)?;
+                let mut first = true;
+                for (constructor, fields) in variants {
+                    if first {
+                        write!(f, "    = {}", constructor)?;
+                        first = false;
+                    } else {
+                        write!(f, "    | {}", constructor)?;
+                    }
+
+                    for (name, type_) in fields {
+                        if let Some(name) = name {
+                            write!(f, " ({}: {})", name, type_)?;
+                        } else {
+                            write!(f, " {}", type_)?;
+                        }
+                    }
+                    writeln!(f)?;
+                }
+
+                Ok(())
+            }
         }
     }
 }
@@ -223,7 +265,8 @@ pub enum ParseError {
     InvalidLet,
     InvalidType,
     InvalidArg,
-    InvalidIf
+    InvalidIf,
+    InvalidTypeDef,
 }
 
 macro_rules! try_token {
@@ -613,6 +656,53 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool, generics: &[String]) -> Res
     }
 }
 
+fn parse_type_def_variant(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<(String, Vec<(Option<String>, Type)>), ParseError> {
+    let name = match try_token!(lexer, Some(Token::Symbol(_))) {
+        Some(Token::Symbol(v)) => v.to_string(),
+        _ => return Err(ParseError::InvalidTypeDef),
+    };
+
+    let mut fields = Vec::new();
+    loop {
+        let t = match parse_base_type(lexer, generics) {
+            Ok(v) => v,
+            Err(ParseError::NotStarted) => break,
+            Err(e) => return Err(e),
+        };
+
+        fields.push((None, t));
+    }
+
+    Ok((name, fields))
+}
+
+fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Ast, ParseError> {
+    if try_token!(lexer, Some(Token::Type)).is_some() {
+        let name = match try_token!(lexer, Some(Token::Symbol(_))) {
+            Some(Token::Symbol(v)) => v.to_string(),
+            _ => return Err(ParseError::InvalidTypeDef),
+        };
+
+        if try_token!(lexer, Some(Token::Equals)).is_none() {
+            return Err(ParseError::InvalidLet);
+        }
+
+        let mut variants = vec![parse_type_def_variant(lexer, generics)?];
+        while try_token!(lexer, Some(Token::Pipe)).is_some() {
+            variants.push(parse_type_def_variant(lexer, generics)?);
+        }
+
+        Ok(Ast::DatatypeDefinition {
+            name,
+            generics: generics.to_vec(),
+            dep_values: Vec::new(),
+            variants,
+        })
+    } else {
+        Err(ParseError::NotStarted)
+    }
+}
+
 // TODO: dependent values
 fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     if try_token!(lexer, Some(Token::Forall)).is_some() {
@@ -626,7 +716,13 @@ fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             }
         }
 
-        parse_let(lexer, true, &generics)
+        match parse_let(lexer, true, &generics) {
+            v @ Ok(_) => return v,
+            Err(ParseError::NotStarted) => (),
+            e => return e,
+        }
+
+        parse_type_def(lexer, &generics)
     } else {
         Err(ParseError::NotStarted)
     }
@@ -652,6 +748,13 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         Err(ParseError::NotStarted) => (),
         e @ Err(_) => return e,
     }
+
+    match parse_type_def(lexer, &[]) {
+        v @ Ok(_) => return v,
+        Err(ParseError::NotStarted) => (),
+        e @ Err(_) => return e,
+    }
+
     parse_let(lexer, true, &[])
 }
 
