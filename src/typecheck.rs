@@ -395,6 +395,8 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
         }
 
         Ast::DatatypeDefinition { .. } => Ok(Type::Unknown),
+
+        Ast::Match { value, patterns } => todo!(),
     }
 }
 
@@ -441,6 +443,14 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             replace_type_vars(cond, env)?;
             replace_type_vars(then, env)?;
             replace_type_vars(elsy, env)
+        }
+
+        Ast::Match { value, patterns } => {
+            replace_type_vars(value, env)?;
+            for (_, result) in patterns {
+                replace_type_vars(result, env)?;
+            }
+            Ok(())
         }
 
         _ => Ok(()),

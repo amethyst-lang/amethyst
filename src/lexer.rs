@@ -12,6 +12,7 @@ pub enum Token<'a> {
     Pipe,
     Colon,
     Arrow,
+    At,
     LParen,
     RParen,
     LBrack,
@@ -109,7 +110,7 @@ impl<'a> Lexer<'a> {
                     State::Initial => {
                         match c {
                             '0'..='9' => state = State::Number,
-                            '+' | '*' | '/' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' => state = State::SingleChar,
+                            '+' | '*' | '/' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | '@' => state = State::SingleChar,
                             '|' | '&' => state = State::Double,
                             '<' | '>' | '=' => state = State::AppendEq,
                             '!' => state = State::Not,
@@ -197,6 +198,7 @@ impl<'a> Lexer<'a> {
                     "|" => Token::Pipe,
                     ":" => Token::Colon,
                     "->" => Token::Arrow,
+                    "@" => Token::At,
                     "=" => Token::Equals,
                     "==" => Token::Eq,
                     ">=" => Token::Ge,

@@ -107,6 +107,49 @@ impl Display for BinaryOp {
 }
 
 #[derive(Debug, Clone)]
+pub enum Pattern {
+    Wildcard,
+    Symbol(String),
+    Constructor(String, Vec<Pattern>),
+    SymbolOrUnitConstructor(String),
+    As(String, Box<Pattern>),
+    Or(Vec<Pattern>),
+}
+
+impl Display for Pattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Pattern::Wildcard => write!(f, "_"),
+            Pattern::Symbol(s) | Pattern::SymbolOrUnitConstructor(s) => write!(f, "{}", s),
+
+            Pattern::Constructor(cons, pats) => {
+                write!(f, "{}", cons)?;
+                for pat in pats {
+                    write!(f, " {}", pat)?;
+                }
+                Ok(())
+            }
+
+            Pattern::As(name, pat) => write!(f, "({} @ {})", name, pat),
+
+            Pattern::Or(pats) => {
+                let mut first = true;
+                for pat in pats {
+                    if first {
+                        write!(f, "({})", pat)?;
+                        first = false;
+                    } else {
+                        write!(f, " | ({})", pat)?;
+                    }
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Ast {
     Integer(u128),
     Bool(bool),
@@ -152,6 +195,11 @@ pub enum Ast {
         generics: Vec<String>,
         dep_values: Vec<(String, Type)>,
         variants: Vec<(String, Vec<(Option<String>, Type)>)>,
+    },
+
+    Match {
+        value: Box<Ast>,
+        patterns: Vec<(Pattern, Ast)>,
     },
 }
 
@@ -252,6 +300,14 @@ impl Display for Ast {
 
                 Ok(())
             }
+
+            Ast::Match { value, patterns } => {
+                writeln!(f, "match {} with", value)?;
+                for (pat, val) in patterns {
+                    writeln!(f, "| {} to {}", pat, val)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -267,6 +323,8 @@ pub enum ParseError {
     InvalidArg,
     InvalidIf,
     InvalidTypeDef,
+    InvalidMatch,
+    InvalidPattern,
 }
 
 macro_rules! try_token {
@@ -568,7 +626,7 @@ fn parse_argument(lexer: &mut Lexer<'_>, allow_type: bool, generics: &[String]) 
 
 fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     if try_token!(lexer, Some(Token::If)).is_some() {
-        let cond = parse_or(lexer)?;
+        let cond = parse_expr(lexer)?;
         if try_token!(lexer, Some(Token::Then)).is_none() {
             return Err(ParseError::InvalidIf);
         }
@@ -584,6 +642,125 @@ fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             cond: Box::new(cond),
             then: Box::new(then),
             elsy: Box::new(elsy),
+        })
+    } else {
+        Err(ParseError::NotStarted)
+    }
+}
+
+/*
+pub enum Pattern {
+    Wildcard,
+    Symbol(String),
+    Constructor(String, Vec<Pattern>),
+    SymbolOrUnitConstructor(String),
+    As(String, Box<Pattern>),
+    Or(Vec<Pattern>),
+}
+*/
+
+fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
+    match lexer.peek() {
+        Some(Token::Symbol("_")) => Ok(Pattern::Wildcard),
+
+        Some(Token::Symbol(name)) => {
+            lexer.lex();
+
+            match lexer.peek() {
+                Some(Token::At) => {
+                    lexer.lex();
+                    match parse_pattern_child(lexer)? {
+                        Pattern::As(_, _) => Err(ParseError::InvalidPattern),
+                        v => Ok(Pattern::As(name.to_string(), Box::new(v))),
+                    }
+                }
+
+                Some(_) => {
+                    let mut fields = Vec::new();
+                    loop {
+                        match lexer.peek() {
+                            Some(Token::Symbol("_")) => fields.push(Pattern::Wildcard),
+                            Some(Token::Symbol(v)) => fields.push(Pattern::Symbol(v.to_string())),
+                            Some(Token::LParen) => {
+                                lexer.lex();
+                                fields.push(parse_pattern(lexer)?);
+                                if let Some(Token::RParen) = lexer.peek() {
+                                } else {
+                                    return Err(ParseError::InvalidPattern);
+                                }
+                            }
+
+                            _ => break,
+                        }
+
+                        lexer.lex();
+                    }
+
+                    if fields.is_empty() {
+                        Ok(Pattern::SymbolOrUnitConstructor(name.to_string()))
+                    } else {
+                        Ok(Pattern::Constructor(name.to_string(), fields))
+                    }
+                }
+
+                _ => Ok(Pattern::SymbolOrUnitConstructor(name.to_string())),
+            }
+        }
+
+        Some(Token::LParen) => {
+            lexer.lex();
+            let v = parse_pattern(lexer)?;
+            if try_token!(lexer, Some(Token::RParen)).is_none() {
+                return Err(ParseError::InvalidPattern);
+            }
+
+            Ok(v)
+        }
+
+        _ => Err(ParseError::InvalidPattern),
+    }
+}
+
+fn parse_pattern(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
+    let mut children = vec![parse_pattern_child(lexer)?];
+
+    while try_token!(lexer, Some(Token::Pipe)).is_some() {
+        children.push(parse_pattern_child(lexer)?);
+    }
+
+    if children.len() == 1 {
+        Ok(children.remove(0))
+    } else {
+        Ok(Pattern::Or(children))
+    }
+}
+
+fn parse_match(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
+    if try_token!(lexer, Some(Token::Match)).is_some() {
+        let value = parse_expr(lexer)?;
+        if try_token!(lexer, Some(Token::With)).is_none() {
+            return Err(ParseError::InvalidMatch);
+        }
+
+        let mut patterns = Vec::new();
+        while try_token!(lexer, Some(Token::Pipe)).is_some() {
+            let pattern = parse_pattern(lexer)?;
+
+            if try_token!(lexer, Some(Token::To)).is_none() {
+                return Err(ParseError::InvalidMatch);
+            }
+
+            let value = parse_expr(lexer)?;
+            patterns.push((pattern, value));
+        }
+
+        if try_token!(lexer, Some(Token::End)).is_none() {
+            return Err(ParseError::InvalidMatch);
+        }
+
+        Ok(Ast::Match {
+            value: Box::new(value),
+            patterns,
         })
     } else {
         Err(ParseError::NotStarted)
@@ -736,6 +913,11 @@ fn parse_expr(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         e => return e,
     }
     match parse_if(lexer) {
+        v @ Ok(_) => return v,
+        Err(ParseError::NotStarted) => (),
+        e => return e,
+    }
+    match parse_match(lexer) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e => return e,
