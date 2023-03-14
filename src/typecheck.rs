@@ -1,10 +1,11 @@
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{HashMap, hash_map::Entry, HashSet};
 
-use crate::parse::{Ast, Type, BaseType, BinaryOp};
+use crate::parse::{Ast, Type, BaseType, BinaryOp, Pattern};
 
 #[derive(Debug, Default)]
 struct Environment {
     variables: Vec<(String, Type)>,
+    constructors: HashMap<String, (Vec<Type>, Type)>,
     substitutions: Vec<Type>,
 }
 
@@ -396,7 +397,143 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
         Ast::DatatypeDefinition { .. } => Ok(Type::Unknown),
 
-        Ast::Match { value, patterns } => todo!(),
+        Ast::Match { value, patterns } => {
+            let mut value = typecheck_helper(env, value)?;
+            let mut result = None;
+
+            for (pat, val) in patterns {
+                let (mut val_type, append_to_env) = typecheck_pattern(env, pat)?;
+                if !value.equals_up_to_env(&mut val_type, env) {
+                    return Err(());
+                }
+
+                for (var, t) in append_to_env.iter().rev() {
+                    env.push_variable(var, t);
+                }
+
+                let mut new = typecheck_helper(env, val)?;
+                match result.as_mut() {
+                    None => result = Some(new),
+
+                    Some(t) => {
+                        if !t.equals_up_to_env(&mut new, env) {
+                            return Err(())
+                        }
+                    }
+                }
+
+                for _ in append_to_env {
+                    env.pop_variable();
+                }
+            }
+
+            if let Some(v) = result {
+                Ok(v)
+            } else {
+                Err(())
+            }
+        }
+    }
+}
+
+fn typecheck_pattern(env: &mut Environment, pattern: &mut Pattern) -> Result<(Type, Vec<(String, Type)>), ()> {
+    match pattern {
+        Pattern::Wildcard => Ok((env.new_type_var(), Vec::new())),
+
+        Pattern::Symbol(s) => {
+            let t = env.new_type_var();
+            Ok((t.clone(), vec![(s.clone(), t)]))
+        }
+
+        Pattern::Constructor(name, fields) => {
+            if let Some((field_types, type_)) = env.constructors.get(name) {
+                if fields.len() != field_types.len() {
+                    Err(())
+                } else {
+                    let mut type_ = type_.clone();
+                    let mut field_types = field_types.clone();
+                    let mut append_to_env = Vec::new();
+                    let mut generics = HashMap::new();
+                    for (field, type_) in fields.iter_mut().zip(field_types.iter_mut()) {
+                        type_.convert_generics_to_type_vars(env, &mut generics);
+                        let (mut t, append) = typecheck_pattern(env, field)?;
+                        append_to_env.extend(append);
+                        if !type_.equals_up_to_env(&mut t, env) {
+                            return Err(());
+                        }
+                    }
+
+                    type_.convert_generics_to_type_vars(env, &mut generics);
+
+                    let mut set = HashSet::new();
+                    for (s, _) in append_to_env.iter() {
+                        if !set.insert(s) {
+                            return Err(());
+                        }
+                    }
+
+                    Ok((type_, append_to_env))
+                }
+            } else {
+                Err(())
+            }
+        }
+
+        Pattern::SymbolOrUnitConstructor(s) => {
+            if let Some((fields, type_)) = env.constructors.get(s) {
+                if fields.is_empty() {
+                    *pattern = Pattern::Constructor(s.clone(), Vec::new());
+                    let mut type_ = type_.clone();
+                    type_.convert_generics_to_type_vars(env, &mut HashMap::new());
+                    Ok((type_, Vec::new()))
+                } else {
+                    Err(())
+                }
+            } else {
+                let s = s.clone();
+                *pattern = Pattern::Symbol(s.clone());
+                let t = env.new_type_var();
+                Ok((t.clone(), vec![(s, t)]))
+            }
+        }
+
+        Pattern::As(s, pat) => {
+            let (t, mut append) = typecheck_pattern(env, pat)?;
+
+            if append.iter().any(|(v, _)| v == s) {
+                return Err(());
+            }
+
+            append.push((s.clone(), t.clone()));
+            Ok((t, append))
+        }
+
+        Pattern::Or(pats) => {
+            let first = pats.first_mut().ok_or(())?;
+            let (mut t, mut append) = typecheck_pattern(env, first)?;
+            for pat in pats.iter_mut().skip(1) {
+                let (mut t2, mut append2) = typecheck_pattern(env, pat)?;
+                if !t.equals_up_to_env(&mut t2, env) {
+                    return Err(());
+                }
+
+                if append.len() != append2.len() {
+                    return Err(());
+                }
+
+                for (s, t) in append2.iter_mut().rev() {
+                    if let Some((_, t2)) = append.iter_mut().rev().find(|(s2, _)| s2 == s) {
+                        if !t.equals_up_to_env(t2, env) {
+                            return Err(())
+                        }
+                    } else {
+                        return Err(())
+                    }
+                }
+            }
+
+            Ok((t, append))
+        }
     }
 }
 
@@ -476,11 +613,17 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
 
             Ast::DatatypeDefinition { name, generics, variants, .. } => {
                 for (cons_name, fields) in variants {
+                    let mut constructor = Vec::new();
                     let mut top = Type::Base(BaseType::Named(name.clone(), generics.iter().cloned().map(Type::Generic).collect(), Vec::new()));
+                    let type_ = top.clone();
                     for (_, type_) in fields.iter().rev() {
                         top = Type::Func(Box::new(type_.clone()), Box::new(top));
                     }
                     env.push_variable(cons_name, &top);
+                    for (_, type_) in fields {
+                        constructor.push(type_.clone());
+                    }
+                    env.constructors.insert(cons_name.clone(), (constructor, type_));
                 }
             }
 
