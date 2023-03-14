@@ -349,6 +349,8 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             t
         }
 
+        Ast::EmptyLet { symbol, args, ret_type } => todo!(),
+
         Ast::TopLet { args, ret_type, value, .. } => {
             let mut generics = HashMap::new();
             for (arg, arg_type) in args.iter() {
@@ -433,6 +435,12 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                 Err(())
             }
         }
+
+        Ast::Class { name, generics, functions } => {
+            todo!()
+        }
+
+        Ast::Instance { name, parameters, functions } => todo!(),
     }
 }
 
@@ -586,6 +594,13 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             replace_type_vars(value, env)?;
             for (_, result) in patterns {
                 replace_type_vars(result, env)?;
+            }
+            Ok(())
+        }
+
+        Ast::Class { functions, .. } | Ast::Instance { functions, .. } => {
+            for func in functions {
+                replace_type_vars(func, env)?;
             }
             Ok(())
         }

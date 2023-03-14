@@ -39,6 +39,9 @@ pub enum Token<'a> {
     End,
     Forall,
     Type,
+    Class,
+    Instance,
+    Where,
     Symbol(&'a str),
 }
 
@@ -225,6 +228,9 @@ impl<'a> Lexer<'a> {
                     "end" => Token::End,
                     "forall" => Token::Forall,
                     "type" => Token::Type,
+                    "class" => Token::Class,
+                    "instance" => Token::Instance,
+                    "where" => Token::Where,
                     _ => Token::Symbol(s),
                 },
                 State::Minus => Token::Minus,

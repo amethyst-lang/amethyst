@@ -25,3 +25,20 @@ forall (a: type)
 type Option
     = Some a
     | None
+
+class Eq e =
+    let eq (a: e) (b: e) -> bool
+    let ne (a: e) (b: e) -> bool = not (eq a b)
+end
+
+instance Eq i32 =
+    // blablabla
+end
+
+forall (e: type) where Eq e
+instance Eq (List e) =
+    // blablabla
+end
+
+forall (e: type) where Eq e
+let contains (v: e) (l: List e) = // blablabla
