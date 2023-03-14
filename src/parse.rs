@@ -306,7 +306,7 @@ impl Display for Ast {
                 for (pat, val) in patterns {
                     writeln!(f, "| {} to {}", pat, val)?;
                 }
-                Ok(())
+                writeln!(f, "end")
             }
         }
     }
