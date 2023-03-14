@@ -292,7 +292,7 @@ macro_rules! try_clean {
     }
 }
 
-fn parse_base_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
+fn parse_base_type(lexer: &mut Lexer<'_>, generics: &[String], parse_names: bool) -> Result<Type, ParseError> {
     let state = lexer.push();
     match lexer.lex() {
         Some(Token::Symbol("bool")) => Ok(Type::Base(BaseType::Bool)),
@@ -307,6 +307,7 @@ fn parse_base_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, P
         Some(Token::Symbol("f32")) => Ok(Type::Base(BaseType::F32)),
         Some(Token::Symbol("f64")) => Ok(Type::Base(BaseType::F64)),
         Some(Token::Symbol(s)) if generics.iter().any(|v| v.as_str() == s) => Ok(Type::Generic(s.to_string())),
+        Some(Token::Symbol(s)) if parse_names => Ok(Type::Base(BaseType::Named(s.to_string(), Vec::new(), Vec::new()))),
 
         Some(Token::LParen) => {
             let type_ = parse_type(lexer, generics)?;
@@ -330,7 +331,7 @@ fn parse_base_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, P
 }
 
 fn parse_child_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
-    match parse_base_type(lexer, generics) {
+    match parse_base_type(lexer, generics, false) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e @ Err(_) => return e,
@@ -344,7 +345,7 @@ fn parse_child_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, 
 }
 
 fn parse_parametarised_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
-    match parse_base_type(lexer, generics) {
+    match parse_base_type(lexer, generics, false) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e @ Err(_) => return e,
@@ -664,7 +665,7 @@ fn parse_type_def_variant(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<
 
     let mut fields = Vec::new();
     loop {
-        let t = match parse_base_type(lexer, generics) {
+        let t = match parse_base_type(lexer, generics, true) {
             Ok(v) => v,
             Err(ParseError::NotStarted) => break,
             Err(e) => return Err(e),
@@ -684,7 +685,7 @@ fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Ast, Par
         };
 
         if try_token!(lexer, Some(Token::Equals)).is_none() {
-            return Err(ParseError::InvalidLet);
+            return Err(ParseError::InvalidTypeDef);
         }
 
         let mut variants = vec![parse_type_def_variant(lexer, generics)?];
