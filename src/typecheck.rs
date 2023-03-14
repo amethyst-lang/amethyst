@@ -247,7 +247,11 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
         Ast::Integer(_) => Ok(Type::Base(BaseType::I32)),
         Ast::Bool(_) => Ok(Type::Base(BaseType::Bool)),
 
-        Ast::Symbol(s) => env.find_variable(s).cloned().ok_or(()),
+        Ast::Symbol(s) => {
+            let mut v = env.find_variable(s).cloned().ok_or(())?;
+            v.convert_generics_to_type_vars(env, &mut HashMap::new());
+            Ok(v)
+        }
 
         Ast::Binary { op, left, right } => {
             let mut left = typecheck_helper(env, left)?;
@@ -292,7 +296,6 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
         Ast::FuncCall { func, args } => {
             let mut func = typecheck_helper(env, func)?;
-            let mut generics = HashMap::new();
             for arg in args {
                 let mut arg = typecheck_helper(env, arg)?;
 
@@ -304,8 +307,6 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                             break;
                         }
                     }
-                    func.convert_generics_to_type_vars(env, &mut generics);
-                    arg.convert_generics_to_type_vars(env, &mut HashMap::new());
                     if let Type::Func(mut a, r) = func {
                         if a.equals_up_to_env(&mut arg, env) {
                             func = *r;
@@ -363,7 +364,6 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
             for (g, mut t) in generics {
                 if !t.equals_up_to_env(&mut Type::Generic(g), env) {
-                    println!("{}", t);
                     return Err(());
                 }
             }
@@ -455,12 +455,26 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
     }
 
     for ast in asts.iter() {
-        if let Ast::TopLet { symbol, args, ret_type, .. } = ast {
-            let mut top = ret_type.clone();
-            for (_, arg_type) in args.iter().rev() {
-                top = Type::Func(Box::new(arg_type.clone()), Box::new(top));
+        match ast {
+            Ast::TopLet { symbol, args, ret_type, .. } => {
+                let mut top = ret_type.clone();
+                for (_, arg_type) in args.iter().rev() {
+                    top = Type::Func(Box::new(arg_type.clone()), Box::new(top));
+                }
+                env.push_variable(symbol, &top);
             }
-            env.push_variable(symbol, &top);
+
+            Ast::DatatypeDefinition { name, generics, variants, .. } => {
+                for (cons_name, fields) in variants {
+                    let mut top = Type::Base(BaseType::Named(name.clone(), generics.iter().cloned().map(Type::Generic).collect(), Vec::new()));
+                    for (_, type_) in fields.iter().rev() {
+                        top = Type::Func(Box::new(type_.clone()), Box::new(top));
+                    }
+                    env.push_variable(cons_name, &top);
+                }
+            }
+
+            _ => (),
         }
     }
 
