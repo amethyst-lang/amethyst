@@ -183,6 +183,7 @@ pub enum Ast {
 
     TopLet {
         symbol: String,
+        constraints: Vec<(String, Vec<Type>)>,
         generics: Vec<String>,
         dep_values: Vec<(String, Type)>,
         args: Vec<(String, Type)>,
@@ -198,6 +199,7 @@ pub enum Ast {
 
     DatatypeDefinition {
         name: String,
+        constraints: Vec<(String, Vec<Type>)>,
         generics: Vec<String>,
         dep_values: Vec<(String, Type)>,
         variants: Vec<(String, Vec<(Option<String>, Type)>)>,
@@ -211,12 +213,15 @@ pub enum Ast {
     Class {
         name: String,
         generics: Vec<String>,
+        constraints: Vec<(String, Vec<Type>)>,
         functions: Vec<Ast>,
     },
 
     Instance {
         name: String,
         parameters: Vec<Type>,
+        generics: Vec<String>,
+        constraints: Vec<(String, Vec<Type>)>,
         functions: Vec<Ast>,
     },
 }
@@ -283,6 +288,7 @@ impl Display for Ast {
             Ast::TopLet {
                 symbol,
                 generics,
+                constraints,
                 dep_values,
                 args,
                 ret_type,
@@ -296,6 +302,22 @@ impl Display for Ast {
                     for (value, type_) in dep_values {
                         write!(f, " ({}: {})", value, type_)?;
                     }
+                    if !constraints.is_empty() {
+                        write!(f, " where ")?;
+                        let mut first = true;
+                        for (name, params) in constraints {
+                            if first {
+                                first = false;
+                            } else {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", name)?;
+                            for param in params {
+                                write!(f, " {}", param)?;
+                            }
+                        }
+                    }
+
                     writeln!(f)?;
                 }
 
@@ -318,6 +340,7 @@ impl Display for Ast {
             Ast::DatatypeDefinition {
                 name,
                 generics,
+                constraints,
                 dep_values,
                 variants,
             } => {
@@ -329,6 +352,23 @@ impl Display for Ast {
                     for (value, type_) in dep_values {
                         write!(f, " ({}: {})", value, type_)?;
                     }
+
+                    if !constraints.is_empty() {
+                        write!(f, " where ")?;
+                        let mut first = true;
+                        for (name, params) in constraints {
+                            if first {
+                                first = false;
+                            } else {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", name)?;
+                            for param in params {
+                                write!(f, " {}", param)?;
+                            }
+                        }
+                    }
+
                     writeln!(f)?;
                 }
 
@@ -366,11 +406,27 @@ impl Display for Ast {
             Ast::Class {
                 name,
                 generics,
+                constraints,
                 functions,
             } => {
                 write!(f, "class {}", name)?;
                 for generic in generics {
                     write!(f, " {}", generic)?;
+                }
+                if !constraints.is_empty() {
+                    write!(f, " where ")?;
+                    let mut first = true;
+                    for (name, params) in constraints {
+                        if first {
+                            first = false;
+                        } else {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", name)?;
+                        for param in params {
+                            write!(f, " {}", param)?;
+                        }
+                    }
                 }
                 writeln!(f, " =")?;
                 for func in functions {
@@ -382,9 +438,36 @@ impl Display for Ast {
 
             Ast::Instance {
                 name,
+                generics,
+                constraints,
                 parameters,
                 functions,
             } => {
+                if !generics.is_empty() {
+                    write!(f, "forall")?;
+                    for generic in generics {
+                        write!(f, " ({}: type)", generic)?;
+                    }
+
+                    if !constraints.is_empty() {
+                        write!(f, " where ")?;
+                        let mut first = true;
+                        for (name, params) in constraints {
+                            if first {
+                                first = false;
+                            } else {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", name)?;
+                            for param in params {
+                                write!(f, " {}", param)?;
+                            }
+                        }
+                    }
+
+                    writeln!(f)?;
+                }
+
                 write!(f, "instance {}", name)?;
                 for param in parameters {
                     write!(f, " {}", param)?;
@@ -901,6 +984,7 @@ fn parse_let(
     top_level: bool,
     generics: &[String],
     allow_no_body: bool,
+    constraints: &[(String, Vec<Type>)],
 ) -> Result<Ast, ParseError> {
     if let Some(Token::Let) = lexer.peek() {
         lexer.lex();
@@ -952,6 +1036,7 @@ fn parse_let(
                 return Ok(Ast::TopLet {
                     symbol,
                     generics: generics.to_vec(),
+                    constraints: constraints.to_vec(),
                     dep_values: Vec::new(), // TODO
                     args,
                     ret_type,
@@ -1001,7 +1086,7 @@ fn parse_type_def_variant(
     Ok((name, fields))
 }
 
-fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Ast, ParseError> {
+fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(String, Vec<Type>)]) -> Result<Ast, ParseError> {
     if try_token!(lexer, Some(Token::Type)).is_some() {
         let name = match try_token!(lexer, Some(Token::Symbol(_))) {
             Some(Token::Symbol(v)) => v.to_string(),
@@ -1020,6 +1105,7 @@ fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Ast, Par
         Ok(Ast::DatatypeDefinition {
             name,
             generics: generics.to_vec(),
+            constraints: constraints.to_vec(),
             dep_values: Vec::new(),
             variants,
         })
@@ -1041,19 +1127,41 @@ fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             }
         }
 
-        match parse_let(lexer, true, &generics, false) {
+        let mut constraints = Vec::new();
+        if try_token!(lexer, Some(Token::Where)).is_some() {
+            while {
+                let name = match try_token!(lexer, Some(Token::Symbol(_))) {
+                    Some(Token::Symbol(v)) => v.to_string(),
+                    _ => return Err(ParseError::InvalidInstance),
+                };
+
+                let mut parameters = Vec::new();
+                loop {
+                    match parse_base_type(lexer, &generics, true) {
+                        Ok(v) => parameters.push(v),
+                        Err(ParseError::NotStarted) => break,
+                        Err(e) => return Err(e),
+                    }
+                }
+
+                constraints.push((name, parameters));
+                try_token!(lexer, Some(Token::Comma)).is_some()
+            } {}
+        }
+
+        match parse_let(lexer, true, &generics, false, &constraints) {
             v @ Ok(_) => return v,
             Err(ParseError::NotStarted) => (),
             e => return e,
         }
 
-        match parse_instance(lexer, &generics) {
+        match parse_instance(lexer, &generics, &constraints) {
             v @ Ok(_) => return v,
             Err(ParseError::NotStarted) => (),
             e => return e,
         }
 
-        parse_type_def(lexer, &generics)
+        parse_type_def(lexer, &generics, &constraints)
     } else {
         Err(ParseError::NotStarted)
     }
@@ -1071,13 +1179,35 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             generics.push(generic.to_string());
         }
 
+        let mut constraints = Vec::new();
+        if try_token!(lexer, Some(Token::Where)).is_some() {
+            while {
+                let name = match try_token!(lexer, Some(Token::Symbol(_))) {
+                    Some(Token::Symbol(v)) => v.to_string(),
+                    _ => return Err(ParseError::InvalidInstance),
+                };
+
+                let mut parameters = Vec::new();
+                loop {
+                    match parse_base_type(lexer, &generics, true) {
+                        Ok(v) => parameters.push(v),
+                        Err(ParseError::NotStarted) => break,
+                        Err(e) => return Err(e),
+                    }
+                }
+
+                constraints.push((name, parameters));
+                try_token!(lexer, Some(Token::Comma)).is_some()
+            } {}
+        }
+
         if try_token!(lexer, Some(Token::Equals)).is_none() {
             return Err(ParseError::InvalidClass);
         }
 
         let mut functions = Vec::new();
         loop {
-            match parse_let(lexer, true, &[], true) {
+            match parse_let(lexer, true, &[], true, &[]) {
                 Ok(v) => functions.push(v),
                 Err(ParseError::NotStarted) => break,
                 e @ Err(_) => return e,
@@ -1091,6 +1221,7 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         Ok(Ast::Class {
             name,
             generics,
+            constraints,
             functions,
         })
     } else {
@@ -1098,7 +1229,7 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     }
 }
 
-fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Ast, ParseError> {
+fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(String, Vec<Type>)]) -> Result<Ast, ParseError> {
     if try_token!(lexer, Some(Token::Instance)).is_some() {
         let name = match try_token!(lexer, Some(Token::Symbol(_))) {
             Some(Token::Symbol(v)) => v.to_string(),
@@ -1120,7 +1251,7 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Ast, Par
 
         let mut functions = Vec::new();
         loop {
-            match parse_let(lexer, true, &[], false) {
+            match parse_let(lexer, true, &[], false, &[]) {
                 Ok(v) => functions.push(v),
                 Err(ParseError::NotStarted) => break,
                 e @ Err(_) => return e,
@@ -1133,6 +1264,8 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Ast, Par
 
         Ok(Ast::Instance {
             name,
+            generics: generics.to_vec(),
+            constraints: constraints.to_vec(),
             parameters,
             functions,
         })
@@ -1142,7 +1275,7 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Ast, Par
 }
 
 fn parse_expr(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    match parse_let(lexer, false, &[], false) {
+    match parse_let(lexer, false, &[], false, &[]) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e => return e,
@@ -1167,7 +1300,7 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         e @ Err(_) => return e,
     }
 
-    match parse_type_def(lexer, &[]) {
+    match parse_type_def(lexer, &[], &[]) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e @ Err(_) => return e,
@@ -1179,13 +1312,13 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         e @ Err(_) => return e,
     }
 
-    match parse_instance(lexer, &[]) {
+    match parse_instance(lexer, &[], &[]) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e @ Err(_) => return e,
     }
 
-    parse_let(lexer, true, &[], false)
+    parse_let(lexer, true, &[], false, &[])
 }
 
 pub fn parse(lexer: &mut Lexer<'_>) -> Result<Vec<Ast>, ParseError> {

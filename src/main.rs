@@ -18,6 +18,10 @@ fn main() {
             let ne a b = not (eq a b)
         end
 
+        class Hash h where Eq h =
+            let hash: h -> u32
+        end
+
         forall (e: type) where Eq e
         instance Eq (Option e) =
             let eq a b =

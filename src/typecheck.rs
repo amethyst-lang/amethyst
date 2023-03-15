@@ -486,6 +486,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
         Ast::Class {
             name,
             generics,
+            constraints,
             functions,
         } => {
             todo!()
@@ -493,6 +494,8 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
         Ast::Instance {
             name,
+            generics,
+            constraints,
             parameters,
             functions,
         } => todo!(),
