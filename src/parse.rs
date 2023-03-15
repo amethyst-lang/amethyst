@@ -237,7 +237,14 @@ impl Display for Ast {
                 Ok(())
             }
 
-            Ast::Let { mutable, symbol, args, ret_type, value, context } => {
+            Ast::Let {
+                mutable,
+                symbol,
+                args,
+                ret_type,
+                value,
+                context,
+            } => {
                 write!(f, "let ")?;
                 if *mutable {
                     write!(f, "mut ")?;
@@ -256,7 +263,11 @@ impl Display for Ast {
                 write!(f, " = {} in {}", value, context)
             }
 
-            Ast::EmptyLet { symbol, args, ret_type } => {
+            Ast::EmptyLet {
+                symbol,
+                args,
+                ret_type,
+            } => {
                 write!(f, "let {}", symbol)?;
                 for (arg, type_) in args {
                     write!(f, " ({}: {})", arg, type_)?;
@@ -269,7 +280,14 @@ impl Display for Ast {
                 }
             }
 
-            Ast::TopLet { symbol, generics, dep_values, args, ret_type, value } => {
+            Ast::TopLet {
+                symbol,
+                generics,
+                dep_values,
+                args,
+                ret_type,
+                value,
+            } => {
                 if !generics.is_empty() || !dep_values.is_empty() {
                     write!(f, "forall")?;
                     for generic in generics {
@@ -297,7 +315,12 @@ impl Display for Ast {
 
             Ast::If { cond, then, elsy } => write!(f, "(if {} then {} else {})", cond, then, elsy),
 
-            Ast::DatatypeDefinition { name, generics, dep_values, variants } => {
+            Ast::DatatypeDefinition {
+                name,
+                generics,
+                dep_values,
+                variants,
+            } => {
                 if !generics.is_empty() || !dep_values.is_empty() {
                     write!(f, "forall")?;
                     for generic in generics {
@@ -340,7 +363,11 @@ impl Display for Ast {
                 writeln!(f, "end")
             }
 
-            Ast::Class { name, generics, functions } => {
+            Ast::Class {
+                name,
+                generics,
+                functions,
+            } => {
                 write!(f, "class {}", name)?;
                 for generic in generics {
                     write!(f, " {}", generic)?;
@@ -353,7 +380,11 @@ impl Display for Ast {
                 writeln!(f, "end")
             }
 
-            Ast::Instance { name, parameters, functions } => {
+            Ast::Instance {
+                name,
+                parameters,
+                functions,
+            } => {
                 write!(f, "instance {}", name)?;
                 for param in parameters {
                     write!(f, " {}", param)?;
@@ -394,7 +425,7 @@ macro_rules! try_token {
         } else {
             None
         }
-    }}
+    }};
 }
 
 macro_rules! try_clean {
@@ -406,10 +437,14 @@ macro_rules! try_clean {
                 return e;
             }
         }
-    }
+    };
 }
 
-fn parse_base_type(lexer: &mut Lexer<'_>, generics: &[String], parse_names: bool) -> Result<Type, ParseError> {
+fn parse_base_type(
+    lexer: &mut Lexer<'_>,
+    generics: &[String],
+    parse_names: bool,
+) -> Result<Type, ParseError> {
     let state = lexer.push();
     match lexer.lex() {
         Some(Token::Symbol("bool")) => Ok(Type::Base(BaseType::Bool)),
@@ -423,8 +458,14 @@ fn parse_base_type(lexer: &mut Lexer<'_>, generics: &[String], parse_names: bool
         Some(Token::Symbol("u64")) => Ok(Type::Base(BaseType::U64)),
         Some(Token::Symbol("f32")) => Ok(Type::Base(BaseType::F32)),
         Some(Token::Symbol("f64")) => Ok(Type::Base(BaseType::F64)),
-        Some(Token::Symbol(s)) if generics.iter().any(|v| v.as_str() == s) => Ok(Type::Generic(s.to_string())),
-        Some(Token::Symbol(s)) if parse_names => Ok(Type::Base(BaseType::Named(s.to_string(), Vec::new(), Vec::new()))),
+        Some(Token::Symbol(s)) if generics.iter().any(|v| v.as_str() == s) => {
+            Ok(Type::Generic(s.to_string()))
+        }
+        Some(Token::Symbol(s)) if parse_names => Ok(Type::Base(BaseType::Named(
+            s.to_string(),
+            Vec::new(),
+            Vec::new(),
+        ))),
 
         Some(Token::LParen) => {
             let type_ = parse_type(lexer, generics)?;
@@ -455,13 +496,20 @@ fn parse_child_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, 
     }
 
     if let Some(Token::Symbol(s)) = try_token!(lexer, Some(Token::Symbol(_))) {
-        Ok(Type::Base(BaseType::Named(s.to_string(), Vec::new(), Vec::new())))
+        Ok(Type::Base(BaseType::Named(
+            s.to_string(),
+            Vec::new(),
+            Vec::new(),
+        )))
     } else {
         Err(ParseError::InvalidType)
     }
 }
 
-fn parse_parametarised_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
+fn parse_parametarised_type(
+    lexer: &mut Lexer<'_>,
+    generics: &[String],
+) -> Result<Type, ParseError> {
     match parse_base_type(lexer, generics, false) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
@@ -478,10 +526,14 @@ fn parse_parametarised_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Resul
             }
             lexer.pop(state);
 
-            Ok(Type::Base(BaseType::Named(s.to_string(), parameters, Vec::new())))
+            Ok(Type::Base(BaseType::Named(
+                s.to_string(),
+                parameters,
+                Vec::new(),
+            )))
         }
 
-        _ => Err(ParseError::InvalidType)
+        _ => Err(ParseError::InvalidType),
     }
 }
 
@@ -567,8 +619,14 @@ fn parse_func_call(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_muldiv(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_func_call(lexer)?;
-    while let Some(token) = try_token!(lexer, Some(Token::Astrisk | Token::Slash | Token::Percent)) {
-        let right = try_clean!(parse_func_call(lexer), lexer, state, ParseError::InvalidInfix);
+    while let Some(token) = try_token!(lexer, Some(Token::Astrisk | Token::Slash | Token::Percent))
+    {
+        let right = try_clean!(
+            parse_func_call(lexer),
+            lexer,
+            state,
+            ParseError::InvalidInfix
+        );
         top = Ast::Binary {
             op: match token {
                 Token::Astrisk => BinaryOp::Mul,
@@ -606,7 +664,10 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_compare(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_addsub(lexer)?;
-    while let Some(token) = try_token!(lexer, Some(Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Eq | Token::Ne)) {
+    while let Some(token) = try_token!(
+        lexer,
+        Some(Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Eq | Token::Ne)
+    ) {
         let right = try_clean!(parse_addsub(lexer), lexer, state, ParseError::InvalidInfix);
         top = Ast::Binary {
             op: match token {
@@ -656,7 +717,11 @@ fn parse_or(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     Ok(top)
 }
 
-fn parse_argument(lexer: &mut Lexer<'_>, allow_type: bool, generics: &[String]) -> Result<(String, Option<Type>), ParseError> {
+fn parse_argument(
+    lexer: &mut Lexer<'_>,
+    allow_type: bool,
+    generics: &[String],
+) -> Result<(String, Option<Type>), ParseError> {
     if let Some(Token::Symbol(s)) = try_token!(lexer, Some(Token::Symbol(_))) {
         Ok((s.to_string(), None))
     } else if try_token!(lexer, Some(Token::LParen)).is_some() {
@@ -742,7 +807,9 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
                     loop {
                         match lexer.peek() {
                             Some(Token::Symbol("_")) => fields.push(Pattern::Wildcard),
-                            Some(Token::Symbol(v)) => fields.push(Pattern::SymbolOrUnitConstructor(v.to_string())),
+                            Some(Token::Symbol(v)) => {
+                                fields.push(Pattern::SymbolOrUnitConstructor(v.to_string()))
+                            }
                             Some(Token::LParen) => {
                                 lexer.lex();
                                 fields.push(parse_pattern(lexer)?);
@@ -829,7 +896,12 @@ fn parse_match(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     }
 }
 
-fn parse_let(lexer: &mut Lexer<'_>, top_level: bool, generics: &[String], allow_no_body: bool) -> Result<Ast, ParseError> {
+fn parse_let(
+    lexer: &mut Lexer<'_>,
+    top_level: bool,
+    generics: &[String],
+    allow_no_body: bool,
+) -> Result<Ast, ParseError> {
     if let Some(Token::Let) = lexer.peek() {
         lexer.lex();
         let mutable = try_token!(lexer, Some(Token::Mut)).is_some();
@@ -850,7 +922,13 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool, generics: &[String], allow_
             }
         }
 
-        let ret_type = if if args.is_empty() { try_token!(lexer, Some(Token::Colon)) } else { try_token!(lexer, Some(Token::Arrow)) }.is_some() {
+        let ret_type = if if args.is_empty() {
+            try_token!(lexer, Some(Token::Colon))
+        } else {
+            try_token!(lexer, Some(Token::Arrow))
+        }
+        .is_some()
+        {
             parse_type(lexer, generics)?
         } else {
             Type::Unknown
@@ -862,7 +940,7 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool, generics: &[String], allow_
                     symbol,
                     args,
                     ret_type,
-                })
+                });
             } else {
                 return Err(ParseError::InvalidLet);
             }
@@ -900,7 +978,10 @@ fn parse_let(lexer: &mut Lexer<'_>, top_level: bool, generics: &[String], allow_
     }
 }
 
-fn parse_type_def_variant(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<(String, Vec<(Option<String>, Type)>), ParseError> {
+fn parse_type_def_variant(
+    lexer: &mut Lexer<'_>,
+    generics: &[String],
+) -> Result<(String, Vec<(Option<String>, Type)>), ParseError> {
     let name = match try_token!(lexer, Some(Token::Symbol(_))) {
         Some(Token::Symbol(v)) => v.to_string(),
         _ => return Err(ParseError::InvalidTypeDef),

@@ -1,6 +1,6 @@
-use std::collections::{HashMap, hash_map::Entry, HashSet};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
-use crate::parse::{Ast, Type, BaseType, BinaryOp, Pattern};
+use crate::parse::{Ast, BaseType, BinaryOp, Pattern, Type};
 
 #[derive(Debug, Default)]
 struct Environment {
@@ -25,7 +25,11 @@ impl Environment {
     }
 
     fn find_variable(&mut self, var: &str) -> Option<&Type> {
-        self.variables.iter().rev().find(|(v, _)| v == var).map(|(_, t)| t)
+        self.variables
+            .iter()
+            .rev()
+            .find(|(v, _)| v == var)
+            .map(|(_, t)| t)
     }
 
     fn update_vars(&mut self) {
@@ -52,8 +56,16 @@ impl Type {
             (Type::Base(BaseType::U64), Type::Base(BaseType::U64)) => true,
             (Type::Base(BaseType::F32), Type::Base(BaseType::F32)) => true,
             (Type::Base(BaseType::F64), Type::Base(BaseType::F64)) => true,
-            (Type::Base(BaseType::Named(n1, p1, _)), Type::Base(BaseType::Named(n2, p2, _))) => n1 == n2 && p1.iter_mut().zip(p2.iter_mut()).all(|(p1, p2)| p1.equals_up_to_env(p2, env)),
-            (Type::Func(a1, r1), Type::Func(a2, r2)) => a1.equals_up_to_env(a2, env) && r1.equals_up_to_env(r2, env),
+            (Type::Base(BaseType::Named(n1, p1, _)), Type::Base(BaseType::Named(n2, p2, _))) => {
+                n1 == n2
+                    && p1
+                        .iter_mut()
+                        .zip(p2.iter_mut())
+                        .all(|(p1, p2)| p1.equals_up_to_env(p2, env))
+            }
+            (Type::Func(a1, r1), Type::Func(a2, r2)) => {
+                a1.equals_up_to_env(a2, env) && r1.equals_up_to_env(r2, env)
+            }
 
             (Type::Generic(a), Type::Generic(b)) => a == b,
 
@@ -102,7 +114,9 @@ impl Type {
     fn replace_type_vars(&mut self, env: &Environment) -> bool {
         match self {
             Type::Unknown => true,
-            Type::Base(BaseType::Named(_, params, _)) => params.iter_mut().all(|v| v.replace_type_vars(env)),
+            Type::Base(BaseType::Named(_, params, _)) => {
+                params.iter_mut().all(|v| v.replace_type_vars(env))
+            }
 
             Type::Base(_) => true,
 
@@ -159,7 +173,11 @@ impl Type {
         }
     }
 
-    fn convert_generics_to_type_vars(&mut self, env: &mut Environment, generics: &mut HashMap<String, Type>) {
+    fn convert_generics_to_type_vars(
+        &mut self,
+        env: &mut Environment,
+        generics: &mut HashMap<String, Type>,
+    ) {
         match self {
             Type::Base(BaseType::Named(_, params, _)) => {
                 for param in params {
@@ -174,18 +192,16 @@ impl Type {
 
             Type::Refined(_, _) => todo!(),
 
-            Type::Generic(g) => {
-                match generics.entry(g.to_string()) {
-                    Entry::Occupied(v) => {
-                        v.get().clone_into(self);
-                    }
-
-                    Entry::Vacant(v) => {
-                        *self = env.new_type_var();
-                        v.insert(self.clone());
-                    }
+            Type::Generic(g) => match generics.entry(g.to_string()) {
+                Entry::Occupied(v) => {
+                    v.get().clone_into(self);
                 }
-            }
+
+                Entry::Vacant(v) => {
+                    *self = env.new_type_var();
+                    v.insert(self.clone());
+                }
+            },
 
             _ => (),
         }
@@ -206,7 +222,13 @@ fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
             }
         }
 
-        Ast::Let { args, ret_type, value, context, .. } => {
+        Ast::Let {
+            args,
+            ret_type,
+            value,
+            context,
+            ..
+        } => {
             for (_, arg_type) in args {
                 if matches!(arg_type, Type::Unknown) {
                     *arg_type = env.new_type_var();
@@ -220,7 +242,12 @@ fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
             replace_unknowns(env, context);
         }
 
-        Ast::TopLet { args, ret_type, value, .. } => {
+        Ast::TopLet {
+            args,
+            ret_type,
+            value,
+            ..
+        } => {
             for (_, arg_type) in args {
                 if matches!(arg_type, Type::Unknown) {
                     *arg_type = env.new_type_var();
@@ -259,12 +286,10 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             let mut right = typecheck_helper(env, right)?;
 
             match op {
-                BinaryOp::Add
-                | BinaryOp::Sub
-                | BinaryOp::Mul
-                | BinaryOp::Div
-                | BinaryOp::Mod => {
-                    if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env) && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env) {
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                    if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
+                        && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
+                    {
                         Ok(Type::Base(BaseType::I32))
                     } else {
                         Err(())
@@ -277,16 +302,19 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                 | BinaryOp::Ge
                 | BinaryOp::Eq
                 | BinaryOp::Ne => {
-                    if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env) && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env) {
+                    if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
+                        && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
+                    {
                         Ok(Type::Base(BaseType::Bool))
                     } else {
                         Err(())
                     }
                 }
 
-                BinaryOp::LogicalAnd
-                | BinaryOp::LogicalOr => {
-                    if left.equals_up_to_env(&mut Type::Base(BaseType::Bool), env) && right.equals_up_to_env(&mut Type::Base(BaseType::Bool), env) {
+                BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
+                    if left.equals_up_to_env(&mut Type::Base(BaseType::Bool), env)
+                        && right.equals_up_to_env(&mut Type::Base(BaseType::Bool), env)
+                    {
                         Ok(Type::Base(BaseType::Bool))
                     } else {
                         Err(())
@@ -300,7 +328,10 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             for arg in args {
                 let mut arg = typecheck_helper(env, arg)?;
 
-                if func.equals_up_to_env(&mut Type::Func(Box::new(env.new_type_var()), Box::new(env.new_type_var())), env) {
+                if func.equals_up_to_env(
+                    &mut Type::Func(Box::new(env.new_type_var()), Box::new(env.new_type_var())),
+                    env,
+                ) {
                     while let Type::TypeVar(x) = func {
                         let x = x;
                         func = env.substitutions[x].clone();
@@ -325,7 +356,14 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             Ok(func)
         }
 
-        Ast::Let { mutable: _, symbol, args, ret_type, value, context } => {
+        Ast::Let {
+            mutable: _,
+            symbol,
+            args,
+            ret_type,
+            value,
+            context,
+        } => {
             for (arg, type_) in args.iter() {
                 env.push_variable(arg, type_);
             }
@@ -349,9 +387,18 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             t
         }
 
-        Ast::EmptyLet { symbol, args, ret_type } => todo!(),
+        Ast::EmptyLet {
+            symbol,
+            args,
+            ret_type,
+        } => todo!(),
 
-        Ast::TopLet { args, ret_type, value, .. } => {
+        Ast::TopLet {
+            args,
+            ret_type,
+            value,
+            ..
+        } => {
             let mut generics = HashMap::new();
             for (arg, arg_type) in args.iter() {
                 let mut arg_type = arg_type.clone();
@@ -419,7 +466,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
                     Some(t) => {
                         if !t.equals_up_to_env(&mut new, env) {
-                            return Err(())
+                            return Err(());
                         }
                     }
                 }
@@ -436,15 +483,26 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             }
         }
 
-        Ast::Class { name, generics, functions } => {
+        Ast::Class {
+            name,
+            generics,
+            functions,
+        } => {
             todo!()
         }
 
-        Ast::Instance { name, parameters, functions } => todo!(),
+        Ast::Instance {
+            name,
+            parameters,
+            functions,
+        } => todo!(),
     }
 }
 
-fn typecheck_pattern(env: &mut Environment, pattern: &mut Pattern) -> Result<(Type, Vec<(String, Type)>), ()> {
+fn typecheck_pattern(
+    env: &mut Environment,
+    pattern: &mut Pattern,
+) -> Result<(Type, Vec<(String, Type)>), ()> {
     match pattern {
         Pattern::Wildcard => Ok((env.new_type_var(), Vec::new())),
 
@@ -532,10 +590,10 @@ fn typecheck_pattern(env: &mut Environment, pattern: &mut Pattern) -> Result<(Ty
                 for (s, t) in append2.iter_mut().rev() {
                     if let Some((_, t2)) = append.iter_mut().rev().find(|(s2, _)| s2 == s) {
                         if !t.equals_up_to_env(t2, env) {
-                            return Err(())
+                            return Err(());
                         }
                     } else {
-                        return Err(())
+                        return Err(());
                     }
                 }
             }
@@ -560,7 +618,13 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             Ok(())
         }
 
-        Ast::Let { args, ret_type, value, context, .. } => {
+        Ast::Let {
+            args,
+            ret_type,
+            value,
+            context,
+            ..
+        } => {
             for (_, arg_type) in args.iter_mut() {
                 if !arg_type.replace_type_vars(env) {
                     return Err(());
@@ -574,7 +638,13 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             replace_type_vars(context, env)
         }
 
-        Ast::TopLet { args, ret_type, value, generics, .. } => {
+        Ast::TopLet {
+            args,
+            ret_type,
+            value,
+            generics,
+            ..
+        } => {
             for (_, arg_type) in args.iter_mut() {
                 arg_type.replace_type_vars(env);
                 arg_type.convert_type_vars_to_generics(env, generics);
@@ -618,7 +688,12 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
 
     for ast in asts.iter() {
         match ast {
-            Ast::TopLet { symbol, args, ret_type, .. } => {
+            Ast::TopLet {
+                symbol,
+                args,
+                ret_type,
+                ..
+            } => {
                 let mut top = ret_type.clone();
                 for (_, arg_type) in args.iter().rev() {
                     top = Type::Func(Box::new(arg_type.clone()), Box::new(top));
@@ -626,10 +701,19 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
                 env.push_variable(symbol, &top);
             }
 
-            Ast::DatatypeDefinition { name, generics, variants, .. } => {
+            Ast::DatatypeDefinition {
+                name,
+                generics,
+                variants,
+                ..
+            } => {
                 for (cons_name, fields) in variants {
                     let mut constructor = Vec::new();
-                    let mut top = Type::Base(BaseType::Named(name.clone(), generics.iter().cloned().map(Type::Generic).collect(), Vec::new()));
+                    let mut top = Type::Base(BaseType::Named(
+                        name.clone(),
+                        generics.iter().cloned().map(Type::Generic).collect(),
+                        Vec::new(),
+                    ));
                     let type_ = top.clone();
                     for (_, type_) in fields.iter().rev() {
                         top = Type::Func(Box::new(type_.clone()), Box::new(top));
@@ -638,7 +722,8 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
                     for (_, type_) in fields {
                         constructor.push(type_.clone());
                     }
-                    env.constructors.insert(cons_name.clone(), (constructor, type_));
+                    env.constructors
+                        .insert(cons_name.clone(), (constructor, type_));
                 }
             }
 

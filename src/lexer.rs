@@ -110,44 +110,38 @@ impl<'a> Lexer<'a> {
             let mut state = State::Initial;
             for c in self.contents[self.pos..].chars() {
                 match state {
-                    State::Initial => {
-                        match c {
-                            '0'..='9' => state = State::Number,
-                            '+' | '*' | '/' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | '@' => state = State::SingleChar,
-                            '|' | '&' => state = State::Double,
-                            '<' | '>' | '=' => state = State::AppendEq,
-                            '!' => state = State::Not,
-                            '-' => state = State::Minus,
-                            ' ' | '\t' | '\n' | '\r' => self.pos += c.len_utf8(),
-                            'a'..='z' | 'A'..='Z' | '_' => state = State::Symbol,
-                            _ => state = State::Invalid,
+                    State::Initial => match c {
+                        '0'..='9' => state = State::Number,
+                        '+' | '*' | '/' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | '@' => {
+                            state = State::SingleChar
                         }
-                    }
+                        '|' | '&' => state = State::Double,
+                        '<' | '>' | '=' => state = State::AppendEq,
+                        '!' => state = State::Not,
+                        '-' => state = State::Minus,
+                        ' ' | '\t' | '\n' | '\r' => self.pos += c.len_utf8(),
+                        'a'..='z' | 'A'..='Z' | '_' => state = State::Symbol,
+                        _ => state = State::Invalid,
+                    },
 
                     State::Invalid => break,
 
-                    State::Number => {
-                        match c {
-                            '0'..='9' => (),
-                            _ => break,
-                        }
-                    }
+                    State::Number => match c {
+                        '0'..='9' => (),
+                        _ => break,
+                    },
 
                     State::SingleChar => break,
 
-                    State::Symbol => {
-                        match c {
-                            'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => (),
-                            _ => break,
-                        }
-                    }
+                    State::Symbol => match c {
+                        'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => (),
+                        _ => break,
+                    },
 
-                    State::Minus => {
-                        match c {
-                            '>' => state = State::SingleChar,
-                            _ => break,
-                        }
-                    }
+                    State::Minus => match c {
+                        '>' => state = State::SingleChar,
+                        _ => break,
+                    },
 
                     State::AppendEq => {
                         state = State::SingleChar;
@@ -156,12 +150,10 @@ impl<'a> Lexer<'a> {
                         }
                     }
 
-                    State::Not => {
-                        match c {
-                            '=' => state = State::SingleChar,
-                            _ => state = State::Invalid,
-                        }
-                    }
+                    State::Not => match c {
+                        '=' => state = State::SingleChar,
+                        _ => state = State::Invalid,
+                    },
 
                     State::Double => {
                         state = State::SingleChar;

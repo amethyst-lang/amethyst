@@ -6,7 +6,8 @@ fn main() {
     // let mut lexer = Lexer::new("forall (a: type) (b: type) type Pair = Pair a b\nforall (a: type) type Option = Some a | None\nlet f x = match x with | Some x to x + 1 | None to 0 end");
     // let mut lexer = Lexer::new("let apply f x = f x\nlet id x = x\nlet a = apply id 2\nlet b = apply id true");
     // let mut lexer = Lexer::new("type Nat = S Nat | Z\nlet f x = match x with | Z to 0 | S k to 1 + f k end");
-    let mut lexer = Lexer::new("
+    let mut lexer = Lexer::new(
+        "
         forall (a: type)
         type Option
             = Some a
@@ -26,7 +27,8 @@ fn main() {
                 | _                      to false
                 end
         end
-    ");
+    ",
+    );
 
     let mut asts = parse::parse(&mut lexer).expect("should work");
     for ast in asts.iter() {
