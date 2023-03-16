@@ -18,8 +18,17 @@ fn main() {
             let ne a b = not (eq a b)
         end
 
-        class Hash h where Eq h =
-            let hash: h -> u32
+        instance Eq i32 =
+            let eq a b = a == b
+        end
+
+        instance Eq bool =
+            let eq a b =
+                if a then
+                    b
+                else if b then
+                    false
+                else true
         end
 
         forall (e: type) where Eq e

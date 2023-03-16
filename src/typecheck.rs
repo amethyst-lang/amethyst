@@ -266,6 +266,20 @@ fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
             replace_unknowns(env, elsy);
         }
 
+        Ast::Match { value, patterns } => {
+            replace_unknowns(env, value);
+            for (_, val) in patterns {
+                replace_unknowns(env, val);
+            }
+        }
+
+        Ast::Class { functions, .. }
+        | Ast::Instance { functions, .. } => {
+            for func in functions {
+                replace_unknowns(env, func);
+            }
+        }
+
         _ => (),
     }
 }

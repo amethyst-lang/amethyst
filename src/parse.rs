@@ -235,11 +235,11 @@ impl Display for Ast {
             Ast::Binary { op, left, right } => write!(f, "({} {} {})", left, op, right),
 
             Ast::FuncCall { func, args } => {
-                write!(f, "{}", func)?;
+                write!(f, "({}", func)?;
                 for arg in args {
                     write!(f, " {}", arg)?;
                 }
-                Ok(())
+                write!(f, ")")
             }
 
             Ast::Let {
@@ -1207,8 +1207,14 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 
         let mut functions = Vec::new();
         loop {
-            match parse_let(lexer, true, &[], true, &[]) {
-                Ok(v) => functions.push(v),
+            match parse_let(lexer, true, &generics, true, &[]) {
+                Ok(mut v) => {
+                    if let Ast::TopLet { generics, .. } = &mut v {
+                        *generics = Vec::new();
+                    }
+                    functions.push(v)
+                }
+
                 Err(ParseError::NotStarted) => break,
                 e @ Err(_) => return e,
             }
@@ -1251,8 +1257,15 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(St
 
         let mut functions = Vec::new();
         loop {
-            match parse_let(lexer, true, &[], false, &[]) {
-                Ok(v) => functions.push(v),
+            match parse_let(lexer, true, &generics, false, &constraints) {
+                Ok(mut v) => {
+                    if let Ast::TopLet { generics, constraints, .. } = &mut v {
+                        *generics = Vec::new();
+                        *constraints = Vec::new();
+                    }
+                    functions.push(v);
+                }
+
                 Err(ParseError::NotStarted) => break,
                 e @ Err(_) => return e,
             }
