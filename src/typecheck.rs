@@ -2,11 +2,21 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use crate::parse::{Ast, BaseType, BinaryOp, Pattern, Type};
 
+#[derive(Debug)]
+struct Class {
+    generics: Vec<String>,
+    constraints: Vec<(String, Vec<Type>)>,
+    class_funcs: Vec<(String, Type)>,
+    default_funcs: Vec<(String, Type)>,
+}
+
 #[derive(Debug, Default)]
 struct Environment {
-    variables: Vec<(String, Type)>,
+    variables: Vec<(String, Type, Vec<(String, Vec<Type>)>)>,
     constructors: HashMap<String, (Vec<Type>, Type)>,
     substitutions: Vec<Type>,
+    classes: HashMap<String, Class>,
+    constraints_applied: Vec<(String, Vec<Type>)>,
 }
 
 impl Environment {
@@ -16,29 +26,37 @@ impl Environment {
         t
     }
 
-    fn push_variable(&mut self, var: &str, type_: &Type) {
-        self.variables.push((var.to_string(), type_.clone()));
+    fn push_variable(&mut self, var: &str, type_: &Type, constraints: &[(String, Vec<Type>)]) {
+        self.variables.push((var.to_string(), type_.clone(), constraints.to_vec()));
     }
 
     fn pop_variable(&mut self) {
         self.variables.pop();
     }
 
-    fn find_variable(&mut self, var: &str) -> Option<&Type> {
+    fn find_variable(&mut self, var: &str) -> Option<&(String, Type, Vec<(String, Vec<Type>)>)> {
         self.variables
             .iter()
             .rev()
-            .find(|(v, _)| v == var)
-            .map(|(_, t)| t)
+            .find(|(v, ..)| v == var)
     }
 
     fn update_vars(&mut self) {
         let mut temp = Vec::new();
         std::mem::swap(&mut temp, &mut self.variables);
-        for (_, var) in temp.iter_mut() {
+        for (_, var, _) in temp.iter_mut() {
             var.replace_type_vars(self);
         }
         std::mem::swap(&mut temp, &mut self.variables);
+
+        let mut temp = HashMap::new();
+        std::mem::swap(&mut temp, &mut self.classes);
+        for (_, class) in temp.iter_mut() {
+            for (_, func) in class.default_funcs.iter_mut() {
+                func.replace_type_vars(self);
+            }
+        }
+        std::mem::swap(&mut temp, &mut self.classes);
     }
 }
 
@@ -206,6 +224,18 @@ impl Type {
             _ => (),
         }
     }
+
+    fn has_generic(&self, generics: &Vec<String>) -> bool {
+        match self {
+            Type::Unknown => false,
+            Type::Base(BaseType::Named(_, g, _)) => g.iter().any(|t| t.has_generic(generics)),
+            Type::Base(_) => false,
+            Type::Func(a, r) => a.has_generic(generics) || r.has_generic(generics),
+            Type::Refined(_, _) => todo!(),
+            Type::Generic(g) => generics.contains(g),
+            Type::TypeVar(_) => false,
+        }
+    }
 }
 
 fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
@@ -290,8 +320,15 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
         Ast::Bool(_) => Ok(Type::Base(BaseType::Bool)),
 
         Ast::Symbol(s) => {
-            let mut v = env.find_variable(s).cloned().ok_or(())?;
-            v.convert_generics_to_type_vars(env, &mut HashMap::new());
+            let (_, mut v, mut c) = env.find_variable(s).cloned().ok_or(())?;
+            let mut generics = HashMap::new();
+            v.convert_generics_to_type_vars(env, &mut generics);
+            for (_, c) in c.iter_mut() {
+                for c in c {
+                    c.convert_generics_to_type_vars(env, &mut generics);
+                }
+            }
+            env.constraints_applied.extend(c);
             Ok(v)
         }
 
@@ -379,7 +416,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             context,
         } => {
             for (arg, type_) in args.iter() {
-                env.push_variable(arg, type_);
+                env.push_variable(arg, type_, &[]);
             }
             let mut r = typecheck_helper(env, value)?;
 
@@ -395,17 +432,13 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                 r = Type::Func(Box::new(arg_type.clone()), Box::new(r));
             }
 
-            env.push_variable(symbol, &r);
+            env.push_variable(symbol, &r, &[]);
             let t = typecheck_helper(env, context);
             env.pop_variable();
             t
         }
 
-        Ast::EmptyLet {
-            symbol,
-            args,
-            ret_type,
-        } => todo!(),
+        Ast::EmptyLet { .. } => Ok(Type::Unknown),
 
         Ast::TopLet {
             args,
@@ -417,7 +450,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             for (arg, arg_type) in args.iter() {
                 let mut arg_type = arg_type.clone();
                 arg_type.convert_generics_to_type_vars(env, &mut generics);
-                env.push_variable(arg, &arg_type);
+                env.push_variable(arg, &arg_type, &[]);
             }
 
             let mut t = typecheck_helper(env, value)?;
@@ -471,7 +504,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                 }
 
                 for (var, t) in append_to_env.iter().rev() {
-                    env.push_variable(var, t);
+                    env.push_variable(var, t, &[]);
                 }
 
                 let mut new = typecheck_helper(env, val)?;
@@ -503,7 +536,10 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             constraints,
             functions,
         } => {
-            todo!()
+            for func in functions {
+                typecheck_helper(env, func)?;
+            }
+            Ok(Type::Unknown) // TODO: actual type
         }
 
         Ast::Instance {
@@ -659,6 +695,7 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             args,
             ret_type,
             value,
+            constraints,
             generics,
             ..
         } => {
@@ -668,6 +705,28 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             }
             ret_type.replace_type_vars(env);
             ret_type.convert_type_vars_to_generics(env, generics);
+
+            if !generics.is_empty() {
+                let mut extension = Vec::new();
+                for (name, params) in env.constraints_applied.iter() {
+                    let params: Vec<_> = params.iter().cloned().map(|mut t| {
+                        t.replace_type_vars(env);
+                        t
+                    }).collect();
+                    extension.push((name.clone(), params));
+                }
+
+                for (name, mut params) in extension {
+                    for param in params.iter_mut() {
+                        param.convert_type_vars_to_generics(env, &mut Vec::new());
+                    }
+
+                    if params.iter().any(|t| t.has_generic(&generics)) {
+                        constraints.push((name, params));
+                    }
+                }
+            }
+
             replace_type_vars(value, env)
         }
 
@@ -715,7 +774,7 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
                 for (_, arg_type) in args.iter().rev() {
                     top = Type::Func(Box::new(arg_type.clone()), Box::new(top));
                 }
-                env.push_variable(symbol, &top);
+                env.push_variable(symbol, &top, &[]);
             }
 
             Ast::DatatypeDefinition {
@@ -735,13 +794,56 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
                     for (_, type_) in fields.iter().rev() {
                         top = Type::Func(Box::new(type_.clone()), Box::new(top));
                     }
-                    env.push_variable(cons_name, &top);
+                    env.push_variable(cons_name, &top, &[]);
                     for (_, type_) in fields {
                         constructor.push(type_.clone());
                     }
                     env.constructors
                         .insert(cons_name.clone(), (constructor, type_));
                 }
+            }
+
+            Ast::Class { name, generics, constraints, functions } => {
+                let mut class_funcs = Vec::new();
+                let mut default_funcs = Vec::new();
+                let mut constraints = constraints.clone();
+                constraints.push((name.clone(), generics.iter().cloned().map(Type::Generic).collect()));
+                for func in functions {
+                    match func {
+                        Ast::EmptyLet { symbol, args, ret_type } => {
+                            let mut top = ret_type.clone();
+                            for (_, type_) in args.iter().rev() {
+                                top = Type::Func(Box::new(type_.clone()), Box::new(top));
+                            }
+                            class_funcs.push((symbol.clone(), top));
+                        }
+
+                        Ast::TopLet { symbol, args, ret_type, .. } => {
+                            let mut top = ret_type.clone();
+                            for (_, type_) in args.iter().rev() {
+                                top = Type::Func(Box::new(type_.clone()), Box::new(top));
+                            }
+                            default_funcs.push((symbol.clone(), top));
+                        }
+
+                        _ => (),
+                    }
+                }
+
+                for (a, b) in class_funcs.iter() {
+                    env.push_variable(a, b, &constraints);
+                }
+
+                for (a, b) in default_funcs.iter() {
+                    env.push_variable(a, b, &constraints);
+                }
+
+                env.classes.insert(name.to_string(), Class {
+                    generics: generics.clone(),
+                    constraints: constraints.clone(),
+                    class_funcs,
+                    default_funcs,
+                });
             }
 
             _ => (),

@@ -1019,7 +1019,7 @@ fn parse_let(
         };
 
         if try_token!(lexer, Some(Token::Equals)).is_none() {
-            if allow_no_body && !mutable {
+            if allow_no_body && !mutable && args.iter().all(|(_, t)| !matches!(t, Type::Unknown)) && !matches!(ret_type, Type::Unknown) {
                 return Ok(Ast::EmptyLet {
                     symbol,
                     args,

@@ -8,6 +8,8 @@ fn main() {
     // let mut lexer = Lexer::new("type Nat = S Nat | Z\nlet f x = match x with | Z to 0 | S k to 1 + f k end");
     let mut lexer = Lexer::new(
         "
+        let not x = if x then false else true
+
         forall (a: type)
         type Option
             = Some a
@@ -15,9 +17,12 @@ fn main() {
 
         class Eq e =
             let eq: e -> e -> bool
-            let ne a b = not (eq a b)
         end
 
+        let ne a b = eq a b
+        let uwu x = x
+    ",
+    ); /*
         instance Eq i32 =
             let eq a b = a == b
         end
@@ -42,6 +47,7 @@ fn main() {
         end
     ",
     );
+    // */
 
     let mut asts = parse::parse(&mut lexer).expect("should work");
     for ast in asts.iter() {
