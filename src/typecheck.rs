@@ -581,9 +581,6 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             constraints,
             functions,
         } => {
-            for func in functions {
-                typecheck_helper(env, func)?;
-            }
             Ok(Type::Unknown) // TODO: actual type
         }
 
@@ -594,7 +591,10 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             parameters,
             functions,
         } => {
-            Ok(Type::Unknown) // TODO: literally everything
+            for function in functions {
+                let _t = typecheck_helper(env, function)?;
+            }
+            Ok(Type::Unknown) // TODO: actual type
         }
     }
 }
