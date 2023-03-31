@@ -15,12 +15,24 @@ fn main() {
             = Some a
             | None
 
+        type NoEq = Uwu | Owo
+
         class Eq e =
             let eq: e -> e -> bool
         end
 
-        let ne a b = eq a b
-        let uwu x = x
+        instance Eq i32 =
+            let eq a b = a == b
+        end
+
+        instance Eq bool =
+            let eq a b = if a then b else not b
+        end
+
+        let ne a b = not (eq a b)
+
+        let a = eq 2 3
+        let b = eq true false
     ",
     ); /*
         instance Eq i32 =

@@ -1028,6 +1028,8 @@ fn parse_let(
             } else {
                 return Err(ParseError::InvalidLet);
             }
+        } else if allow_no_body {
+            return Err(ParseError::InvalidLet);
         }
 
         let value = parse_expr(lexer)?;

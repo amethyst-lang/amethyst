@@ -16,6 +16,7 @@ struct Environment {
     constructors: HashMap<String, (Vec<Type>, Type)>,
     substitutions: Vec<Type>,
     classes: HashMap<String, Class>,
+    instances: Vec<(String, Vec<Type>)>,
     constraints_applied: Vec<(String, Vec<Type>)>,
 }
 
@@ -57,6 +58,50 @@ impl Environment {
             }
         }
         std::mem::swap(&mut temp, &mut self.classes);
+    }
+
+    fn check_constraints(&mut self) -> bool {
+        let mut constraints_applied = self.constraints_applied.clone();
+        let mut instances = self.instances.clone();
+        'a: for (name, params) in constraints_applied.iter_mut() {
+            if let Some(class) = self.classes.get(name) {
+                if class.generics.len() != params.len() {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+
+            for p in params.iter_mut() {
+                p.replace_type_vars(self);
+            }
+
+            if params.iter().all(|t| matches!(t, Type::TypeVar(_) | Type::Generic(_))) {
+                continue 'a;
+            }
+
+            for (n, p) in instances.iter_mut() {
+                if n != name || p.len() != params.len() {
+                    continue;
+                }
+
+                let mut same = true;
+                for (a, b) in params.iter_mut().zip(p.iter_mut()) {
+                    if !a.equals_up_to_env(b, self) && !matches!(a, Type::TypeVar(_) | Type::Generic(_)) {
+                        same = false;
+                        break;
+                    }
+                }
+
+                if same {
+                    continue 'a;
+                }
+            }
+
+            return false;
+        }
+
+        true
     }
 }
 
@@ -548,7 +593,9 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             constraints,
             parameters,
             functions,
-        } => todo!(),
+        } => {
+            Ok(Type::Unknown) // TODO: literally everything
+        }
     }
 }
 
@@ -846,6 +893,10 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
                 });
             }
 
+            Ast::Instance { name, parameters, generics, constraints, functions } => {
+                env.instances.push((name.clone(), parameters.clone()));
+            }
+
             _ => (),
         }
     }
@@ -856,5 +907,9 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
         env.update_vars();
     }
 
-    Ok(())
+    if env.check_constraints() {
+        Ok(())
+    } else {
+        Err(())
+    }
 }
