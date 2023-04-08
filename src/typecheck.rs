@@ -16,7 +16,7 @@ struct Environment {
     constructors: HashMap<String, (Vec<Type>, Type)>,
     substitutions: Vec<Type>,
     classes: HashMap<String, Class>,
-    instances: Vec<(String, Vec<Type>)>,
+    instances: Vec<(String, Vec<Type>, Vec<(String, Vec<Type>)>)>,
     constraints_applied: Vec<(String, Vec<Type>)>,
 }
 
@@ -61,45 +61,61 @@ impl Environment {
     }
 
     fn check_constraints(&mut self) -> bool {
-        let mut constraints_applied = self.constraints_applied.clone();
         let mut instances = self.instances.clone();
-        'a: for (name, params) in constraints_applied.iter_mut() {
-            if let Some(class) = self.classes.get(name) {
-                if class.generics.len() != params.len() {
+
+        while {
+            let mut constraints_applied = Vec::new();
+            std::mem::swap(&mut constraints_applied, &mut self.constraints_applied);
+
+            'a: for (name, params) in constraints_applied.iter_mut() {
+                if let Some(class) = self.classes.get(name) {
+                    if class.generics.len() != params.len() {
+                        return false;
+                    }
+                } else {
                     return false;
                 }
-            } else {
-                return false;
-            }
 
-            for p in params.iter_mut() {
-                p.replace_type_vars(self);
-            }
-
-            if params.iter().all(|t| matches!(t, Type::TypeVar(_) | Type::Generic(_))) {
-                continue 'a;
-            }
-
-            for (n, p) in instances.iter_mut() {
-                if n != name || p.len() != params.len() {
-                    continue;
+                for p in params.iter_mut() {
+                    p.replace_type_vars(self);
                 }
 
-                let mut same = true;
-                for (a, b) in params.iter_mut().zip(p.iter_mut()) {
-                    if !a.equals_up_to_env(b, self) && !matches!(a, Type::TypeVar(_) | Type::Generic(_)) {
-                        same = false;
-                        break;
+                if params.iter().all(|t| matches!(t, Type::TypeVar(_) | Type::Generic(_))) {
+                    continue 'a;
+                }
+
+                for (n, p, c) in instances.iter_mut() {
+                    if n != name || p.len() != params.len() {
+                        continue;
+                    }
+
+                    let mut same = true;
+                    let mut generics = HashMap::new();
+                    // TODO: so much cloning,,, fix that
+                    for (a, mut b) in params.iter_mut().zip(p.iter().cloned()) {
+                        b.convert_generics_to_type_vars(self, &mut generics);
+                        if !a.equals_up_to_env(&mut b, self) {
+                            same = false;
+                            break;
+                        }
+                    }
+
+                    if same {
+                        for (_, c) in c.iter_mut() {
+                            for c in c {
+                                c.convert_generics_to_type_vars(self, &mut generics);
+                            }
+                        }
+
+                        self.constraints_applied.extend(c.iter().cloned());
+                        continue 'a;
                     }
                 }
 
-                if same {
-                    continue 'a;
-                }
+                return false;
             }
-
-            return false;
-        }
+            !self.constraints_applied.is_empty()
+        } {}
 
         true
     }
@@ -894,7 +910,7 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
             }
 
             Ast::Instance { name, parameters, generics, constraints, functions } => {
-                env.instances.push((name.clone(), parameters.clone()));
+                env.instances.push((name.clone(), parameters.clone(), constraints.clone()));
             }
 
             _ => (),
