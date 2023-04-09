@@ -106,6 +106,8 @@ impl<'a> Lexer<'a> {
                 AppendEq,
                 Not,
                 Double,
+                Slash,
+                SingleComment,
             }
 
             let mut state = State::Initial;
@@ -113,9 +115,8 @@ impl<'a> Lexer<'a> {
                 match state {
                     State::Initial => match c {
                         '0'..='9' => state = State::Number,
-                        '+' | '*' | '/' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | '@' | ',' => {
-                            state = State::SingleChar
-                        }
+                        '+' | '*' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | '@' | ',' =>state = State::SingleChar,
+                        '/' => state = State::Slash,
                         '|' | '&' => state = State::Double,
                         '<' | '>' | '=' => state = State::AppendEq,
                         '!' => state = State::Not,
@@ -162,6 +163,22 @@ impl<'a> Lexer<'a> {
                             break;
                         }
                     }
+
+                    State::Slash => {
+                        if c == '/' {
+                            self.pos += c.len_utf8() * 2;
+                            state = State::SingleComment;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    State::SingleComment => {
+                        if c == '\n' {
+                            state = State::Initial;
+                        }
+                        self.pos += c.len_utf8();
+                    }
                 }
 
                 final_pos += c.len_utf8();
@@ -176,7 +193,7 @@ impl<'a> Lexer<'a> {
 
             let s = &self.contents[initial_pos..final_pos];
             let token = match state {
-                State::Initial | State::AppendEq | State::Not | State::Double => unreachable!(),
+                State::Initial | State::AppendEq | State::Not | State::Double | State::SingleComment => unreachable!(),
                 State::Invalid => Token::Invalid(s),
                 State::Number => Token::Integer(s.parse().unwrap()),
                 State::SingleChar => match s {
@@ -228,6 +245,7 @@ impl<'a> Lexer<'a> {
                     _ => Token::Symbol(s),
                 },
                 State::Minus => Token::Minus,
+                State::Slash => Token::Slash,
             };
 
             self.prev_tokens.push((token, final_pos));
