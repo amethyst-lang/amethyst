@@ -28,6 +28,7 @@ pub enum Token<'a> {
     Ne,
     LogicalAnd,
     LogicalOr,
+    Exclamation,
     Let,
     In,
     Mut,
@@ -154,7 +155,7 @@ impl<'a> Lexer<'a> {
 
                     State::Not => match c {
                         '=' => state = State::SingleChar,
-                        _ => state = State::Invalid,
+                        _ => break,
                     },
 
                     State::Double => {
@@ -193,9 +194,10 @@ impl<'a> Lexer<'a> {
 
             let s = &self.contents[initial_pos..final_pos];
             let token = match state {
-                State::Initial | State::AppendEq | State::Not | State::Double | State::SingleComment => unreachable!(),
+                State::Initial | State::AppendEq | State::Double | State::SingleComment => unreachable!(),
                 State::Invalid => Token::Invalid(s),
                 State::Number => Token::Integer(s.parse().unwrap()),
+                State::Not => Token::Exclamation,
                 State::SingleChar => match s {
                     "+" => Token::Plus,
                     "-" => Token::Minus,

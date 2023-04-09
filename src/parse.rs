@@ -4,6 +4,7 @@ use crate::lexer::{Lexer, Token};
 
 #[derive(Debug, Clone)]
 pub enum BaseType {
+    Bottom,
     Bool,
     I8,
     I16,
@@ -21,6 +22,7 @@ pub enum BaseType {
 impl Display for BaseType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            BaseType::Bottom => write!(f, "!"),
             BaseType::Bool => write!(f, "bool"),
             BaseType::I8 => write!(f, "i8"),
             BaseType::I16 => write!(f, "i16"),
@@ -530,6 +532,7 @@ fn parse_base_type(
 ) -> Result<Type, ParseError> {
     let state = lexer.push();
     match lexer.lex() {
+        Some(Token::Exclamation) => Ok(Type::Base(BaseType::Bottom)),
         Some(Token::Symbol("bool")) => Ok(Type::Base(BaseType::Bool)),
         Some(Token::Symbol("i8")) => Ok(Type::Base(BaseType::I8)),
         Some(Token::Symbol("i16")) => Ok(Type::Base(BaseType::I16)),
@@ -988,6 +991,28 @@ fn parse_let(
 ) -> Result<Ast, ParseError> {
     if let Some(Token::Let) = lexer.peek() {
         lexer.lex();
+
+        if !top_level && !allow_no_body && try_token!(lexer, Some(Token::LParen)).is_some() {
+            let pattern = parse_pattern(lexer)?;
+
+            if try_token!(lexer, Some(Token::RParen)).is_none() || try_token!(lexer, Some(Token::Equals)).is_none() {
+                return Err(ParseError::InvalidLet);
+            }
+
+            let value = parse_expr(lexer)?;
+            if try_token!(lexer, Some(Token::In)).is_none() {
+                return Err(ParseError::InvalidLet);
+            }
+            let context = parse_expr(lexer)?;
+
+            let mut patterns = vec![(pattern, context)];
+            if let Some(elsy) = try_token!(lexer, Some(Token::Else)).map(|_| parse_expr(lexer)) {
+                patterns.push((Pattern::Wildcard, elsy?));
+            }
+
+            return Ok(Ast::Match { value: Box::new(value), patterns });
+        }
+
         let mutable = try_token!(lexer, Some(Token::Mut)).is_some();
         let symbol = match try_token!(lexer, Some(Token::Symbol(_))) {
             Some(Token::Symbol(v)) => v.to_string(),
@@ -996,7 +1021,6 @@ fn parse_let(
 
         let mut args = Vec::new();
 
-        // TODO: args annotated with types
         loop {
             match parse_argument(lexer, false, generics) {
                 Ok((arg, Some(t))) => args.push((arg, t)),
