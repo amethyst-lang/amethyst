@@ -67,7 +67,7 @@ impl Environment {
         std::mem::swap(&mut temp, &mut self.classes);
     }
 
-    fn check_constraints(&mut self) -> bool {
+    fn check_constraints(&mut self, errors: &mut Vec<CheckError>) -> bool {
         let mut instances = self.instances.clone();
 
         while {
@@ -1047,11 +1047,14 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
         typecheck_helper(&mut env, ast, &mut errors);
     }
 
-    if env.check_constraints() {
+    if env.check_constraints(&mut errors) {
         for ast in asts.iter_mut() {
             replace_type_vars(ast, &mut env, &mut errors);
         }
         env.update_vars();
+    }
+
+    if errors.is_empty() {
         Ok(())
     } else {
         Err(errors)
