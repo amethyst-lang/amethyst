@@ -1,6 +1,15 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
-use crate::parse::{Ast, BaseType, BinaryOp, Pattern, Type};
+use crate::{parse::{Ast, BaseType, BinaryOp, Pattern, Type}, lexer::Span};
+
+#[derive(Debug)]
+pub struct CheckError {
+    pub message: String,
+    pub primary_label: String,
+    pub primary_label_loc: Span,
+    pub secondary_labels: Vec<(String, Span)>,
+    pub notes: Vec<String>,
+}
 
 #[derive(Debug, Clone)]
 #[allow(unused)]
@@ -382,13 +391,13 @@ fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
     }
 }
 
-fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
+fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<CheckError>) -> Type {
     match ast {
-        Ast::Integer(_, _) => Ok(Type::Base(BaseType::I32)),
-        Ast::Bool(_, _) => Ok(Type::Base(BaseType::Bool)),
+        Ast::Integer(_, _) => Type::Base(BaseType::I32),
+        Ast::Bool(_, _) => Type::Base(BaseType::Bool),
 
         Ast::Symbol(_, s) => {
-            let (_, mut v, mut c) = env.find_variable(s).cloned().ok_or(())?;
+            let (_, mut v, mut c) = env.find_variable(s).cloned().unwrap();
             let mut generics = HashMap::new();
             v.convert_generics_to_type_vars(env, &mut generics);
             for (_, c) in c.iter_mut() {
@@ -397,23 +406,23 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                 }
             }
             env.constraints_applied.extend(c);
-            Ok(v)
+            v
         }
 
         Ast::Binary {
             op, left, right, ..
         } => {
-            let mut left = typecheck_helper(env, left)?;
-            let mut right = typecheck_helper(env, right)?;
+            let mut left = typecheck_helper(env, left, errors);
+            let mut right = typecheck_helper(env, right, errors);
 
             match op {
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
                         && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
                     {
-                        Ok(Type::Base(BaseType::I32))
+                        Type::Base(BaseType::I32)
                     } else {
-                        Err(())
+                        todo!()
                     }
                 }
 
@@ -426,9 +435,9 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                     if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
                         && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
                     {
-                        Ok(Type::Base(BaseType::Bool))
+                        Type::Base(BaseType::Bool)
                     } else {
-                        Err(())
+                        todo!()
                     }
                 }
 
@@ -436,18 +445,18 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                     if left.equals_up_to_env(&mut Type::Base(BaseType::Bool), env)
                         && right.equals_up_to_env(&mut Type::Base(BaseType::Bool), env)
                     {
-                        Ok(Type::Base(BaseType::Bool))
+                        Type::Base(BaseType::Bool)
                     } else {
-                        Err(())
+                        todo!()
                     }
                 }
             }
         }
 
         Ast::FuncCall { func, args, .. } => {
-            let mut func = typecheck_helper(env, func)?;
+            let mut func = typecheck_helper(env, func, errors);
             for arg in args {
-                let mut arg = typecheck_helper(env, arg)?;
+                let mut arg = typecheck_helper(env, arg, errors);
 
                 if func.equals_up_to_env(
                     &mut Type::Func(Box::new(env.new_type_var()), Box::new(env.new_type_var())),
@@ -464,17 +473,17 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                         if a.equals_up_to_env(&mut arg, env) {
                             func = *r;
                         } else {
-                            return Err(());
+                            todo!()
                         }
                     } else {
                         unreachable!();
                     }
                 } else {
-                    return Err(());
+                    todo!()
                 }
             }
 
-            Ok(func)
+            func
         }
 
         Ast::Let {
@@ -489,14 +498,14 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             for (arg, type_) in args.iter() {
                 env.push_variable(arg, type_, &[]);
             }
-            let mut r = typecheck_helper(env, value)?;
+            let mut r = typecheck_helper(env, value, errors);
 
             for _ in args.iter() {
                 env.pop_variable();
             }
 
             if !ret_type.equals_up_to_env(&mut r, env) {
-                return Err(());
+                todo!()
             }
 
             for (_, arg_type) in args.iter().rev() {
@@ -504,12 +513,12 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             }
 
             env.push_variable(symbol, &r, &[]);
-            let t = typecheck_helper(env, context);
+            let t = typecheck_helper(env, context, errors);
             env.pop_variable();
             t
         }
 
-        Ast::EmptyLet { .. } => Ok(Type::Unknown),
+        Ast::EmptyLet { .. } => Type::Unknown,
 
         Ast::TopLet {
             args,
@@ -524,7 +533,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                 env.push_variable(arg, &arg_type, &[]);
             }
 
-            let mut t = typecheck_helper(env, value)?;
+            let mut t = typecheck_helper(env, value, errors);
 
             for _ in args.iter() {
                 env.pop_variable();
@@ -532,63 +541,63 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
             for (g, mut t) in generics {
                 if !t.equals_up_to_env(&mut Type::Generic(g), env) {
-                    return Err(());
+                    todo!()
                 }
             }
 
             if !ret_type.equals_up_to_env(&mut t, env) {
-                Err(())
+                todo!()
             } else {
                 for (_, arg) in args.iter().rev() {
                     t = Type::Func(Box::new(arg.clone()), Box::new(t));
                 }
-                Ok(t) // TODO: actual type
+                t // TODO: actual type
             }
         }
 
         Ast::If {
             cond, then, elsy, ..
         } => {
-            let mut cond = typecheck_helper(env, cond)?;
-            let mut then = typecheck_helper(env, then)?;
-            let mut elsy = typecheck_helper(env, elsy)?;
+            let mut cond = typecheck_helper(env, cond, errors);
+            let mut then = typecheck_helper(env, then, errors);
+            let mut elsy = typecheck_helper(env, elsy, errors);
 
             if !cond.equals_up_to_env(&mut Type::Base(BaseType::Bool), env) {
-                return Err(());
+                todo!()
             }
 
             if then.equals_up_to_env(&mut elsy, env) {
-                Ok(then)
+                then
             } else {
-                Err(())
+                todo!()
             }
         }
 
-        Ast::DatatypeDefinition { .. } => Ok(Type::Unknown),
+        Ast::DatatypeDefinition { .. } => Type::Unknown,
 
         Ast::Match {
             value, patterns, ..
         } => {
-            let mut value = typecheck_helper(env, value)?;
+            let mut value = typecheck_helper(env, value, errors);
             let mut result = None;
 
             for (pat, val) in patterns {
-                let (mut val_type, append_to_env) = typecheck_pattern(env, pat)?;
+                let (mut val_type, append_to_env) = typecheck_pattern(env, pat, errors);
                 if !value.equals_up_to_env(&mut val_type, env) {
-                    return Err(());
+                    todo!()
                 }
 
                 for (var, t) in append_to_env.iter().rev() {
                     env.push_variable(var, t, &[]);
                 }
 
-                let mut new = typecheck_helper(env, val)?;
+                let mut new = typecheck_helper(env, val, errors);
                 match result.as_mut() {
                     None => result = Some(new),
 
                     Some(t) => {
                         if !t.equals_up_to_env(&mut new, env) {
-                            return Err(());
+                            todo!()
                         }
                     }
                 }
@@ -599,14 +608,14 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             }
 
             if let Some(v) = result {
-                Ok(v)
+                v
             } else {
-                Err(())
+                todo!()
             }
         }
 
         Ast::Class { .. } => {
-            Ok(Type::Unknown) // TODO: actual type
+            Type::Unknown // TODO: actual type
         }
 
         Ast::Instance {
@@ -618,7 +627,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
         } => {
             if let Some(class) = env.classes.get(name) {
                 if class.generics.len() != parameters.len() {
-                    return Err(());
+                    todo!()
                 }
 
                 let mut class = class.clone();
@@ -630,7 +639,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
                 for (gen, v) in gens.iter_mut() {
                     if !v.equals_up_to_env(&mut Type::Generic(format!("{}{}", v, gen)), env) {
-                        return Err(());
+                        todo!()
                     }
                 }
 
@@ -668,7 +677,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                                         .map(|(i, _)| i)
                                         .unwrap();
                                     if !parameters[i].equals_up_to_env(&mut v, env) {
-                                        return Err(());
+                                        todo!()
                                     }
                                 }
 
@@ -676,27 +685,27 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                                     type_.convert_generics_to_type_vars(env, &mut gens);
                                     if let Type::Func(mut a, r) = func {
                                         if !a.equals_up_to_env(type_, env) {
-                                            return Err(());
+                                            todo!()
                                         }
 
                                         type_.replace_type_vars(env);
                                         env.push_variable(name, type_, &[]);
                                         func = *r;
                                     } else {
-                                        return Err(());
+                                        todo!()
                                     }
                                 }
 
-                                *ret_type = typecheck_helper(env, &mut **value)?;
+                                *ret_type = typecheck_helper(env, &mut **value, errors);
                                 for _ in args.iter() {
                                     env.pop_variable();
                                 }
 
                                 if !func.equals_up_to_env(ret_type, env) {
-                                    return Err(());
+                                    todo!()
                                 }
                             } else {
-                                return Err(());
+                                todo!()
                             }
                         }
 
@@ -705,12 +714,12 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                 }
 
                 if class.funcs.is_empty() {
-                    Ok(Type::Unknown)
+                    Type::Unknown // TODO: actual type
                 } else {
-                    Err(()) // TODO: actual type
+                    todo!()
                 }
             } else {
-                Err(())
+                todo!()
             }
         }
     }
@@ -719,19 +728,20 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 fn typecheck_pattern(
     env: &mut Environment,
     pattern: &mut Pattern,
-) -> Result<(Type, Vec<(String, Type)>), ()> {
+    errors: &mut Vec<CheckError>,
+) -> (Type, Vec<(String, Type)>) {
     match pattern {
-        Pattern::Wildcard(_) => Ok((env.new_type_var(), Vec::new())),
+        Pattern::Wildcard(_) => (env.new_type_var(), Vec::new()),
 
         Pattern::Symbol(_, s) => {
             let t = env.new_type_var();
-            Ok((t.clone(), vec![(s.clone(), t)]))
+            (t.clone(), vec![(s.clone(), t)])
         }
 
         Pattern::Constructor(_, name, fields) => {
             if let Some((field_types, type_)) = env.constructors.get(name) {
                 if fields.len() != field_types.len() {
-                    Err(())
+                    todo!()
                 } else {
                     let mut type_ = type_.clone();
                     let mut field_types = field_types.clone();
@@ -740,10 +750,10 @@ fn typecheck_pattern(
                     type_.convert_generics_to_type_vars(env, &mut generics);
                     for (field, type_) in fields.iter_mut().zip(field_types.iter_mut()) {
                         type_.convert_generics_to_type_vars(env, &mut generics);
-                        let (mut t, append) = typecheck_pattern(env, field)?;
+                        let (mut t, append) = typecheck_pattern(env, field, errors);
                         append_to_env.extend(append);
                         if !type_.equals_up_to_env(&mut t, env) {
-                            return Err(());
+                            todo!()
                         }
                     }
                     type_.replace_type_vars(env);
@@ -751,14 +761,14 @@ fn typecheck_pattern(
                     let mut set = HashSet::new();
                     for (s, _) in append_to_env.iter() {
                         if !set.insert(s) {
-                            return Err(());
+                            todo!()
                         }
                     }
 
-                    Ok((type_, append_to_env))
+                    (type_, append_to_env)
                 }
             } else {
-                Err(())
+                todo!()
             }
         }
 
@@ -768,71 +778,70 @@ fn typecheck_pattern(
                     *pattern = Pattern::Constructor(span.clone(), s.clone(), Vec::new());
                     let mut type_ = type_.clone();
                     type_.convert_generics_to_type_vars(env, &mut HashMap::new());
-                    Ok((type_, Vec::new()))
+                    (type_, Vec::new())
                 } else {
-                    Err(())
+                    todo!()
                 }
             } else {
                 let s = s.clone();
                 *pattern = Pattern::Symbol(span.clone(), s.clone());
                 let t = env.new_type_var();
-                Ok((t.clone(), vec![(s, t)]))
+                (t.clone(), vec![(s, t)])
             }
         }
 
         Pattern::As(_, s, pat) => {
-            let (t, mut append) = typecheck_pattern(env, pat)?;
+            let (t, mut append) = typecheck_pattern(env, pat, errors);
 
             if append.iter().any(|(v, _)| v == s) {
-                return Err(());
+                todo!()
             }
 
             append.push((s.clone(), t.clone()));
-            Ok((t, append))
+            (t, append)
         }
 
         Pattern::Or(_, pats) => {
-            let first = pats.first_mut().ok_or(())?;
-            let (mut t, mut append) = typecheck_pattern(env, first)?;
+            let first = pats.first_mut().unwrap();
+            let (mut t, mut append) = typecheck_pattern(env, first, errors);
             for pat in pats.iter_mut().skip(1) {
-                let (mut t2, mut append2) = typecheck_pattern(env, pat)?;
+                let (mut t2, mut append2) = typecheck_pattern(env, pat, errors);
                 if !t.equals_up_to_env(&mut t2, env) {
-                    return Err(());
+                    todo!()
                 }
 
                 if append.len() != append2.len() {
-                    return Err(());
+                    todo!()
                 }
 
                 for (s, t) in append2.iter_mut().rev() {
                     if let Some((_, t2)) = append.iter_mut().rev().find(|(s2, _)| s2 == s) {
                         if !t.equals_up_to_env(t2, env) {
-                            return Err(());
+                            todo!()
                         }
                     } else {
-                        return Err(());
+                        todo!()
                     }
                 }
             }
 
-            Ok((t, append))
+            (t, append)
         }
     }
 }
 
-fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
+fn replace_type_vars(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<CheckError>) {
     match ast {
         Ast::Binary { left, right, .. } => {
-            replace_type_vars(left, env)?;
-            replace_type_vars(right, env)
+            replace_type_vars(left, env, errors);
+            replace_type_vars(right, env, errors);
         }
 
         Ast::FuncCall { func, args, .. } => {
-            replace_type_vars(func, env)?;
+            replace_type_vars(func, env, errors);
             for arg in args {
-                replace_type_vars(arg, env)?;
+                replace_type_vars(arg, env, errors);
             }
-            Ok(())
         }
 
         Ast::Let {
@@ -844,15 +853,15 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
         } => {
             for (_, arg_type) in args.iter_mut() {
                 if !arg_type.replace_type_vars(env) {
-                    return Err(());
+                    todo!()
                 }
             }
             if !ret_type.replace_type_vars(env) {
-                return Err(());
+                todo!()
             }
 
-            replace_type_vars(value, env)?;
-            replace_type_vars(context, env)
+            replace_type_vars(value, env, errors);
+            replace_type_vars(context, env, errors);
         }
 
         Ast::TopLet {
@@ -895,40 +904,39 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
                 }
             }
 
-            replace_type_vars(value, env)
+            replace_type_vars(value, env, errors)
         }
 
         Ast::If {
             cond, then, elsy, ..
         } => {
-            replace_type_vars(cond, env)?;
-            replace_type_vars(then, env)?;
-            replace_type_vars(elsy, env)
+            replace_type_vars(cond, env, errors);
+            replace_type_vars(then, env, errors);
+            replace_type_vars(elsy, env, errors);
         }
 
         Ast::Match {
             value, patterns, ..
         } => {
-            replace_type_vars(value, env)?;
+            replace_type_vars(value, env, errors);
             for (_, result) in patterns {
-                replace_type_vars(result, env)?;
+                replace_type_vars(result, env, errors);
             }
-            Ok(())
         }
 
         Ast::Class { functions, .. } | Ast::Instance { functions, .. } => {
             for func in functions {
-                replace_type_vars(func, env)?;
+                replace_type_vars(func, env, errors);
             }
-            Ok(())
         }
 
-        _ => Ok(()),
+        _ => (),
     }
 }
 
-pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
+pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
     let mut env = Environment::default();
+    let mut errors = Vec::new();
 
     for ast in asts.iter_mut() {
         replace_unknowns(&mut env, ast);
@@ -1036,16 +1044,16 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
     }
 
     for ast in asts.iter_mut() {
-        typecheck_helper(&mut env, ast)?;
+        typecheck_helper(&mut env, ast, &mut errors);
     }
 
     if env.check_constraints() {
         for ast in asts.iter_mut() {
-            replace_type_vars(ast, &mut env)?;
+            replace_type_vars(ast, &mut env, &mut errors);
         }
         env.update_vars();
         Ok(())
     } else {
-        Err(())
+        Err(errors)
     }
 }
