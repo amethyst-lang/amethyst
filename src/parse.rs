@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::lexer::{Lexer, Token, Span};
+use crate::lexer::{Lexer, Span, Token};
 
 #[derive(Debug, Clone)]
 pub enum BaseType {
@@ -266,7 +266,7 @@ impl Ast {
             | Ast::DatatypeDefinition { span, .. }
             | Ast::Match { span, .. }
             | Ast::Class { span, .. }
-            | Ast::Instance { span, .. } => span.clone()
+            | Ast::Instance { span, .. } => span.clone(),
         }
     }
 }
@@ -277,7 +277,9 @@ impl Display for Ast {
             Ast::Integer(_, n) => write!(f, "{}", n),
             Ast::Bool(_, b) => write!(f, "{}", b),
             Ast::Symbol(_, s) => write!(f, "{}", s),
-            Ast::Binary { op, left, right, .. } => write!(f, "({} {} {})", left, op, right),
+            Ast::Binary {
+                op, left, right, ..
+            } => write!(f, "({} {} {})", left, op, right),
 
             Ast::FuncCall { func, args, .. } => {
                 write!(f, "({}", func)?;
@@ -383,7 +385,9 @@ impl Display for Ast {
                 write!(f, " = {}", value)
             }
 
-            Ast::If { cond, then, elsy, .. } => write!(f, "(if {} then {} else {})", cond, then, elsy),
+            Ast::If {
+                cond, then, elsy, ..
+            } => write!(f, "(if {} then {} else {})", cond, then, elsy),
 
             Ast::DatatypeDefinition {
                 name,
@@ -444,7 +448,9 @@ impl Display for Ast {
                 Ok(())
             }
 
-            Ast::Match { value, patterns, .. } => {
+            Ast::Match {
+                value, patterns, ..
+            } => {
                 writeln!(f, "match {} with", value)?;
                 for (pat, val) in patterns {
                     writeln!(f, "| {} to {}", pat, val)?;
@@ -589,24 +595,20 @@ fn parse_base_type(
             let type_ = parse_type(lexer, generics)?;
             match lexer.lex() {
                 Some((Token::RParen, _)) => Ok(type_),
-                Some((_, s2)) => {
-                    Err(ParseError::Error {
-                        message: "expected right parenthesis".to_string(),
-                        primary_label: "this is not a right parenthesis".to_string(),
-                        primary_label_loc: s2,
-                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
-                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
-                    })
-                }
-                None => {
-                    Err(ParseError::Error {
-                        message: "expected right parenthesis".to_string(),
-                        primary_label: "eof found here".to_string(),
-                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
-                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
-                    })
-                }
+                Some((_, s2)) => Err(ParseError::Error {
+                    message: "expected right parenthesis".to_string(),
+                    primary_label: "this is not a right parenthesis".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                    notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                }),
+                None => Err(ParseError::Error {
+                    message: "expected right parenthesis".to_string(),
+                    primary_label: "eof found here".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                    notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                }),
             }
         }
 
@@ -630,33 +632,27 @@ fn parse_child_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, 
     }
 
     match lexer.lex() {
-        Some((Token::Symbol(s), _)) => {
-            Ok(Type::Base(BaseType::Named(
-                s.to_string(),
-                Vec::new(),
-                Vec::new(),
-            )))
-        }
+        Some((Token::Symbol(s), _)) => Ok(Type::Base(BaseType::Named(
+            s.to_string(),
+            Vec::new(),
+            Vec::new(),
+        ))),
 
-        Some((_, span)) => {
-            Err(ParseError::Error {
-                message: "expected type".to_string(),
-                primary_label: "this is not a valid type".to_string(),
-                primary_label_loc: span,
-                secondary_labels: Vec::new(),
-                notes: Vec::new(),
-            })
-        }
+        Some((_, span)) => Err(ParseError::Error {
+            message: "expected type".to_string(),
+            primary_label: "this is not a valid type".to_string(),
+            primary_label_loc: span,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
 
-        None => {
-            Err(ParseError::Error {
-                message: "expected type".to_string(),
-                primary_label: "eof found here".to_string(),
-                primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                secondary_labels: Vec::new(),
-                notes: Vec::new(),
-            })
-        }
+        None => Err(ParseError::Error {
+            message: "expected type".to_string(),
+            primary_label: "eof found here".to_string(),
+            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
     }
 }
 
@@ -687,25 +683,21 @@ fn parse_parametarised_type(
             )))
         }
 
-        Some((_, span)) => {
-            Err(ParseError::Error {
-                message: "expected type".to_string(),
-                primary_label: "this is not a valid type".to_string(),
-                primary_label_loc: span,
-                secondary_labels: Vec::new(),
-                notes: Vec::new(),
-            })
-        }
+        Some((_, span)) => Err(ParseError::Error {
+            message: "expected type".to_string(),
+            primary_label: "this is not a valid type".to_string(),
+            primary_label_loc: span,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
 
-        None => {
-            Err(ParseError::Error {
-                message: "expected type".to_string(),
-                primary_label: "eof found here".to_string(),
-                primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                secondary_labels: Vec::new(),
-                notes: Vec::new(),
-            })
-        }
+        None => Err(ParseError::Error {
+            message: "expected type".to_string(),
+            primary_label: "eof found here".to_string(),
+            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
     }
 }
 
@@ -714,13 +706,15 @@ fn parse_refinement_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<T
     if try_token!(lexer, Some((Token::LBrace, _))).is_some() {
         let base = match parse_parametarised_type(lexer, generics)? {
             Type::Base(v) => v,
-            _ => return Err(ParseError::Error {
-                message: todo!(),
-                primary_label: todo!(),
-                primary_label_loc: todo!(),
-                secondary_labels: todo!(),
-                notes: todo!(),
-            }),
+            _ => {
+                return Err(ParseError::Error {
+                    message: todo!(),
+                    primary_label: todo!(),
+                    primary_label_loc: todo!(),
+                    secondary_labels: todo!(),
+                    notes: todo!(),
+                })
+            }
         };
 
         if try_token!(lexer, Some((Token::Colon, _))).is_none() {
@@ -778,24 +772,20 @@ fn parse_value(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             let value = parse_expr(lexer)?;
             match lexer.lex() {
                 Some((Token::RParen, _)) => Ok(value),
-                Some((_, s2)) => {
-                    Err(ParseError::Error {
-                        message: "expected right parenthesis".to_string(),
-                        primary_label: "this is not a right parenthesis".to_string(),
-                        primary_label_loc: s2,
-                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
-                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
-                    })
-                }
-                None => {
-                    Err(ParseError::Error {
-                        message: "expected right parenthesis".to_string(),
-                        primary_label: "eof found here".to_string(),
-                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
-                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
-                    })
-                }
+                Some((_, s2)) => Err(ParseError::Error {
+                    message: "expected right parenthesis".to_string(),
+                    primary_label: "this is not a right parenthesis".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                    notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                }),
+                None => Err(ParseError::Error {
+                    message: "expected right parenthesis".to_string(),
+                    primary_label: "eof found here".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                    notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                }),
             }
         }
 
@@ -841,8 +831,10 @@ fn parse_func_call(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_muldiv(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_func_call(lexer)?;
-    while let Some((token, _)) = try_token!(lexer, Some((Token::Astrisk | Token::Slash | Token::Percent, _)))
-    {
+    while let Some((token, _)) = try_token!(
+        lexer,
+        Some((Token::Astrisk | Token::Slash | Token::Percent, _))
+    ) {
         let right = match parse_func_call(lexer) {
             Ok(v) => v,
             e @ Err(_) => {
@@ -898,7 +890,10 @@ fn parse_compare(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let mut top = parse_addsub(lexer)?;
     while let Some((token, _)) = try_token!(
         lexer,
-        Some((Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Eq | Token::Ne, _))
+        Some((
+            Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Eq | Token::Ne,
+            _
+        ))
     ) {
         let right = match parse_addsub(lexer) {
             Ok(v) => v,
@@ -990,7 +985,10 @@ fn parse_argument(
                         message: "expected colon".to_string(),
                         primary_label: "this is not a colon".to_string(),
                         primary_label_loc: s2,
-                        secondary_labels: vec![("argument declaration starts here".to_string(), s1)],
+                        secondary_labels: vec![(
+                            "argument declaration starts here".to_string(),
+                            s1,
+                        )],
                         notes: Vec::new(),
                     });
                 }
@@ -1000,7 +998,10 @@ fn parse_argument(
                         message: "expected colon".to_string(),
                         primary_label: "eof found here".to_string(),
                         primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                        secondary_labels: vec![("argument declaration starts here".to_string(), s1)],
+                        secondary_labels: vec![(
+                            "argument declaration starts here".to_string(),
+                            s1,
+                        )],
                         notes: Vec::new(),
                     });
                 }
@@ -1038,25 +1039,21 @@ fn parse_argument(
             Ok((arg.to_string(), type_))
         } else {
             match lexer.lex() {
-                Some((_, span)) => {
-                    Err(ParseError::Error {
-                        message: "expected argument name".to_string(),
-                        primary_label: "this is not a valid argument name".to_string(),
-                        primary_label_loc: span,
-                        secondary_labels: Vec::new(),
-                        notes: Vec::new(),
-                    })
-                }
+                Some((_, span)) => Err(ParseError::Error {
+                    message: "expected argument name".to_string(),
+                    primary_label: "this is not a valid argument name".to_string(),
+                    primary_label_loc: span,
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                }),
 
-                None => {
-                    Err(ParseError::Error {
-                        message: "expected argument name".to_string(),
-                        primary_label: "eof found here".to_string(),
-                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                        secondary_labels: Vec::new(),
-                        notes: Vec::new(),
-                    })
-                }
+                None => Err(ParseError::Error {
+                    message: "expected argument name".to_string(),
+                    primary_label: "eof found here".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                }),
             }
         }
     } else {
@@ -1146,10 +1143,17 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
                             message: "cannot nest `@` pattern operator".to_string(),
                             primary_label: "second instance of `@` pattern operator".to_string(),
                             primary_label_loc: s3,
-                            secondary_labels: vec![("first instance of `@` pattern operator".to_string(), s2)],
+                            secondary_labels: vec![(
+                                "first instance of `@` pattern operator".to_string(),
+                                s2,
+                            )],
                             notes: Vec::new(),
                         }),
-                        v => Ok(Pattern::As(span.start..v.span().end, name.to_string(), Box::new(v))),
+                        v => Ok(Pattern::As(
+                            span.start..v.span().end,
+                            name.to_string(),
+                            Box::new(v),
+                        )),
                     }
                 }
 
@@ -1157,7 +1161,9 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
                     let mut fields = Vec::new();
                     loop {
                         match lexer.peek() {
-                            Some((Token::Symbol("_"), span)) => fields.push(Pattern::Wildcard(span)),
+                            Some((Token::Symbol("_"), span)) => {
+                                fields.push(Pattern::Wildcard(span))
+                            }
                             Some((Token::Symbol(v), span)) => {
                                 fields.push(Pattern::SymbolOrUnitConstructor(span, v.to_string()))
                             }
@@ -1169,10 +1175,17 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
                                     Some((_, s2)) => {
                                         return Err(ParseError::Error {
                                             message: "expected right parenthesis".to_string(),
-                                            primary_label: "this is not a right parenthesis".to_string(),
+                                            primary_label: "this is not a right parenthesis"
+                                                .to_string(),
                                             primary_label_loc: s2,
-                                            secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
-                                            notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                                            secondary_labels: vec![(
+                                                "left parenthesis found here".to_string(),
+                                                s1,
+                                            )],
+                                            notes: vec![
+                                                "insert a right parenthesis to resolve this error"
+                                                    .to_string(),
+                                            ],
                                         });
                                     }
                                     None => {
@@ -1180,8 +1193,14 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
                                             message: "expected right parenthesis".to_string(),
                                             primary_label: "eof found here".to_string(),
                                             primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                                            secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
-                                            notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                                            secondary_labels: vec![(
+                                                "left parenthesis found here".to_string(),
+                                                s1,
+                                            )],
+                                            notes: vec![
+                                                "insert a right parenthesis to resolve this error"
+                                                    .to_string(),
+                                            ],
                                         });
                                     }
                                 }
@@ -1196,7 +1215,11 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
                     if fields.is_empty() {
                         Ok(Pattern::SymbolOrUnitConstructor(span, name.to_string()))
                     } else {
-                        Ok(Pattern::Constructor(span.start..fields.last().unwrap().span().end, name.to_string(), fields))
+                        Ok(Pattern::Constructor(
+                            span.start..fields.last().unwrap().span().end,
+                            name.to_string(),
+                            fields,
+                        ))
                     }
                 }
 
@@ -1262,7 +1285,10 @@ fn parse_pattern(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
     if children.len() == 1 {
         Ok(children.remove(0))
     } else {
-        Ok(Pattern::Or(children.first().unwrap().span().start..children.last().unwrap().span().end, children))
+        Ok(Pattern::Or(
+            children.first().unwrap().span().start..children.last().unwrap().span().end,
+            children,
+        ))
     }
 }
 
@@ -1326,33 +1352,27 @@ fn parse_match(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         }
 
         match lexer.lex() {
-            Some((Token::End, Span { end, .. })) => {
-                Ok(Ast::Match {
-                    span: start..end,
-                    value: Box::new(value),
-                    patterns,
-                })
-            }
+            Some((Token::End, Span { end, .. })) => Ok(Ast::Match {
+                span: start..end,
+                value: Box::new(value),
+                patterns,
+            }),
 
-            Some((_, s2)) => {
-                Err(ParseError::Error {
-                    message: "invalid match expression".to_string(),
-                    primary_label: "expected `end`".to_string(),
-                    primary_label_loc: s2,
-                    secondary_labels: vec![("match expression starts here".to_string(), span)],
-                    notes: Vec::new(),
-                })
-            }
+            Some((_, s2)) => Err(ParseError::Error {
+                message: "invalid match expression".to_string(),
+                primary_label: "expected `end`".to_string(),
+                primary_label_loc: s2,
+                secondary_labels: vec![("match expression starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
 
-            None => {
-                Err(ParseError::Error {
-                    message: "invalid match expression".to_string(),
-                    primary_label: "expected `end`".to_string(),
-                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                    secondary_labels: vec![("match expression starts here".to_string(), span)],
-                    notes: Vec::new(),
-                })
-            }
+            None => Err(ParseError::Error {
+                message: "invalid match expression".to_string(),
+                primary_label: "expected `end`".to_string(),
+                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                secondary_labels: vec![("match expression starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
         }
     } else {
         Err(ParseError::NotStarted)
@@ -1372,7 +1392,9 @@ fn parse_let(
         if !top_level && !allow_no_body && try_token!(lexer, Some((Token::LParen, _))).is_some() {
             let pattern = parse_pattern(lexer)?;
 
-            if try_token!(lexer, Some((Token::RParen, _))).is_none() || try_token!(lexer, Some((Token::Equals, _))).is_none() {
+            if try_token!(lexer, Some((Token::RParen, _))).is_none()
+                || try_token!(lexer, Some((Token::Equals, _))).is_none()
+            {
                 match lexer.lex() {
                     Some((_, s2)) => {
                         return Err(ParseError::Error {
@@ -1427,26 +1449,34 @@ fn parse_let(
                 patterns.push((Pattern::Wildcard(span), parse_expr(lexer)?));
             }
 
-            return Ok(Ast::Match { span: start..patterns.last().unwrap().1.span().end, value: Box::new(value), patterns });
+            return Ok(Ast::Match {
+                span: start..patterns.last().unwrap().1.span().end,
+                value: Box::new(value),
+                patterns,
+            });
         }
 
         let mutable = try_token!(lexer, Some((Token::Mut, _))).is_some();
         let symbol = match lexer.lex() {
             Some((Token::Symbol(v), _)) => v.to_string(),
-            Some((_, s2)) => return Err(ParseError::Error {
-                message: "invalid let binding".to_string(),
-                primary_label: "expected variable name".to_string(),
-                primary_label_loc: s2,
-                secondary_labels: vec![("let binding starts here".to_string(), span)],
-                notes: Vec::new(),
-            }),
-            None => return Err(ParseError::Error {
-                message: "invalid let binding".to_string(),
-                primary_label: "expected variable name".to_string(),
-                primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                secondary_labels: vec![("let binding starts here".to_string(), span)],
-                notes: Vec::new(),
-            }),
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid let binding".to_string(),
+                    primary_label: "expected variable name".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("let binding starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
+            None => {
+                return Err(ParseError::Error {
+                    message: "invalid let binding".to_string(),
+                    primary_label: "expected variable name".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("let binding starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
         };
 
         let mut args = Vec::new();
@@ -1474,7 +1504,11 @@ fn parse_let(
 
         if try_token!(lexer, Some((Token::Equals, _))).is_none() {
             let span = start..lexer.loc();
-            if allow_no_body && !mutable && args.iter().all(|(_, t)| !matches!(t, Type::Unknown)) && !matches!(ret_type, Type::Unknown) {
+            if allow_no_body
+                && !mutable
+                && args.iter().all(|(_, t)| !matches!(t, Type::Unknown))
+                && !matches!(ret_type, Type::Unknown)
+            {
                 return Ok(Ast::EmptyLet {
                     span,
                     symbol,
@@ -1497,7 +1531,9 @@ fn parse_let(
                     secondary_labels: Vec::new(),
                     notes: Vec::new(),
                 });
-            } else if args.iter().any(|(_, t)| matches!(t, Type::Unknown)) || matches!(ret_type, Type::Unknown) {
+            } else if args.iter().any(|(_, t)| matches!(t, Type::Unknown))
+                || matches!(ret_type, Type::Unknown)
+            {
                 return Err(ParseError::Error {
                     message: "declaration must have types declared".to_string(),
                     primary_label: "this declaration has missing type declarations".to_string(),
@@ -1537,7 +1573,10 @@ fn parse_let(
                             message: "invalid local definition".to_string(),
                             primary_label: "context expected here".to_string(),
                             primary_label_loc: s2,
-                            secondary_labels: vec![("local definition starts here".to_string(), span)],
+                            secondary_labels: vec![(
+                                "local definition starts here".to_string(),
+                                span,
+                            )],
                             notes: Vec::new(),
                         });
                     }
@@ -1547,7 +1586,10 @@ fn parse_let(
                             message: "invalid local definition".to_string(),
                             primary_label: "context expected here".to_string(),
                             primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                            secondary_labels: vec![("local definition starts here".to_string(), span)],
+                            secondary_labels: vec![(
+                                "local definition starts here".to_string(),
+                                span,
+                            )],
                             notes: Vec::new(),
                         });
                     }
@@ -1593,20 +1635,24 @@ fn parse_type_def_variant(
 ) -> Result<(String, Vec<(Option<String>, Type)>), ParseError> {
     let name = match lexer.lex() {
         Some((Token::Symbol(v), _)) => v.to_string(),
-        Some((_, span)) => return Err(ParseError::Error {
-            message: "invalid datatype variant".to_string(),
-            primary_label: "expected symbol".to_string(),
-            primary_label_loc: span,
-            secondary_labels: Vec::new(),
-            notes: Vec::new(),
-        }),
-        None => return Err(ParseError::Error {
-            message: "invalid datatype variant".to_string(),
-            primary_label: "expected symbol".to_string(),
-            primary_label_loc: lexer.loc()..lexer.loc() + 1,
-            secondary_labels: Vec::new(),
-            notes: Vec::new(),
-        }),
+        Some((_, span)) => {
+            return Err(ParseError::Error {
+                message: "invalid datatype variant".to_string(),
+                primary_label: "expected symbol".to_string(),
+                primary_label_loc: span,
+                secondary_labels: Vec::new(),
+                notes: Vec::new(),
+            })
+        }
+        None => {
+            return Err(ParseError::Error {
+                message: "invalid datatype variant".to_string(),
+                primary_label: "expected symbol".to_string(),
+                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                secondary_labels: Vec::new(),
+                notes: Vec::new(),
+            })
+        }
     };
 
     let mut fields = Vec::new();
@@ -1623,26 +1669,34 @@ fn parse_type_def_variant(
     Ok((name, fields))
 }
 
-fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(String, Vec<Type>)]) -> Result<Ast, ParseError> {
+fn parse_type_def(
+    lexer: &mut Lexer<'_>,
+    generics: &[String],
+    constraints: &[(String, Vec<Type>)],
+) -> Result<Ast, ParseError> {
     if let Some((_, span @ Span { start, .. })) = try_token!(lexer, Some((Token::Type, _))) {
         let name = match lexer.lex() {
             Some((Token::Symbol(v), _)) => v.to_string(),
 
-            Some((_, s2)) => return Err(ParseError::Error {
-                message: "invalid type definition".to_string(),
-                primary_label: "expected datatype name".to_string(),
-                primary_label_loc: s2,
-                secondary_labels: vec![("type definition starts here".to_string(), span)],
-                notes: Vec::new(),
-            }),
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid type definition".to_string(),
+                    primary_label: "expected datatype name".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("type definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
 
-            None => return Err(ParseError::Error {
-                message: "invalid type definition".to_string(),
-                primary_label: "expected datatype name".to_string(),
-                primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                secondary_labels: vec![("type definition starts here".to_string(), span)],
-                notes: Vec::new(),
-            }),
+            None => {
+                return Err(ParseError::Error {
+                    message: "invalid type definition".to_string(),
+                    primary_label: "expected datatype name".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("type definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
         };
 
         match lexer.lex() {
@@ -1706,21 +1760,31 @@ fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
                 let name = match lexer.lex() {
                     Some((Token::Symbol(v), _)) => v.to_string(),
 
-                    Some((_, s2)) => return Err(ParseError::Error {
-                        message: "invalid class definition".to_string(),
-                        primary_label: "expected constraint".to_string(),
-                        primary_label_loc: s2,
-                        secondary_labels: vec![("class definition starts here".to_string(), span)],
-                        notes: Vec::new(),
-                    }),
+                    Some((_, s2)) => {
+                        return Err(ParseError::Error {
+                            message: "invalid class definition".to_string(),
+                            primary_label: "expected constraint".to_string(),
+                            primary_label_loc: s2,
+                            secondary_labels: vec![(
+                                "class definition starts here".to_string(),
+                                span,
+                            )],
+                            notes: Vec::new(),
+                        })
+                    }
 
-                    None => return Err(ParseError::Error {
-                        message: "invalid class definition".to_string(),
-                        primary_label: "expected constraint".to_string(),
-                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                        secondary_labels: vec![("class definition starts here".to_string(), span)],
-                        notes: Vec::new(),
-                    }),
+                    None => {
+                        return Err(ParseError::Error {
+                            message: "invalid class definition".to_string(),
+                            primary_label: "expected constraint".to_string(),
+                            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                            secondary_labels: vec![(
+                                "class definition starts here".to_string(),
+                                span,
+                            )],
+                            notes: Vec::new(),
+                        })
+                    }
                 };
 
                 let mut parameters = Vec::new();
@@ -1782,7 +1846,8 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         };
 
         let mut generics = Vec::new();
-        while let Some((Token::Symbol(generic), _)) = try_token!(lexer, Some((Token::Symbol(_), _))) {
+        while let Some((Token::Symbol(generic), _)) = try_token!(lexer, Some((Token::Symbol(_), _)))
+        {
             generics.push(generic.to_string());
         }
 
@@ -1792,21 +1857,31 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
                 let name = match lexer.lex() {
                     Some((Token::Symbol(v), _)) => v.to_string(),
 
-                    Some((_, s2)) => return Err(ParseError::Error {
-                        message: "invalid class definition".to_string(),
-                        primary_label: "expected constraint".to_string(),
-                        primary_label_loc: s2,
-                        secondary_labels: vec![("class definition starts here".to_string(), span)],
-                        notes: Vec::new(),
-                    }),
+                    Some((_, s2)) => {
+                        return Err(ParseError::Error {
+                            message: "invalid class definition".to_string(),
+                            primary_label: "expected constraint".to_string(),
+                            primary_label_loc: s2,
+                            secondary_labels: vec![(
+                                "class definition starts here".to_string(),
+                                span,
+                            )],
+                            notes: Vec::new(),
+                        })
+                    }
 
-                    None => return Err(ParseError::Error {
-                        message: "invalid class definition".to_string(),
-                        primary_label: "expected constraint".to_string(),
-                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                        secondary_labels: vec![("class definition starts here".to_string(), span)],
-                        notes: Vec::new(),
-                    }),
+                    None => {
+                        return Err(ParseError::Error {
+                            message: "invalid class definition".to_string(),
+                            primary_label: "expected constraint".to_string(),
+                            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                            secondary_labels: vec![(
+                                "class definition starts here".to_string(),
+                                span,
+                            )],
+                            notes: Vec::new(),
+                        })
+                    }
                 };
 
                 let mut parameters = Vec::new();
@@ -1863,61 +1938,63 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         }
 
         match lexer.lex() {
-            Some((Token::End, Span { end, .. })) => {
-                Ok(Ast::Class {
-                    span: start..end,
-                    name,
-                    generics,
-                    constraints,
-                    functions,
-                })
-            }
+            Some((Token::End, Span { end, .. })) => Ok(Ast::Class {
+                span: start..end,
+                name,
+                generics,
+                constraints,
+                functions,
+            }),
 
-            Some((_, s2)) => {
-                Err(ParseError::Error {
-                    message: "invalid class definition".to_string(),
-                    primary_label: "expected `end`".to_string(),
-                    primary_label_loc: s2,
-                    secondary_labels: vec![("class definition starts here".to_string(), span)],
-                    notes: Vec::new(),
-                })
-            }
+            Some((_, s2)) => Err(ParseError::Error {
+                message: "invalid class definition".to_string(),
+                primary_label: "expected `end`".to_string(),
+                primary_label_loc: s2,
+                secondary_labels: vec![("class definition starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
 
-            None => {
-                Err(ParseError::Error {
-                    message: "invalid class definition".to_string(),
-                    primary_label: "expected `end`".to_string(),
-                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                    secondary_labels: vec![("class definition starts here".to_string(), span)],
-                    notes: Vec::new(),
-                })
-            }
+            None => Err(ParseError::Error {
+                message: "invalid class definition".to_string(),
+                primary_label: "expected `end`".to_string(),
+                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                secondary_labels: vec![("class definition starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
         }
     } else {
         Err(ParseError::NotStarted)
     }
 }
 
-fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(String, Vec<Type>)]) -> Result<Ast, ParseError> {
+fn parse_instance(
+    lexer: &mut Lexer<'_>,
+    generics: &[String],
+    constraints: &[(String, Vec<Type>)],
+) -> Result<Ast, ParseError> {
     if let Some((_, span @ Span { start, .. })) = try_token!(lexer, Some((Token::Instance, _))) {
         let name = match lexer.lex() {
             Some((Token::Symbol(v), _)) => v.to_string(),
 
-            Some((_, s2)) => return Err(ParseError::Error {
-                message: "invalid instance".to_string(),
-                primary_label: "expected constraint".to_string(),
-                primary_label_loc: s2,
-                secondary_labels: vec![("instance starts here".to_string(), span)],
-                notes: Vec::new(),
-            }),
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid instance".to_string(),
+                    primary_label: "expected constraint".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("instance starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
 
-            None => return Err(ParseError::Error {
-                message: "invalid instance".to_string(),
-                primary_label: "expected constraint".to_string(),
-                primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                secondary_labels: vec![("instance starts here".to_string(), span)],
-                notes: Vec::new(),
-            }),
+            None => {
+                return Err(ParseError::Error {
+                    message: "invalid instance".to_string(),
+                    primary_label: "expected constraint".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("instance starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
         };
 
         let mut parameters = Vec::new();
@@ -1955,7 +2032,12 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(St
         loop {
             match parse_let(lexer, true, &generics, false, &constraints) {
                 Ok(mut v) => {
-                    if let Ast::TopLet { generics, constraints, .. } = &mut v {
+                    if let Ast::TopLet {
+                        generics,
+                        constraints,
+                        ..
+                    } = &mut v
+                    {
                         *generics = Vec::new();
                         *constraints = Vec::new();
                     }
@@ -1968,36 +2050,30 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(St
         }
 
         match lexer.lex() {
-            Some((Token::End, Span { end, .. })) => {
-                Ok(Ast::Instance {
-                    span: start..end,
-                    name,
-                    generics: generics.to_vec(),
-                    constraints: constraints.to_vec(),
-                    parameters,
-                    functions,
-                })
-            }
+            Some((Token::End, Span { end, .. })) => Ok(Ast::Instance {
+                span: start..end,
+                name,
+                generics: generics.to_vec(),
+                constraints: constraints.to_vec(),
+                parameters,
+                functions,
+            }),
 
-            Some((_, s2)) => {
-                Err(ParseError::Error {
-                    message: "invalid instance".to_string(),
-                    primary_label: "expected `end`".to_string(),
-                    primary_label_loc: s2,
-                    secondary_labels: vec![("instance starts here".to_string(), span)],
-                    notes: Vec::new(),
-                })
-            }
+            Some((_, s2)) => Err(ParseError::Error {
+                message: "invalid instance".to_string(),
+                primary_label: "expected `end`".to_string(),
+                primary_label_loc: s2,
+                secondary_labels: vec![("instance starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
 
-            None => {
-                Err(ParseError::Error {
-                    message: "invalid instance".to_string(),
-                    primary_label: "expected `end`".to_string(),
-                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                    secondary_labels: vec![("instance starts here".to_string(), span)],
-                    notes: Vec::new(),
-                })
-            }
+            None => Err(ParseError::Error {
+                message: "invalid instance".to_string(),
+                primary_label: "expected `end`".to_string(),
+                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                secondary_labels: vec![("instance starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
         }
     } else {
         Err(ParseError::NotStarted)

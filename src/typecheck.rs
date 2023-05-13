@@ -28,7 +28,8 @@ impl Environment {
     }
 
     fn push_variable(&mut self, var: &str, type_: &Type, constraints: &[(String, Vec<Type>)]) {
-        self.variables.push((var.to_string(), type_.clone(), constraints.to_vec()));
+        self.variables
+            .push((var.to_string(), type_.clone(), constraints.to_vec()));
     }
 
     fn pop_variable(&mut self) {
@@ -36,10 +37,7 @@ impl Environment {
     }
 
     fn find_variable(&mut self, var: &str) -> Option<&(String, Type, Vec<(String, Vec<Type>)>)> {
-        self.variables
-            .iter()
-            .rev()
-            .find(|(v, ..)| v == var)
+        self.variables.iter().rev().find(|(v, ..)| v == var)
     }
 
     fn update_vars(&mut self) {
@@ -357,21 +355,24 @@ fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
             replace_unknowns(env, value);
         }
 
-        Ast::If { cond, then, elsy, .. } => {
+        Ast::If {
+            cond, then, elsy, ..
+        } => {
             replace_unknowns(env, cond);
             replace_unknowns(env, then);
             replace_unknowns(env, elsy);
         }
 
-        Ast::Match { value, patterns, .. } => {
+        Ast::Match {
+            value, patterns, ..
+        } => {
             replace_unknowns(env, value);
             for (_, val) in patterns {
                 replace_unknowns(env, val);
             }
         }
 
-        Ast::Class { functions, .. }
-        | Ast::Instance { functions, .. } => {
+        Ast::Class { functions, .. } | Ast::Instance { functions, .. } => {
             for func in functions {
                 replace_unknowns(env, func);
             }
@@ -399,7 +400,9 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             Ok(v)
         }
 
-        Ast::Binary { op, left, right, .. } => {
+        Ast::Binary {
+            op, left, right, ..
+        } => {
             let mut left = typecheck_helper(env, left)?;
             let mut right = typecheck_helper(env, right)?;
 
@@ -543,7 +546,9 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             }
         }
 
-        Ast::If { cond, then, elsy, .. } => {
+        Ast::If {
+            cond, then, elsy, ..
+        } => {
             let mut cond = typecheck_helper(env, cond)?;
             let mut then = typecheck_helper(env, then)?;
             let mut elsy = typecheck_helper(env, elsy)?;
@@ -561,7 +566,9 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
         Ast::DatatypeDefinition { .. } => Ok(Type::Unknown),
 
-        Ast::Match { value, patterns, .. } => {
+        Ast::Match {
+            value, patterns, ..
+        } => {
             let mut value = typecheck_helper(env, value)?;
             let mut result = None;
 
@@ -633,7 +640,8 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
                     }
                 }
 
-                env.instances.extend(constraints.iter().cloned().map(|(a, b)| (a, b, Vec::new())));
+                env.instances
+                    .extend(constraints.iter().cloned().map(|(a, b)| (a, b, Vec::new())));
 
                 for param in parameters.iter_mut() {
                     param.replace_type_vars(env);
@@ -641,12 +649,24 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
                 for function in functions {
                     match function {
-                        Ast::TopLet { symbol, args, ret_type, value, .. } => {
+                        Ast::TopLet {
+                            symbol,
+                            args,
+                            ret_type,
+                            value,
+                            ..
+                        } => {
                             if let Some(mut func) = class.funcs.remove(symbol) {
                                 let mut generics = HashMap::new();
                                 func.convert_generics_to_type_vars(env, &mut generics);
                                 for (g, mut v) in generics {
-                                    let i = class.generics.iter().enumerate().find(|(_, u)| g == **u).map(|(i, _)| i).unwrap();
+                                    let i = class
+                                        .generics
+                                        .iter()
+                                        .enumerate()
+                                        .find(|(_, u)| g == **u)
+                                        .map(|(i, _)| i)
+                                        .unwrap();
                                     if !parameters[i].equals_up_to_env(&mut v, env) {
                                         return Err(());
                                     }
@@ -853,10 +873,14 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             if !generics.is_empty() {
                 let mut extension = Vec::new();
                 for (name, params) in env.constraints_applied.iter() {
-                    let params: Vec<_> = params.iter().cloned().map(|mut t| {
-                        t.replace_type_vars(env);
-                        t
-                    }).collect();
+                    let params: Vec<_> = params
+                        .iter()
+                        .cloned()
+                        .map(|mut t| {
+                            t.replace_type_vars(env);
+                            t
+                        })
+                        .collect();
                     extension.push((name.clone(), params));
                 }
 
@@ -874,13 +898,17 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             replace_type_vars(value, env)
         }
 
-        Ast::If { cond, then, elsy, .. } => {
+        Ast::If {
+            cond, then, elsy, ..
+        } => {
             replace_type_vars(cond, env)?;
             replace_type_vars(then, env)?;
             replace_type_vars(elsy, env)
         }
 
-        Ast::Match { value, patterns, .. } => {
+        Ast::Match {
+            value, patterns, ..
+        } => {
             replace_type_vars(value, env)?;
             for (_, result) in patterns {
                 replace_type_vars(result, env)?;
@@ -947,13 +975,27 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
                 }
             }
 
-            Ast::Class { name, generics, constraints, functions, .. } => {
+            Ast::Class {
+                name,
+                generics,
+                constraints,
+                functions,
+                ..
+            } => {
                 let mut class_funcs = HashMap::new();
                 let mut constraints = constraints.clone();
-                constraints.push((name.clone(), generics.iter().cloned().map(Type::Generic).collect()));
+                constraints.push((
+                    name.clone(),
+                    generics.iter().cloned().map(Type::Generic).collect(),
+                ));
                 for func in functions {
                     match func {
-                        Ast::EmptyLet { symbol, args, ret_type, .. } => {
+                        Ast::EmptyLet {
+                            symbol,
+                            args,
+                            ret_type,
+                            ..
+                        } => {
                             let mut top = ret_type.clone();
                             for (_, type_) in args.iter().rev() {
                                 top = Type::Func(Box::new(type_.clone()), Box::new(top));
@@ -969,15 +1011,24 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
                     env.push_variable(a, b, &constraints);
                 }
 
-                env.classes.insert(name.to_string(), Class {
-                    generics: generics.clone(),
-                    constraints,
-                    funcs: class_funcs,
-                });
+                env.classes.insert(
+                    name.to_string(),
+                    Class {
+                        generics: generics.clone(),
+                        constraints,
+                        funcs: class_funcs,
+                    },
+                );
             }
 
-            Ast::Instance { name, parameters, constraints, .. } => {
-                env.instances.push((name.clone(), parameters.clone(), constraints.clone()));
+            Ast::Instance {
+                name,
+                parameters,
+                constraints,
+                ..
+            } => {
+                env.instances
+                    .push((name.clone(), parameters.clone(), constraints.clone()));
             }
 
             _ => (),

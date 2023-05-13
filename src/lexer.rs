@@ -124,7 +124,9 @@ impl<'a> Lexer<'a> {
                 match state {
                     State::Initial => match c {
                         '0'..='9' => state = State::Number,
-                        '+' | '*' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | '@' | ',' =>state = State::SingleChar,
+                        '+' | '*' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | '@' | ',' => {
+                            state = State::SingleChar
+                        }
                         '/' => state = State::Slash,
                         '|' | '&' => state = State::Double,
                         '<' | '>' | '=' => state = State::AppendEq,
@@ -202,7 +204,9 @@ impl<'a> Lexer<'a> {
 
             let s = &self.contents[initial_pos..final_pos];
             let token = match state {
-                State::Initial | State::AppendEq | State::Double | State::SingleComment => unreachable!(),
+                State::Initial | State::AppendEq | State::Double | State::SingleComment => {
+                    unreachable!()
+                }
                 State::Invalid => Token::Invalid(s),
                 State::Number => Token::Integer(s.parse().unwrap()),
                 State::Not => Token::Exclamation,
