@@ -110,21 +110,21 @@ impl Display for BinaryOp {
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Wildcard,
-    Symbol(String),
-    Constructor(String, Vec<Pattern>),
-    SymbolOrUnitConstructor(String),
-    As(String, Box<Pattern>),
-    Or(Vec<Pattern>),
+    Wildcard(Span),
+    Symbol(Span, String),
+    Constructor(Span, String, Vec<Pattern>),
+    SymbolOrUnitConstructor(Span, String),
+    As(Span, String, Box<Pattern>),
+    Or(Span, Vec<Pattern>),
 }
 
 impl Display for Pattern {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Pattern::Wildcard => write!(f, "_"),
-            Pattern::Symbol(s) | Pattern::SymbolOrUnitConstructor(s) => write!(f, "{}", s),
+            Pattern::Wildcard(_) => write!(f, "_"),
+            Pattern::Symbol(_, s) | Pattern::SymbolOrUnitConstructor(_, s) => write!(f, "{}", s),
 
-            Pattern::Constructor(cons, pats) => {
+            Pattern::Constructor(_, cons, pats) => {
                 write!(f, "({}", cons)?;
                 for pat in pats {
                     write!(f, " {}", pat)?;
@@ -132,9 +132,9 @@ impl Display for Pattern {
                 write!(f, ")")
             }
 
-            Pattern::As(name, pat) => write!(f, "({} @ {})", name, pat),
+            Pattern::As(_, name, pat) => write!(f, "({} @ {})", name, pat),
 
-            Pattern::Or(pats) => {
+            Pattern::Or(_, pats) => {
                 let mut first = true;
                 for pat in pats {
                     if first {
@@ -147,6 +147,19 @@ impl Display for Pattern {
 
                 Ok(())
             }
+        }
+    }
+}
+
+impl Pattern {
+    pub fn span(&self) -> Span {
+        match self {
+            Pattern::Wildcard(span)
+            | Pattern::Symbol(span, _)
+            | Pattern::Constructor(span, _, _)
+            | Pattern::SymbolOrUnitConstructor(span, _)
+            | Pattern::As(span, _, _)
+            | Pattern::Or(span, _) => span.clone(),
         }
     }
 }
@@ -524,18 +537,13 @@ impl Display for Ast {
 #[derive(Debug)]
 pub enum ParseError {
     NotStarted,
-    InvalidValue,
-    UnclosedBracket,
-    InvalidInfix,
-    InvalidLet,
-    InvalidType,
-    InvalidArg,
-    InvalidIf,
-    InvalidTypeDef,
-    InvalidMatch,
-    InvalidPattern,
-    InvalidClass,
-    InvalidInstance,
+    Error {
+        message: String,
+        primary_label: String,
+        primary_label_loc: Span,
+        secondary_labels: Vec<(String, Span)>,
+        notes: Vec<String>,
+    },
 }
 
 macro_rules! try_token {
@@ -549,56 +557,60 @@ macro_rules! try_token {
     }};
 }
 
-macro_rules! try_clean {
-    ($parse: expr, $lexer: expr, $state: ident, $error: expr) => {
-        match $parse {
-            Ok(v) => v,
-            e @ Err(_) => {
-                $lexer.pop($state);
-                return e;
-            }
-        }
-    };
-}
-
 fn parse_base_type(
     lexer: &mut Lexer<'_>,
     generics: &[String],
     parse_names: bool,
 ) -> Result<Type, ParseError> {
     let state = lexer.push();
-    match lexer.lex().map(|v| v.0) {
-        Some(Token::Exclamation) => Ok(Type::Base(BaseType::Bottom)),
-        Some(Token::Symbol("bool")) => Ok(Type::Base(BaseType::Bool)),
-        Some(Token::Symbol("i8")) => Ok(Type::Base(BaseType::I8)),
-        Some(Token::Symbol("i16")) => Ok(Type::Base(BaseType::I16)),
-        Some(Token::Symbol("i32")) => Ok(Type::Base(BaseType::I32)),
-        Some(Token::Symbol("i64")) => Ok(Type::Base(BaseType::I64)),
-        Some(Token::Symbol("u8")) => Ok(Type::Base(BaseType::U8)),
-        Some(Token::Symbol("u16")) => Ok(Type::Base(BaseType::U16)),
-        Some(Token::Symbol("u32")) => Ok(Type::Base(BaseType::U32)),
-        Some(Token::Symbol("u64")) => Ok(Type::Base(BaseType::U64)),
-        Some(Token::Symbol("f32")) => Ok(Type::Base(BaseType::F32)),
-        Some(Token::Symbol("f64")) => Ok(Type::Base(BaseType::F64)),
-        Some(Token::Symbol(s)) if generics.iter().any(|v| v.as_str() == s) => {
+    match lexer.lex() {
+        Some((Token::Exclamation, _)) => Ok(Type::Base(BaseType::Bottom)),
+        Some((Token::Symbol("bool"), _)) => Ok(Type::Base(BaseType::Bool)),
+        Some((Token::Symbol("i8"), _)) => Ok(Type::Base(BaseType::I8)),
+        Some((Token::Symbol("i16"), _)) => Ok(Type::Base(BaseType::I16)),
+        Some((Token::Symbol("i32"), _)) => Ok(Type::Base(BaseType::I32)),
+        Some((Token::Symbol("i64"), _)) => Ok(Type::Base(BaseType::I64)),
+        Some((Token::Symbol("u8"), _)) => Ok(Type::Base(BaseType::U8)),
+        Some((Token::Symbol("u16"), _)) => Ok(Type::Base(BaseType::U16)),
+        Some((Token::Symbol("u32"), _)) => Ok(Type::Base(BaseType::U32)),
+        Some((Token::Symbol("u64"), _)) => Ok(Type::Base(BaseType::U64)),
+        Some((Token::Symbol("f32"), _)) => Ok(Type::Base(BaseType::F32)),
+        Some((Token::Symbol("f64"), _)) => Ok(Type::Base(BaseType::F64)),
+        Some((Token::Symbol(s), _)) if generics.iter().any(|v| v.as_str() == s) => {
             Ok(Type::Generic(s.to_string()))
         }
-        Some(Token::Symbol(s)) if parse_names => Ok(Type::Base(BaseType::Named(
+        Some((Token::Symbol(s), _)) if parse_names => Ok(Type::Base(BaseType::Named(
             s.to_string(),
             Vec::new(),
             Vec::new(),
         ))),
 
-        Some(Token::LParen) => {
+        Some((Token::LParen, s1)) => {
             let type_ = parse_type(lexer, generics)?;
-            if let Some((Token::RParen, _)) = lexer.lex() {
-                Ok(type_)
-            } else {
-                Err(ParseError::UnclosedBracket)
+            match lexer.lex() {
+                Some((Token::RParen, _)) => Ok(type_),
+                Some((_, s2)) => {
+                    Err(ParseError::Error {
+                        message: "expected right parenthesis".to_string(),
+                        primary_label: "this is not a right parenthesis".to_string(),
+                        primary_label_loc: s2,
+                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                    })
+                }
+                None => {
+                    Err(ParseError::Error {
+                        message: "expected right parenthesis".to_string(),
+                        primary_label: "eof found here".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                    })
+                }
             }
         }
 
-        Some(Token::LBrace) => {
+        Some((Token::LBrace, _)) => {
             lexer.pop(state);
             parse_refinement_type(lexer, generics)
         }
@@ -617,14 +629,34 @@ fn parse_child_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, 
         e @ Err(_) => return e,
     }
 
-    if let Some((Token::Symbol(s), _)) = try_token!(lexer, Some((Token::Symbol(_), _))) {
-        Ok(Type::Base(BaseType::Named(
-            s.to_string(),
-            Vec::new(),
-            Vec::new(),
-        )))
-    } else {
-        Err(ParseError::InvalidType)
+    match lexer.lex() {
+        Some((Token::Symbol(s), _)) => {
+            Ok(Type::Base(BaseType::Named(
+                s.to_string(),
+                Vec::new(),
+                Vec::new(),
+            )))
+        }
+
+        Some((_, span)) => {
+            Err(ParseError::Error {
+                message: "expected type".to_string(),
+                primary_label: "this is not a valid type".to_string(),
+                primary_label_loc: span,
+                secondary_labels: Vec::new(),
+                notes: Vec::new(),
+            })
+        }
+
+        None => {
+            Err(ParseError::Error {
+                message: "expected type".to_string(),
+                primary_label: "eof found here".to_string(),
+                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                secondary_labels: Vec::new(),
+                notes: Vec::new(),
+            })
+        }
     }
 }
 
@@ -655,25 +687,62 @@ fn parse_parametarised_type(
             )))
         }
 
-        _ => Err(ParseError::InvalidType),
+        Some((_, span)) => {
+            Err(ParseError::Error {
+                message: "expected type".to_string(),
+                primary_label: "this is not a valid type".to_string(),
+                primary_label_loc: span,
+                secondary_labels: Vec::new(),
+                notes: Vec::new(),
+            })
+        }
+
+        None => {
+            Err(ParseError::Error {
+                message: "expected type".to_string(),
+                primary_label: "eof found here".to_string(),
+                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                secondary_labels: Vec::new(),
+                notes: Vec::new(),
+            })
+        }
     }
 }
 
+#[allow(unreachable_code)]
 fn parse_refinement_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
     if try_token!(lexer, Some((Token::LBrace, _))).is_some() {
         let base = match parse_parametarised_type(lexer, generics)? {
             Type::Base(v) => v,
-            _ => return Err(ParseError::InvalidType),
+            _ => return Err(ParseError::Error {
+                message: todo!(),
+                primary_label: todo!(),
+                primary_label_loc: todo!(),
+                secondary_labels: todo!(),
+                notes: todo!(),
+            }),
         };
 
         if try_token!(lexer, Some((Token::Colon, _))).is_none() {
-            return Err(ParseError::UnclosedBracket);
+            return Err(ParseError::Error {
+                message: todo!(),
+                primary_label: todo!(),
+                primary_label_loc: todo!(),
+                secondary_labels: todo!(),
+                notes: todo!(),
+            });
         }
 
         let constraint = parse_expr(lexer)?;
 
         if try_token!(lexer, Some((Token::RBrace, _))).is_none() {
-            return Err(ParseError::UnclosedBracket);
+            return Err(ParseError::Error {
+                message: todo!(),
+                primary_label: todo!(),
+                primary_label_loc: todo!(),
+                secondary_labels: todo!(),
+                notes: todo!(),
+            });
         }
 
         Ok(Type::Refined(base, Box::new(constraint)))
@@ -705,16 +774,46 @@ fn parse_value(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         Some((Token::Integer(n), span)) => Ok(Ast::Integer(span, n)),
         Some((Token::Bool(b), span)) => Ok(Ast::Bool(span, b)),
         Some((Token::Symbol(s), span)) => Ok(Ast::Symbol(span, s.to_string())),
-        Some((Token::LParen, _)) => {
+        Some((Token::LParen, s1)) => {
             let value = parse_expr(lexer)?;
-            if let Some((Token::RParen, _)) = lexer.lex() {
-                Ok(value)
-            } else {
-                Err(ParseError::UnclosedBracket)
+            match lexer.lex() {
+                Some((Token::RParen, _)) => Ok(value),
+                Some((_, s2)) => {
+                    Err(ParseError::Error {
+                        message: "expected right parenthesis".to_string(),
+                        primary_label: "this is not a right parenthesis".to_string(),
+                        primary_label_loc: s2,
+                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                    })
+                }
+                None => {
+                    Err(ParseError::Error {
+                        message: "expected right parenthesis".to_string(),
+                        primary_label: "eof found here".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                    })
+                }
             }
         }
 
-        _ => Err(ParseError::InvalidValue),
+        Some((_, span)) => Err(ParseError::Error {
+            message: "expected value".to_string(),
+            primary_label: "this is not a value".to_string(),
+            primary_label_loc: span,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
+
+        None => Err(ParseError::Error {
+            message: "expected value".to_string(),
+            primary_label: "eof found here".to_string(),
+            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
     }
 }
 
@@ -744,12 +843,13 @@ fn parse_muldiv(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let mut top = parse_func_call(lexer)?;
     while let Some((token, _)) = try_token!(lexer, Some((Token::Astrisk | Token::Slash | Token::Percent, _)))
     {
-        let right = try_clean!(
-            parse_func_call(lexer),
-            lexer,
-            state,
-            ParseError::InvalidInfix
-        );
+        let right = match parse_func_call(lexer) {
+            Ok(v) => v,
+            e @ Err(_) => {
+                lexer.pop(state);
+                return e;
+            }
+        };
         top = Ast::Binary {
             span: top.span().start..right.span().end,
             op: match token {
@@ -770,7 +870,14 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_muldiv(lexer)?;
     while let Some((token, _)) = try_token!(lexer, Some((Token::Plus | Token::Minus, _))) {
-        let right = try_clean!(parse_muldiv(lexer), lexer, state, ParseError::InvalidInfix);
+        let right = match parse_muldiv(lexer) {
+            Ok(v) => v,
+            e @ Err(_) => {
+                lexer.pop(state);
+                return e;
+            }
+        };
+
         top = Ast::Binary {
             span: top.span().start..right.span().end,
             op: match token {
@@ -793,7 +900,14 @@ fn parse_compare(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         lexer,
         Some((Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Eq | Token::Ne, _))
     ) {
-        let right = try_clean!(parse_addsub(lexer), lexer, state, ParseError::InvalidInfix);
+        let right = match parse_addsub(lexer) {
+            Ok(v) => v,
+            e @ Err(_) => {
+                lexer.pop(state);
+                return e;
+            }
+        };
+
         top = Ast::Binary {
             span: top.span().start..right.span().end,
             op: match token {
@@ -817,7 +931,14 @@ fn parse_and(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_compare(lexer)?;
     while try_token!(lexer, Some((Token::LogicalAnd, _))).is_some() {
-        let right = try_clean!(parse_compare(lexer), lexer, state, ParseError::InvalidInfix);
+        let right = match parse_compare(lexer) {
+            Ok(v) => v,
+            e @ Err(_) => {
+                lexer.pop(state);
+                return e;
+            }
+        };
+
         top = Ast::Binary {
             span: top.span().start..right.span().end,
             op: BinaryOp::LogicalAnd,
@@ -833,7 +954,14 @@ fn parse_or(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_and(lexer)?;
     while try_token!(lexer, Some((Token::LogicalOr, _))).is_some() {
-        let right = try_clean!(parse_and(lexer), lexer, state, ParseError::InvalidInfix);
+        let right = match parse_and(lexer) {
+            Ok(v) => v,
+            e @ Err(_) => {
+                lexer.pop(state);
+                return e;
+            }
+        };
+
         top = Ast::Binary {
             span: top.span().start..right.span().end,
             op: BinaryOp::LogicalAnd,
@@ -852,10 +980,30 @@ fn parse_argument(
 ) -> Result<(String, Option<Type>), ParseError> {
     if let Some((Token::Symbol(s), _)) = try_token!(lexer, Some((Token::Symbol(_), _))) {
         Ok((s.to_string(), None))
-    } else if try_token!(lexer, Some((Token::LParen, _))).is_some() {
+    } else if let Some((_, s1)) = try_token!(lexer, Some((Token::LParen, _))) {
         if let Some((Token::Symbol(arg), _)) = try_token!(lexer, Some((Token::Symbol(_), _))) {
-            if try_token!(lexer, Some((Token::Colon, _))).is_none() {
-                return Err(ParseError::InvalidArg);
+            match lexer.lex() {
+                Some((Token::Colon, _)) => (),
+
+                Some((_, s2)) => {
+                    return Err(ParseError::Error {
+                        message: "expected colon".to_string(),
+                        primary_label: "this is not a colon".to_string(),
+                        primary_label_loc: s2,
+                        secondary_labels: vec![("argument declaration starts here".to_string(), s1)],
+                        notes: Vec::new(),
+                    });
+                }
+
+                None => {
+                    return Err(ParseError::Error {
+                        message: "expected colon".to_string(),
+                        primary_label: "eof found here".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![("argument declaration starts here".to_string(), s1)],
+                        notes: Vec::new(),
+                    });
+                }
             }
 
             let type_ = if allow_type && try_token!(lexer, Some((Token::Type, _))).is_some() {
@@ -863,13 +1011,53 @@ fn parse_argument(
             } else {
                 Some(parse_type(lexer, generics)?)
             };
-            if try_token!(lexer, Some((Token::RParen, _))).is_none() {
-                return Err(ParseError::InvalidArg);
+
+            match lexer.lex() {
+                Some((Token::RParen, _)) => (),
+                Some((_, s2)) => {
+                    return Err(ParseError::Error {
+                        message: "expected right parenthesis".to_string(),
+                        primary_label: "this is not a right parenthesis".to_string(),
+                        primary_label_loc: s2,
+                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                        notes: Vec::new(),
+                    });
+                }
+
+                None => {
+                    return Err(ParseError::Error {
+                        message: "expected colon".to_string(),
+                        primary_label: "eof found here".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                        notes: Vec::new(),
+                    });
+                }
             }
 
             Ok((arg.to_string(), type_))
         } else {
-            Err(ParseError::InvalidArg)
+            match lexer.lex() {
+                Some((_, span)) => {
+                    Err(ParseError::Error {
+                        message: "expected argument name".to_string(),
+                        primary_label: "this is not a valid argument name".to_string(),
+                        primary_label_loc: span,
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    })
+                }
+
+                None => {
+                    Err(ParseError::Error {
+                        message: "expected argument name".to_string(),
+                        primary_label: "eof found here".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    })
+                }
+            }
         }
     } else {
         Err(ParseError::NotStarted)
@@ -877,17 +1065,56 @@ fn parse_argument(
 }
 
 fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::If, _))) {
+    if let Some((_, s1 @ Span { start, .. })) = try_token!(lexer, Some((Token::If, _))) {
         let cond = parse_expr(lexer)?;
-        if try_token!(lexer, Some((Token::Then, _))).is_none() {
-            return Err(ParseError::InvalidIf);
+        match lexer.lex() {
+            Some((Token::Then, _)) => (),
+
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid if expression".to_string(),
+                    primary_label: "expected `then`".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("if expression starts here".to_string(), s1)],
+                    notes: Vec::new(),
+                });
+            }
+
+            None => {
+                return Err(ParseError::Error {
+                    message: "invalid if expression".to_string(),
+                    primary_label: "expected `then`".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("if expression starts here".to_string(), s1)],
+                    notes: Vec::new(),
+                });
+            }
         }
 
         let then = parse_expr(lexer)?;
-        if try_token!(lexer, Some((Token::Else, _))).is_none() {
-            return Err(ParseError::InvalidIf);
-        }
+        match lexer.lex() {
+            Some((Token::Else, _)) => (),
 
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid if expression".to_string(),
+                    primary_label: "expected `else`".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("if expression starts here".to_string(), s1)],
+                    notes: Vec::new(),
+                });
+            }
+
+            None => {
+                return Err(ParseError::Error {
+                    message: "invalid if expression".to_string(),
+                    primary_label: "expected `else`".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("if expression starts here".to_string(), s1)],
+                    notes: Vec::new(),
+                });
+            }
+        }
         let elsy = parse_expr(lexer)?;
 
         Ok(Ast::If {
@@ -902,38 +1129,61 @@ fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 }
 
 fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
-    match lexer.peek().map(|v| v.0) {
-        Some(Token::Symbol("_")) => {
+    match lexer.peek() {
+        Some((Token::Symbol("_"), span)) => {
             lexer.lex();
-            Ok(Pattern::Wildcard)
+            Ok(Pattern::Wildcard(span))
         }
 
-        Some(Token::Symbol(name)) => {
+        Some((Token::Symbol(name), span)) => {
             lexer.lex();
 
             match lexer.peek() {
-                Some((Token::At, _)) => {
+                Some((Token::At, s2)) => {
                     lexer.lex();
                     match parse_pattern_child(lexer)? {
-                        Pattern::As(_, _) => Err(ParseError::InvalidPattern),
-                        v => Ok(Pattern::As(name.to_string(), Box::new(v))),
+                        Pattern::As(s3, _, _) => Err(ParseError::Error {
+                            message: "cannot nest `@` pattern operator".to_string(),
+                            primary_label: "second instance of `@` pattern operator".to_string(),
+                            primary_label_loc: s3,
+                            secondary_labels: vec![("first instance of `@` pattern operator".to_string(), s2)],
+                            notes: Vec::new(),
+                        }),
+                        v => Ok(Pattern::As(span.start..v.span().end, name.to_string(), Box::new(v))),
                     }
                 }
 
                 Some(_) => {
                     let mut fields = Vec::new();
                     loop {
-                        match lexer.peek().map(|v| v.0) {
-                            Some(Token::Symbol("_")) => fields.push(Pattern::Wildcard),
-                            Some(Token::Symbol(v)) => {
-                                fields.push(Pattern::SymbolOrUnitConstructor(v.to_string()))
+                        match lexer.peek() {
+                            Some((Token::Symbol("_"), span)) => fields.push(Pattern::Wildcard(span)),
+                            Some((Token::Symbol(v), span)) => {
+                                fields.push(Pattern::SymbolOrUnitConstructor(span, v.to_string()))
                             }
-                            Some(Token::LParen) => {
+                            Some((Token::LParen, s1)) => {
                                 lexer.lex();
                                 fields.push(parse_pattern(lexer)?);
-                                if let Some((Token::RParen, _)) = lexer.peek() {
-                                } else {
-                                    return Err(ParseError::InvalidPattern);
+                                match lexer.peek() {
+                                    Some((Token::RParen, _)) => (),
+                                    Some((_, s2)) => {
+                                        return Err(ParseError::Error {
+                                            message: "expected right parenthesis".to_string(),
+                                            primary_label: "this is not a right parenthesis".to_string(),
+                                            primary_label_loc: s2,
+                                            secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                                            notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                                        });
+                                    }
+                                    None => {
+                                        return Err(ParseError::Error {
+                                            message: "expected right parenthesis".to_string(),
+                                            primary_label: "eof found here".to_string(),
+                                            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                                            secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                                            notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                                        });
+                                    }
                                 }
                             }
 
@@ -944,27 +1194,61 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
                     }
 
                     if fields.is_empty() {
-                        Ok(Pattern::SymbolOrUnitConstructor(name.to_string()))
+                        Ok(Pattern::SymbolOrUnitConstructor(span, name.to_string()))
                     } else {
-                        Ok(Pattern::Constructor(name.to_string(), fields))
+                        Ok(Pattern::Constructor(span.start..fields.last().unwrap().span().end, name.to_string(), fields))
                     }
                 }
 
-                _ => Ok(Pattern::SymbolOrUnitConstructor(name.to_string())),
+                _ => Ok(Pattern::SymbolOrUnitConstructor(span, name.to_string())),
             }
         }
 
-        Some(Token::LParen) => {
+        Some((Token::LParen, s1)) => {
             lexer.lex();
             let v = parse_pattern(lexer)?;
-            if try_token!(lexer, Some((Token::RParen, _))).is_none() {
-                return Err(ParseError::InvalidPattern);
+            match lexer.lex() {
+                Some((Token::RParen, _)) => (),
+
+                Some((_, s2)) => {
+                    return Err(ParseError::Error {
+                        message: "expected right parenthesis".to_string(),
+                        primary_label: "this is not a right parenthesis".to_string(),
+                        primary_label_loc: s2,
+                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                    });
+                }
+
+                None => {
+                    return Err(ParseError::Error {
+                        message: "expected right parenthesis".to_string(),
+                        primary_label: "eof found here".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![("left parenthesis found here".to_string(), s1)],
+                        notes: vec!["insert a right parenthesis to resolve this error".to_string()],
+                    });
+                }
             }
 
             Ok(v)
         }
 
-        _ => Err(ParseError::InvalidPattern),
+        Some((_, span)) => Err(ParseError::Error {
+            message: "invalid pattern".to_string(),
+            primary_label: "expected a pattern".to_string(),
+            primary_label_loc: span,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
+
+        None => Err(ParseError::Error {
+            message: "expected a pattern".to_string(),
+            primary_label: "eof found here".to_string(),
+            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
     }
 }
 
@@ -978,37 +1262,97 @@ fn parse_pattern(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
     if children.len() == 1 {
         Ok(children.remove(0))
     } else {
-        Ok(Pattern::Or(children))
+        Ok(Pattern::Or(children.first().unwrap().span().start..children.last().unwrap().span().end, children))
     }
 }
 
 fn parse_match(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::Match, _))) {
+    if let Some((_, span @ Span { start, .. })) = try_token!(lexer, Some((Token::Match, _))) {
         let value = parse_expr(lexer)?;
-        if try_token!(lexer, Some((Token::With, _))).is_none() {
-            return Err(ParseError::InvalidMatch);
+        match lexer.lex() {
+            Some((Token::With, _)) => (),
+
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid match expression".to_string(),
+                    primary_label: "expected `with`".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("match expression starts here".to_string(), span)],
+                    notes: Vec::new(),
+                });
+            }
+
+            None => {
+                return Err(ParseError::Error {
+                    message: "invalid match expression".to_string(),
+                    primary_label: "expected `with`".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("match expression starts here".to_string(), span)],
+                    notes: Vec::new(),
+                });
+            }
         }
 
         let mut patterns = Vec::new();
         while try_token!(lexer, Some((Token::Pipe, _))).is_some() {
             let pattern = parse_pattern(lexer)?;
 
-            if try_token!(lexer, Some((Token::To, _))).is_none() {
-                return Err(ParseError::InvalidMatch);
+            match lexer.lex() {
+                Some((Token::To, _)) => (),
+
+                Some((_, s2)) => {
+                    return Err(ParseError::Error {
+                        message: "invalid match expression".to_string(),
+                        primary_label: "expected `to`".to_string(),
+                        primary_label_loc: s2,
+                        secondary_labels: vec![("match expression starts here".to_string(), span)],
+                        notes: Vec::new(),
+                    });
+                }
+
+                None => {
+                    return Err(ParseError::Error {
+                        message: "invalid match expression".to_string(),
+                        primary_label: "expected `to`".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![("match expression starts here".to_string(), span)],
+                        notes: Vec::new(),
+                    });
+                }
             }
 
             let value = parse_expr(lexer)?;
             patterns.push((pattern, value));
         }
 
-        if let Some((_, Span { end, .. })) = try_token!(lexer, Some((Token::End, _))) {
-            Ok(Ast::Match {
-                span: start..end,
-                value: Box::new(value),
-                patterns,
-            })
-        } else {
-            Err(ParseError::InvalidMatch)
+        match lexer.lex() {
+            Some((Token::End, Span { end, .. })) => {
+                Ok(Ast::Match {
+                    span: start..end,
+                    value: Box::new(value),
+                    patterns,
+                })
+            }
+
+            Some((_, s2)) => {
+                Err(ParseError::Error {
+                    message: "invalid match expression".to_string(),
+                    primary_label: "expected `end`".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("match expression starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
+
+            None => {
+                Err(ParseError::Error {
+                    message: "invalid match expression".to_string(),
+                    primary_label: "expected `end`".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("match expression starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
         }
     } else {
         Err(ParseError::NotStarted)
@@ -1022,34 +1366,87 @@ fn parse_let(
     allow_no_body: bool,
     constraints: &[(String, Vec<Type>)],
 ) -> Result<Ast, ParseError> {
-    if let Some((Token::Let, Span { start, .. })) = lexer.peek() {
+    if let Some((Token::Let, span @ Span { start, .. })) = lexer.peek() {
         lexer.lex();
 
         if !top_level && !allow_no_body && try_token!(lexer, Some((Token::LParen, _))).is_some() {
             let pattern = parse_pattern(lexer)?;
 
             if try_token!(lexer, Some((Token::RParen, _))).is_none() || try_token!(lexer, Some((Token::Equals, _))).is_none() {
-                return Err(ParseError::InvalidLet);
+                match lexer.lex() {
+                    Some((_, s2)) => {
+                        return Err(ParseError::Error {
+                            message: "invalid let binding".to_string(),
+                            primary_label: "expected `)` followed by `=`".to_string(),
+                            primary_label_loc: s2,
+                            secondary_labels: vec![("let binding starts here".to_string(), span)],
+                            notes: Vec::new(),
+                        });
+                    }
+
+                    None => {
+                        return Err(ParseError::Error {
+                            message: "invalid let binding".to_string(),
+                            primary_label: "expected `)` followed by `=`".to_string(),
+                            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                            secondary_labels: vec![("let binding starts here".to_string(), span)],
+                            notes: Vec::new(),
+                        });
+                    }
+                }
             }
 
             let value = parse_expr(lexer)?;
             if try_token!(lexer, Some((Token::In, _))).is_none() {
-                return Err(ParseError::InvalidLet);
+                match lexer.lex() {
+                    Some((_, s2)) => {
+                        return Err(ParseError::Error {
+                            message: "invalid let binding".to_string(),
+                            primary_label: "expected `in`".to_string(),
+                            primary_label_loc: s2,
+                            secondary_labels: vec![("let binding starts here".to_string(), span)],
+                            notes: Vec::new(),
+                        });
+                    }
+
+                    None => {
+                        return Err(ParseError::Error {
+                            message: "invalid let binding".to_string(),
+                            primary_label: "expected `in`".to_string(),
+                            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                            secondary_labels: vec![("let binding starts here".to_string(), span)],
+                            notes: Vec::new(),
+                        });
+                    }
+                }
             }
             let context = parse_expr(lexer)?;
 
             let mut patterns = vec![(pattern, context)];
-            if let Some(elsy) = try_token!(lexer, Some((Token::Else, _))).map(|_| parse_expr(lexer)) {
-                patterns.push((Pattern::Wildcard, elsy?));
+            if let Some((_, span)) = try_token!(lexer, Some((Token::Else, _))) {
+                patterns.push((Pattern::Wildcard(span), parse_expr(lexer)?));
             }
 
             return Ok(Ast::Match { span: start..patterns.last().unwrap().1.span().end, value: Box::new(value), patterns });
         }
 
         let mutable = try_token!(lexer, Some((Token::Mut, _))).is_some();
-        let symbol = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+        let symbol = match lexer.lex() {
             Some((Token::Symbol(v), _)) => v.to_string(),
-            _ => return Err(ParseError::InvalidLet),
+            Some((_, s2)) => return Err(ParseError::Error {
+                message: "invalid let binding".to_string(),
+                primary_label: "expected variable name".to_string(),
+                primary_label_loc: s2,
+                secondary_labels: vec![("let binding starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
+            None => return Err(ParseError::Error {
+                message: "invalid let binding".to_string(),
+                primary_label: "expected variable name".to_string(),
+                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                secondary_labels: vec![("let binding starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
         };
 
         let mut args = Vec::new();
@@ -1076,18 +1473,48 @@ fn parse_let(
         };
 
         if try_token!(lexer, Some((Token::Equals, _))).is_none() {
+            let span = start..lexer.loc();
             if allow_no_body && !mutable && args.iter().all(|(_, t)| !matches!(t, Type::Unknown)) && !matches!(ret_type, Type::Unknown) {
                 return Ok(Ast::EmptyLet {
-                    span: start..lexer.loc(),
+                    span,
                     symbol,
                     args,
                     ret_type,
                 });
-            } else {
-                return Err(ParseError::InvalidLet);
+            } else if !allow_no_body {
+                return Err(ParseError::Error {
+                    message: "declaration is not allowed in this position".to_string(),
+                    primary_label: "declaration is invalid here".to_string(),
+                    primary_label_loc: span,
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+            } else if mutable {
+                return Err(ParseError::Error {
+                    message: "declaration cannot be mutable".to_string(),
+                    primary_label: "this declaration is mutable".to_string(),
+                    primary_label_loc: span,
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+            } else if args.iter().any(|(_, t)| matches!(t, Type::Unknown)) || matches!(ret_type, Type::Unknown) {
+                return Err(ParseError::Error {
+                    message: "declaration must have types declared".to_string(),
+                    primary_label: "this declaration has missing type declarations".to_string(),
+                    primary_label_loc: span,
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
             }
         } else if allow_no_body {
-            return Err(ParseError::InvalidLet);
+            let (_, s2) = try_token!(lexer, Some((Token::Equals, _))).unwrap();
+            return Err(ParseError::Error {
+                message: "declaration must not have a body".to_string(),
+                primary_label: "body starting here".to_string(),
+                primary_label_loc: s2,
+                secondary_labels: Vec::new(),
+                notes: Vec::new(),
+            });
         }
 
         let value = parse_expr(lexer)?;
@@ -1103,11 +1530,46 @@ fn parse_let(
                     ret_type,
                     value: Box::new(value),
                 });
-            } else {
-                return Err(ParseError::InvalidLet);
+            } else if !top_level {
+                match lexer.lex() {
+                    Some((_, s2)) => {
+                        return Err(ParseError::Error {
+                            message: "invalid local definition".to_string(),
+                            primary_label: "context expected here".to_string(),
+                            primary_label_loc: s2,
+                            secondary_labels: vec![("local definition starts here".to_string(), span)],
+                            notes: Vec::new(),
+                        });
+                    }
+
+                    None => {
+                        return Err(ParseError::Error {
+                            message: "invalid local definition".to_string(),
+                            primary_label: "context expected here".to_string(),
+                            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                            secondary_labels: vec![("local definition starts here".to_string(), span)],
+                            notes: Vec::new(),
+                        });
+                    }
+                }
+            } else if mutable {
+                return Err(ParseError::Error {
+                    message: "invalid top level definition".to_string(),
+                    primary_label: "top level definition cannot be mutable".to_string(),
+                    primary_label_loc: span,
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
             }
         } else if top_level {
-            return Err(ParseError::InvalidLet);
+            let (_, s2) = try_token!(lexer, Some((Token::In, _))).unwrap();
+            return Err(ParseError::Error {
+                message: "top level definition must not have a context".to_string(),
+                primary_label: "context starting here".to_string(),
+                primary_label_loc: s2,
+                secondary_labels: vec![("top level definition starts here".to_string(), span)],
+                notes: Vec::new(),
+            });
         }
 
         let context = parse_expr(lexer)?;
@@ -1129,9 +1591,22 @@ fn parse_type_def_variant(
     lexer: &mut Lexer<'_>,
     generics: &[String],
 ) -> Result<(String, Vec<(Option<String>, Type)>), ParseError> {
-    let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+    let name = match lexer.lex() {
         Some((Token::Symbol(v), _)) => v.to_string(),
-        _ => return Err(ParseError::InvalidTypeDef),
+        Some((_, span)) => return Err(ParseError::Error {
+            message: "invalid datatype variant".to_string(),
+            primary_label: "expected symbol".to_string(),
+            primary_label_loc: span,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
+        None => return Err(ParseError::Error {
+            message: "invalid datatype variant".to_string(),
+            primary_label: "expected symbol".to_string(),
+            primary_label_loc: lexer.loc()..lexer.loc() + 1,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        }),
     };
 
     let mut fields = Vec::new();
@@ -1149,14 +1624,49 @@ fn parse_type_def_variant(
 }
 
 fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(String, Vec<Type>)]) -> Result<Ast, ParseError> {
-    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::Type, _))) {
-        let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+    if let Some((_, span @ Span { start, .. })) = try_token!(lexer, Some((Token::Type, _))) {
+        let name = match lexer.lex() {
             Some((Token::Symbol(v), _)) => v.to_string(),
-            _ => return Err(ParseError::InvalidTypeDef),
+
+            Some((_, s2)) => return Err(ParseError::Error {
+                message: "invalid type definition".to_string(),
+                primary_label: "expected datatype name".to_string(),
+                primary_label_loc: s2,
+                secondary_labels: vec![("type definition starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
+
+            None => return Err(ParseError::Error {
+                message: "invalid type definition".to_string(),
+                primary_label: "expected datatype name".to_string(),
+                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                secondary_labels: vec![("type definition starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
         };
 
-        if try_token!(lexer, Some((Token::Equals, _))).is_none() {
-            return Err(ParseError::InvalidTypeDef);
+        match lexer.lex() {
+            Some((Token::Equals, _)) => (),
+
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid type definition".to_string(),
+                    primary_label: "expected `=`".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("type definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                });
+            }
+
+            None => {
+                return Err(ParseError::Error {
+                    message: "invalid type definition".to_string(),
+                    primary_label: "expected `=`".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("type definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                });
+            }
         }
 
         let mut variants = vec![parse_type_def_variant(lexer, generics)?];
@@ -1179,7 +1689,7 @@ fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(St
 
 // TODO: dependent values
 fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    if try_token!(lexer, Some((Token::Forall, _))).is_some() {
+    if let Some((_, span)) = try_token!(lexer, Some((Token::Forall, _))) {
         let mut generics = Vec::new();
         loop {
             match parse_argument(lexer, true, &[]) {
@@ -1193,9 +1703,24 @@ fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         let mut constraints = Vec::new();
         if try_token!(lexer, Some((Token::Where, _))).is_some() {
             while {
-                let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+                let name = match lexer.lex() {
                     Some((Token::Symbol(v), _)) => v.to_string(),
-                    _ => return Err(ParseError::InvalidInstance),
+
+                    Some((_, s2)) => return Err(ParseError::Error {
+                        message: "invalid class definition".to_string(),
+                        primary_label: "expected constraint".to_string(),
+                        primary_label_loc: s2,
+                        secondary_labels: vec![("class definition starts here".to_string(), span)],
+                        notes: Vec::new(),
+                    }),
+
+                    None => return Err(ParseError::Error {
+                        message: "invalid class definition".to_string(),
+                        primary_label: "expected constraint".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![("class definition starts here".to_string(), span)],
+                        notes: Vec::new(),
+                    }),
                 };
 
                 let mut parameters = Vec::new();
@@ -1231,10 +1756,29 @@ fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 }
 
 fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::Class, _))) {
-        let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+    if let Some((_, span @ Span { start, .. })) = try_token!(lexer, Some((Token::Class, _))) {
+        let name = match lexer.lex() {
             Some((Token::Symbol(v), _)) => v.to_string(),
-            _ => return Err(ParseError::InvalidClass),
+
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid class definition".to_string(),
+                    primary_label: "expected class name".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("class definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
+
+            _ => {
+                return Err(ParseError::Error {
+                    message: "invalid class definition".to_string(),
+                    primary_label: "expected class name".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("class definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
         };
 
         let mut generics = Vec::new();
@@ -1245,9 +1789,24 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         let mut constraints = Vec::new();
         if try_token!(lexer, Some((Token::Where, _))).is_some() {
             while {
-                let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+                let name = match lexer.lex() {
                     Some((Token::Symbol(v), _)) => v.to_string(),
-                    _ => return Err(ParseError::InvalidInstance),
+
+                    Some((_, s2)) => return Err(ParseError::Error {
+                        message: "invalid class definition".to_string(),
+                        primary_label: "expected constraint".to_string(),
+                        primary_label_loc: s2,
+                        secondary_labels: vec![("class definition starts here".to_string(), span)],
+                        notes: Vec::new(),
+                    }),
+
+                    None => return Err(ParseError::Error {
+                        message: "invalid class definition".to_string(),
+                        primary_label: "expected constraint".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![("class definition starts here".to_string(), span)],
+                        notes: Vec::new(),
+                    }),
                 };
 
                 let mut parameters = Vec::new();
@@ -1264,8 +1823,28 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             } {}
         }
 
-        if try_token!(lexer, Some((Token::Equals, _))).is_none() {
-            return Err(ParseError::InvalidClass);
+        match lexer.lex() {
+            Some((Token::Equals, _)) => (),
+
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid class definition".to_string(),
+                    primary_label: "expected `=`".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("class definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                });
+            }
+
+            None => {
+                return Err(ParseError::Error {
+                    message: "invalid class definition".to_string(),
+                    primary_label: "expected `=`".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("class definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                });
+            }
         }
 
         let mut functions = Vec::new();
@@ -1283,16 +1862,36 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             }
         }
 
-        if let Some((_, Span { end, .. })) = try_token!(lexer, Some((Token::End, _))) {
-            Ok(Ast::Class {
-                span: start..end,
-                name,
-                generics,
-                constraints,
-                functions,
-            })
-        } else {
-            Err(ParseError::InvalidClass)
+        match lexer.lex() {
+            Some((Token::End, Span { end, .. })) => {
+                Ok(Ast::Class {
+                    span: start..end,
+                    name,
+                    generics,
+                    constraints,
+                    functions,
+                })
+            }
+
+            Some((_, s2)) => {
+                Err(ParseError::Error {
+                    message: "invalid class definition".to_string(),
+                    primary_label: "expected `end`".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("class definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
+
+            None => {
+                Err(ParseError::Error {
+                    message: "invalid class definition".to_string(),
+                    primary_label: "expected `end`".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("class definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
         }
     } else {
         Err(ParseError::NotStarted)
@@ -1300,10 +1899,25 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 }
 
 fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(String, Vec<Type>)]) -> Result<Ast, ParseError> {
-    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::Instance, _))) {
-        let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+    if let Some((_, span @ Span { start, .. })) = try_token!(lexer, Some((Token::Instance, _))) {
+        let name = match lexer.lex() {
             Some((Token::Symbol(v), _)) => v.to_string(),
-            _ => return Err(ParseError::InvalidInstance),
+
+            Some((_, s2)) => return Err(ParseError::Error {
+                message: "invalid instance".to_string(),
+                primary_label: "expected constraint".to_string(),
+                primary_label_loc: s2,
+                secondary_labels: vec![("instance starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
+
+            None => return Err(ParseError::Error {
+                message: "invalid instance".to_string(),
+                primary_label: "expected constraint".to_string(),
+                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                secondary_labels: vec![("instance starts here".to_string(), span)],
+                notes: Vec::new(),
+            }),
         };
 
         let mut parameters = Vec::new();
@@ -1315,8 +1929,26 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(St
             }
         }
 
-        if try_token!(lexer, Some((Token::Equals, _))).is_none() {
-            return Err(ParseError::InvalidInstance);
+        match lexer.lex() {
+            Some((Token::Equals, _)) => (),
+            Some((_, s2)) => {
+                return Err(ParseError::Error {
+                    message: "invalid instance".to_string(),
+                    primary_label: "expected `=`".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("instance starts here".to_string(), span)],
+                    notes: Vec::new(),
+                });
+            }
+            None => {
+                return Err(ParseError::Error {
+                    message: "invalid instance".to_string(),
+                    primary_label: "expected `=`".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("instance starts here".to_string(), span)],
+                    notes: Vec::new(),
+                });
+            }
         }
 
         let mut functions = Vec::new();
@@ -1335,17 +1967,37 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(St
             }
         }
 
-        if let Some((_, Span { end, .. })) = try_token!(lexer, Some((Token::End, _))) {
-            Ok(Ast::Instance {
-                span: start..end,
-                name,
-                generics: generics.to_vec(),
-                constraints: constraints.to_vec(),
-                parameters,
-                functions,
-            })
-        } else {
-            Err(ParseError::InvalidInstance)
+        match lexer.lex() {
+            Some((Token::End, Span { end, .. })) => {
+                Ok(Ast::Instance {
+                    span: start..end,
+                    name,
+                    generics: generics.to_vec(),
+                    constraints: constraints.to_vec(),
+                    parameters,
+                    functions,
+                })
+            }
+
+            Some((_, s2)) => {
+                Err(ParseError::Error {
+                    message: "invalid instance".to_string(),
+                    primary_label: "expected `end`".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("instance starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
+
+            None => {
+                Err(ParseError::Error {
+                    message: "invalid instance".to_string(),
+                    primary_label: "expected `end`".to_string(),
+                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                    secondary_labels: vec![("instance starts here".to_string(), span)],
+                    notes: Vec::new(),
+                })
+            }
         }
     } else {
         Err(ParseError::NotStarted)
@@ -1396,7 +2048,23 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         e @ Err(_) => return e,
     }
 
-    parse_let(lexer, true, &[], false, &[])
+    match parse_let(lexer, true, &[], false, &[]) {
+        v @ Ok(_) => return v,
+        Err(ParseError::NotStarted) => (),
+        e @ Err(_) => return e,
+    }
+
+    if let Some((_, span)) = lexer.lex() {
+        Err(ParseError::Error {
+            message: "unexpected token".to_string(),
+            primary_label: "expected `forall`, `type`, `class`, `instance`, or `let`".to_string(),
+            primary_label_loc: span,
+            secondary_labels: Vec::new(),
+            notes: Vec::new(),
+        })
+    } else {
+        unreachable!();
+    }
 }
 
 pub fn parse(lexer: &mut Lexer<'_>) -> Result<Vec<Ast>, ParseError> {

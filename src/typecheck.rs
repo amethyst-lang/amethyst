@@ -701,14 +701,14 @@ fn typecheck_pattern(
     pattern: &mut Pattern,
 ) -> Result<(Type, Vec<(String, Type)>), ()> {
     match pattern {
-        Pattern::Wildcard => Ok((env.new_type_var(), Vec::new())),
+        Pattern::Wildcard(_) => Ok((env.new_type_var(), Vec::new())),
 
-        Pattern::Symbol(s) => {
+        Pattern::Symbol(_, s) => {
             let t = env.new_type_var();
             Ok((t.clone(), vec![(s.clone(), t)]))
         }
 
-        Pattern::Constructor(name, fields) => {
+        Pattern::Constructor(_, name, fields) => {
             if let Some((field_types, type_)) = env.constructors.get(name) {
                 if fields.len() != field_types.len() {
                     Err(())
@@ -742,10 +742,10 @@ fn typecheck_pattern(
             }
         }
 
-        Pattern::SymbolOrUnitConstructor(s) => {
+        Pattern::SymbolOrUnitConstructor(span, s) => {
             if let Some((fields, type_)) = env.constructors.get(s) {
                 if fields.is_empty() {
-                    *pattern = Pattern::Constructor(s.clone(), Vec::new());
+                    *pattern = Pattern::Constructor(span.clone(), s.clone(), Vec::new());
                     let mut type_ = type_.clone();
                     type_.convert_generics_to_type_vars(env, &mut HashMap::new());
                     Ok((type_, Vec::new()))
@@ -754,13 +754,13 @@ fn typecheck_pattern(
                 }
             } else {
                 let s = s.clone();
-                *pattern = Pattern::Symbol(s.clone());
+                *pattern = Pattern::Symbol(span.clone(), s.clone());
                 let t = env.new_type_var();
                 Ok((t.clone(), vec![(s, t)]))
             }
         }
 
-        Pattern::As(s, pat) => {
+        Pattern::As(_, s, pat) => {
             let (t, mut append) = typecheck_pattern(env, pat)?;
 
             if append.iter().any(|(v, _)| v == s) {
@@ -771,7 +771,7 @@ fn typecheck_pattern(
             Ok((t, append))
         }
 
-        Pattern::Or(pats) => {
+        Pattern::Or(_, pats) => {
             let first = pats.first_mut().ok_or(())?;
             let (mut t, mut append) = typecheck_pattern(env, first)?;
             for pat in pats.iter_mut().skip(1) {
