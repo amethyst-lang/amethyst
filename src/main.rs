@@ -1,3 +1,5 @@
+use clap::Parser;
+
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFiles;
 use codespan_reporting::term;
@@ -7,22 +9,25 @@ use amethyst::lexer::Lexer;
 use amethyst::parse::ParseError;
 use amethyst::{parse, typecheck};
 
-fn main() {
-    let filename = "test.amy";
-    let contents = "
-        forall a
-        type Option = Some a | None
+#[derive(Parser)]
+struct Cli {
+    filename: String,
+}
 
-        let f x =
-            let (Some x) = x in
-                x
-            else 0
-        ";
+fn main() {
+    let args = Cli::parse();
+    let contents = match std::fs::read_to_string(&args.filename) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error opening file: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     let mut files = SimpleFiles::new();
-    let file_id = files.add(filename, contents);
+    let file_id = files.add(&args.filename, &contents);
 
-    let mut lexer = Lexer::new(contents);
+    let mut lexer = Lexer::new(&contents);
 
     let mut asts = match parse::parse(&mut lexer) {
         Ok(v) => v,

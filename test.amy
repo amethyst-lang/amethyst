@@ -1,0 +1,7 @@
+forall a
+type Option = Some a | None
+
+let f x =
+    let (Some x) = x in
+        x
+    else 0
