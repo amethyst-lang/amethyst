@@ -62,13 +62,29 @@ fn main() {
         _ => unreachable!(),
     };
 
-    for ast in asts.iter() {
-        println!("{}", ast);
+    if let Err(errors) = typecheck::typecheck(&mut asts) {
+        let writer = StandardStream::stderr(ColorChoice::Always);
+        let config = term::Config::default();
+
+        for error in errors {
+            let diagnostic = Diagnostic::error()
+                .with_message(error.message)
+                .with_labels(
+                    vec![Label::primary(file_id, error.primary_label_loc).with_message(error.primary_label)]
+                        .into_iter()
+                        .chain(
+                            error.secondary_labels.into_iter().map(|(msg, span)| {
+                                Label::secondary(file_id, span).with_message(msg)
+                            }),
+                        )
+                        .collect(),
+                )
+                .with_notes(error.notes);
+            term::emit(&mut writer.lock(), &config, &files, &diagnostic).expect("o no");
+        }
+
+        std::process::exit(1);
     }
-
-    println!();
-
-    typecheck::typecheck(&mut asts).expect("should work");
 
     for ast in asts {
         println!("{}", ast);

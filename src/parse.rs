@@ -1554,7 +1554,17 @@ fn parse_let(
         }
 
         let value = parse_expr(lexer)?;
-        if try_token!(lexer, Some((Token::In, _))).is_none() {
+        if let Some((_, s2)) = try_token!(lexer, Some((Token::In, _))) {
+            if top_level {
+                return Err(ParseError::Error {
+                    message: "top level definition must not have a context".to_string(),
+                    primary_label: "context starting here".to_string(),
+                    primary_label_loc: s2,
+                    secondary_labels: vec![("top level definition starts here".to_string(), span)],
+                    notes: Vec::new(),
+                });
+            }
+        } else {
             if top_level && !mutable {
                 return Ok(Ast::TopLet {
                     span: start..value.span().end,
@@ -1603,15 +1613,6 @@ fn parse_let(
                     notes: Vec::new(),
                 });
             }
-        } else if top_level {
-            let (_, s2) = try_token!(lexer, Some((Token::In, _))).unwrap();
-            return Err(ParseError::Error {
-                message: "top level definition must not have a context".to_string(),
-                primary_label: "context starting here".to_string(),
-                primary_label_loc: s2,
-                secondary_labels: vec![("top level definition starts here".to_string(), span)],
-                notes: Vec::new(),
-            });
         }
 
         let context = parse_expr(lexer)?;

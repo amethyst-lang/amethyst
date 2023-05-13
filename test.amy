@@ -1,7 +1,12 @@
 forall a
-type Option = Some a | None
+type Option
+    = Some a
+    | None
 
-let f x =
-    let (Some x) = x in
-        x
-    else 0
+type Other = No
+
+let _ =
+    match (Some 2) with
+    | Some x to x
+    | None to false
+    end

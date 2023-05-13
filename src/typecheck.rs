@@ -67,7 +67,7 @@ impl Environment {
         std::mem::swap(&mut temp, &mut self.classes);
     }
 
-    fn check_constraints(&mut self, errors: &mut Vec<CheckError>) -> bool {
+    fn check_constraints(&mut self, _errors: &mut Vec<CheckError>) {
         let mut instances = self.instances.clone();
 
         while {
@@ -77,10 +77,10 @@ impl Environment {
             'a: for (name, params) in constraints_applied.iter_mut() {
                 if let Some(class) = self.classes.get(name) {
                     if class.generics.len() != params.len() {
-                        return false;
+                        todo!()
                     }
                 } else {
-                    return false;
+                    todo!()
                 }
 
                 for p in params.iter_mut() {
@@ -119,19 +119,18 @@ impl Environment {
                     }
                 }
 
-                return false;
+                todo!()
             }
 
             !self.constraints_applied.is_empty()
         } {}
-
-        true
     }
 }
 
 impl Type {
     fn equals_up_to_env(&mut self, other: &mut Type, env: &mut Environment) -> bool {
         match (self, other) {
+            (Type::Base(BaseType::Bottom), _) | (_, Type::Base(BaseType::Bottom)) => true,
             (Type::Base(BaseType::Bool), Type::Base(BaseType::Bool)) => true,
             (Type::Base(BaseType::I8), Type::Base(BaseType::I8)) => true,
             (Type::Base(BaseType::I16), Type::Base(BaseType::I16)) => true,
@@ -396,8 +395,20 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
         Ast::Integer(_, _) => Type::Base(BaseType::I32),
         Ast::Bool(_, _) => Type::Base(BaseType::Bool),
 
-        Ast::Symbol(_, s) => {
-            let (_, mut v, mut c) = env.find_variable(s).cloned().unwrap();
+        Ast::Symbol(span, s) => {
+            let (_, mut v, mut c) = match env.find_variable(s).cloned() {
+                Some(v) => v,
+                None => {
+                    errors.push(CheckError {
+                        message: "undefined identifier".to_string(),
+                        primary_label: format!("identifier `{}` has not been previously defined", s),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                    return Type::Base(BaseType::Bottom);
+                }
+            };
             let mut generics = HashMap::new();
             v.convert_generics_to_type_vars(env, &mut generics);
             for (_, c) in c.iter_mut() {
@@ -412,17 +423,33 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
         Ast::Binary {
             op, left, right, ..
         } => {
-            let mut left = typecheck_helper(env, left, errors);
-            let mut right = typecheck_helper(env, right, errors);
+            let mut t_left = typecheck_helper(env, left, errors);
+            let mut t_right = typecheck_helper(env, right, errors);
 
             match op {
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
-                    if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
-                        && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
-                    {
-                        Type::Base(BaseType::I32)
+                    if t_left.equals_up_to_env(&mut Type::Base(BaseType::I32), env) {
+                        if t_right.equals_up_to_env(&mut Type::Base(BaseType::I32), env) {
+                            Type::Base(BaseType::I32)
+                        } else {
+                            errors.push(CheckError {
+                                message: "invalid arguments to infix operator".to_string(),
+                                primary_label: format!("expected `i32`, found `{}`", t_right),
+                                primary_label_loc: right.span(),
+                                secondary_labels: Vec::new(),
+                                notes: vec![format!("infix op `{}` has type signature `i32 -> i32 -> i32`", op)],
+                            });
+                            Type::Base(BaseType::Bottom)
+                        }
                     } else {
-                        todo!()
+                        errors.push(CheckError {
+                            message: "invalid arguments to infix operator".to_string(),
+                            primary_label: format!("expected `i32`, found `{}`", t_left),
+                            primary_label_loc: left.span(),
+                            secondary_labels: Vec::new(),
+                            notes: vec![format!("infix op `{}` has type signature `i32 -> i32 -> i32`", op)],
+                        });
+                        Type::Base(BaseType::Bottom)
                     }
                 }
 
@@ -432,68 +459,118 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
                 | BinaryOp::Ge
                 | BinaryOp::Eq
                 | BinaryOp::Ne => {
-                    if left.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
-                        && right.equals_up_to_env(&mut Type::Base(BaseType::I32), env)
-                    {
-                        Type::Base(BaseType::Bool)
+                    if t_left.equals_up_to_env(&mut Type::Base(BaseType::I32), env) {
+                        if t_right.equals_up_to_env(&mut Type::Base(BaseType::I32), env) {
+                            Type::Base(BaseType::Bool)
+                        } else {
+                            errors.push(CheckError {
+                                message: "invalid arguments to infix operator".to_string(),
+                                primary_label: format!("expected `i32`, found `{}`", t_right),
+                                primary_label_loc: right.span(),
+                                secondary_labels: Vec::new(),
+                                notes: vec![format!("infix op `{}` has type signature `i32 -> i32 -> bool`", op)],
+                            });
+                            Type::Base(BaseType::Bottom)
+                        }
                     } else {
-                        todo!()
+                        errors.push(CheckError {
+                            message: "invalid arguments to infix operator".to_string(),
+                            primary_label: format!("expected `i32`, found `{}`", t_left),
+                            primary_label_loc: left.span(),
+                            secondary_labels: Vec::new(),
+                            notes: vec![format!("infix op `{}` has type signature `i32 -> i32 -> bool`", op)],
+                        });
+                        Type::Base(BaseType::Bottom)
                     }
                 }
 
                 BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
-                    if left.equals_up_to_env(&mut Type::Base(BaseType::Bool), env)
-                        && right.equals_up_to_env(&mut Type::Base(BaseType::Bool), env)
-                    {
-                        Type::Base(BaseType::Bool)
+                    if t_left.equals_up_to_env(&mut Type::Base(BaseType::Bool), env) {
+                        if t_right.equals_up_to_env(&mut Type::Base(BaseType::Bool), env) {
+                            Type::Base(BaseType::Bool)
+                        } else {
+                            errors.push(CheckError {
+                                message: "invalid arguments to infix operator".to_string(),
+                                primary_label: format!("expected `bool`, found `{}`", t_right),
+                                primary_label_loc: right.span(),
+                                secondary_labels: Vec::new(),
+                                notes: vec![format!("infix op `{}` has type signature `bool -> bool -> bool`", op)],
+                            });
+                            Type::Base(BaseType::Bottom)
+                        }
                     } else {
-                        todo!()
+                        errors.push(CheckError {
+                            message: "invalid arguments to infix operator".to_string(),
+                            primary_label: format!("expected `bool`, found `{}`", t_left),
+                            primary_label_loc: left.span(),
+                            secondary_labels: Vec::new(),
+                            notes: vec![format!("infix op `{}` has type signature `bool -> bool -> bool`", op)],
+                        });
+                        Type::Base(BaseType::Bottom)
                     }
                 }
             }
         }
 
         Ast::FuncCall { func, args, .. } => {
-            let mut func = typecheck_helper(env, func, errors);
+            let mut end = func.span().end;
+            let mut t_func = typecheck_helper(env, func, errors);
+            let mut it_func = t_func.clone();
+            it_func.replace_type_vars(env);
+            let it_func = it_func;
             for arg in args {
-                let mut arg = typecheck_helper(env, arg, errors);
+                let mut t_arg = typecheck_helper(env, arg, errors);
 
-                if func.equals_up_to_env(
+                if t_func.equals_up_to_env(
                     &mut Type::Func(Box::new(env.new_type_var()), Box::new(env.new_type_var())),
                     env,
                 ) {
-                    while let Type::TypeVar(x) = func {
+                    while let Type::TypeVar(x) = t_func {
                         let x = x;
-                        func = env.substitutions[x].clone();
-                        if matches!(func, Type::TypeVar(y) if x == y) {
+                        t_func = env.substitutions[x].clone();
+                        if matches!(t_func, Type::TypeVar(y) if x == y) {
                             break;
                         }
                     }
-                    if let Type::Func(mut a, r) = func {
-                        if a.equals_up_to_env(&mut arg, env) {
-                            func = *r;
-                        } else {
-                            todo!()
+                    if let Type::Func(mut a, r) = t_func {
+                        if !a.equals_up_to_env(&mut t_arg, env) {
+                            errors.push(CheckError {
+                                message: "invalid function application".to_string(),
+                                primary_label: format!("expected `{}`, found `{}`", a, t_arg),
+                                primary_label_loc: arg.span(),
+                                secondary_labels: vec![(format!("function has type `{}`", it_func), func.span())],
+                                notes: Vec::new(),
+                            });
                         }
+                        t_func = *r;
                     } else {
-                        unreachable!();
+                        t_func = Type::Base(BaseType::Bottom);
                     }
                 } else {
-                    todo!()
+                    errors.push(CheckError {
+                        message: "invalid function application".to_string(),
+                        primary_label: format!("expected a function, found `{}`", t_func),
+                        primary_label_loc: func.span().start..end,
+                        secondary_labels: vec![("extra argument found here".to_string(), arg.span())],
+                        notes: Vec::new(),
+                    });
+                    t_func = Type::Base(BaseType::Bottom);
                 }
+
+                end = arg.span().end;
             }
 
-            func
+            t_func
         }
 
         Ast::Let {
+            span,
             mutable: _,
             symbol,
             args,
             ret_type,
             value,
             context,
-            ..
         } => {
             for (arg, type_) in args.iter() {
                 env.push_variable(arg, type_, &[]);
@@ -505,8 +582,15 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
             }
 
             if !ret_type.equals_up_to_env(&mut r, env) {
-                todo!()
+                errors.push(CheckError {
+                    message: "let binding does not match reported type".to_string(),
+                    primary_label: format!("expected `{}`, found `{}`", ret_type, r),
+                    primary_label_loc: value.span(),
+                    secondary_labels: vec![("let binding begins here".to_string(), span.start..span.start + 3)],
+                    notes: Vec::new(),
+                });
             }
+            r = ret_type.clone();
 
             for (_, arg_type) in args.iter().rev() {
                 r = Type::Func(Box::new(arg_type.clone()), Box::new(r));
@@ -521,6 +605,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
         Ast::EmptyLet { .. } => Type::Unknown,
 
         Ast::TopLet {
+            span,
             args,
             ret_type,
             value,
@@ -540,51 +625,87 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
             }
 
             for (g, mut t) in generics {
-                if !t.equals_up_to_env(&mut Type::Generic(g), env) {
-                    todo!()
+                if !t.equals_up_to_env(&mut Type::Generic(g.clone()), env) {
+                    errors.push(CheckError {
+                        message: "generic unpreserved in let binding".to_string(),
+                        primary_label: format!("generic `{}` unpreserved", g),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
                 }
             }
 
             if !ret_type.equals_up_to_env(&mut t, env) {
-                todo!()
-            } else {
-                for (_, arg) in args.iter().rev() {
-                    t = Type::Func(Box::new(arg.clone()), Box::new(t));
-                }
-                t // TODO: actual type
+                errors.push(CheckError {
+                    message: "let binding does not match reported type".to_string(),
+                    primary_label: format!("expected `{}`, found `{}`", ret_type, t),
+                    primary_label_loc: value.span(),
+                    secondary_labels: vec![("let binding begins here".to_string(), span.start..span.start + 3)],
+                    notes: Vec::new(),
+                });
             }
+            for (_, arg) in args.iter().rev() {
+                t = Type::Func(Box::new(arg.clone()), Box::new(t));
+            }
+            t // TODO: actual type
         }
 
         Ast::If {
-            cond, then, elsy, ..
+            span, cond, then, elsy,
         } => {
-            let mut cond = typecheck_helper(env, cond, errors);
-            let mut then = typecheck_helper(env, then, errors);
-            let mut elsy = typecheck_helper(env, elsy, errors);
+            let mut t_cond = typecheck_helper(env, cond, errors);
+            let mut t_then = typecheck_helper(env, then, errors);
+            let mut t_elsy = typecheck_helper(env, elsy, errors);
 
-            if !cond.equals_up_to_env(&mut Type::Base(BaseType::Bool), env) {
-                todo!()
+            if !t_cond.equals_up_to_env(&mut Type::Base(BaseType::Bool), env) {
+                t_cond.replace_type_vars(env);
+                errors.push(CheckError {
+                    message: "if condition is not a `bool`".to_string(),
+                    primary_label: format!("expected `bool`, found `{}`", t_cond),
+                    primary_label_loc: cond.span(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
             }
 
-            if then.equals_up_to_env(&mut elsy, env) {
-                then
+            if t_then.equals_up_to_env(&mut t_elsy, env) {
+                t_then
             } else {
-                todo!()
+                t_then.replace_type_vars(env);
+                t_elsy.replace_type_vars(env);
+                errors.push(CheckError {
+                    message: "if branches don't match".to_string(),
+                    primary_label: format!("expected `{}`, found `{}`", t_then, t_elsy),
+                    primary_label_loc: span.clone(),
+                    secondary_labels: vec![(format!("then branch has type `{}`", t_then), then.span()), (format!("else branch has type `{}`", t_elsy), elsy.span())],
+                    notes: Vec::new(),
+                });
+                Type::Base(BaseType::Bottom)
             }
         }
 
         Ast::DatatypeDefinition { .. } => Type::Unknown,
 
         Ast::Match {
-            value, patterns, ..
+            span, value, patterns
         } => {
-            let mut value = typecheck_helper(env, value, errors);
+            let mut t_value = typecheck_helper(env, value, errors);
             let mut result = None;
+            let first_span = patterns.first().map(|(_, v)| v.span()).unwrap_or(0..0);
 
             for (pat, val) in patterns {
                 let (mut val_type, append_to_env) = typecheck_pattern(env, pat, errors);
-                if !value.equals_up_to_env(&mut val_type, env) {
-                    todo!()
+                if !t_value.equals_up_to_env(&mut val_type, env) {
+                    t_value.replace_type_vars(env);
+                    val_type.replace_type_vars(env);
+                    errors.push(CheckError {
+                        message: "pattern does not match the type".to_string(),
+                        primary_label: format!("expected `{}`, found `{}`", t_value, val_type),
+                        primary_label_loc: pat.span(),
+                        secondary_labels: vec![(format!("value has type `{}`", t_value), value.span())],
+                        notes: Vec::new(),
+                    });
                 }
 
                 for (var, t) in append_to_env.iter().rev() {
@@ -597,7 +718,15 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
 
                     Some(t) => {
                         if !t.equals_up_to_env(&mut new, env) {
-                            todo!()
+                            t.replace_type_vars(env);
+                            new.replace_type_vars(env);
+                            errors.push(CheckError {
+                                message: "match cases have mismatched types".to_string(),
+                                primary_label: format!("expected `{}`, found `{}`", t, new),
+                                primary_label_loc: val.span(),
+                                secondary_labels: vec![(format!("value has type `{}`", t), first_span.clone())],
+                                notes: Vec::new(),
+                            });
                         }
                     }
                 }
@@ -610,7 +739,14 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
             if let Some(v) = result {
                 v
             } else {
-                todo!()
+                errors.push(CheckError {
+                    message: "empty match expression".to_string(),
+                    primary_label: "match expression is empty".to_string(),
+                    primary_label_loc: span.clone(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+                Type::Base(BaseType::Bottom)
             }
         }
 
@@ -738,10 +874,18 @@ fn typecheck_pattern(
             (t.clone(), vec![(s.clone(), t)])
         }
 
-        Pattern::Constructor(_, name, fields) => {
+        Pattern::Constructor(span, name, fields) => {
             if let Some((field_types, type_)) = env.constructors.get(name) {
                 if fields.len() != field_types.len() {
-                    todo!()
+                    errors.push(CheckError {
+                        message: "constructor applied to wrong number of fields".to_string(),
+                        primary_label: format!("constructor `{}` expects {} fields, found {} fields", name, field_types.len(), fields.len()),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+
+                    (Type::Base(BaseType::Bottom), Vec::new())
                 } else {
                     let mut type_ = type_.clone();
                     let mut field_types = field_types.clone();
@@ -753,22 +897,49 @@ fn typecheck_pattern(
                         let (mut t, append) = typecheck_pattern(env, field, errors);
                         append_to_env.extend(append);
                         if !type_.equals_up_to_env(&mut t, env) {
-                            todo!()
+                            t.replace_type_vars(env);
+                            errors.push(CheckError {
+                                message: "constructor field has incompatible type".to_string(),
+                                primary_label: format!("field expects `{}`, found `{}`", type_, t),
+                                primary_label_loc: span.clone(),
+                                secondary_labels: Vec::new(),
+                                notes: Vec::new(),
+                            });
                         }
                     }
                     type_.replace_type_vars(env);
 
                     let mut set = HashSet::new();
-                    for (s, _) in append_to_env.iter() {
+                    let mut dup_indices = Vec::new();
+                    for (i, (s, _)) in append_to_env.iter().enumerate() {
                         if !set.insert(s) {
-                            todo!()
+                            dup_indices.push(i);
+                            errors.push(CheckError {
+                                message: "pattern has duplicate variables".to_string(),
+                                primary_label: format!("duplicate variable `{}` found", s),
+                                primary_label_loc: span.clone(),
+                                secondary_labels: Vec::new(),
+                                notes: Vec::new(),
+                            });
                         }
+                    }
+
+                    for i in dup_indices.into_iter().rev() {
+                        append_to_env.remove(i);
                     }
 
                     (type_, append_to_env)
                 }
             } else {
-                todo!()
+                errors.push(CheckError {
+                    message: "constructor doesn't exist".to_string(),
+                    primary_label: format!("constructor `{}` doesn't exist", name),
+                    primary_label_loc: span.clone(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+
+                (Type::Base(BaseType::Bottom), Vec::new())
             }
         }
 
@@ -780,7 +951,15 @@ fn typecheck_pattern(
                     type_.convert_generics_to_type_vars(env, &mut HashMap::new());
                     (type_, Vec::new())
                 } else {
-                    todo!()
+                    errors.push(CheckError {
+                        message: "constructor applied to wrong number of fields".to_string(),
+                        primary_label: format!("constructor `{}` expects {} fields, found {} fields", s, fields.len(), 0),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+
+                    (Type::Base(BaseType::Bottom), Vec::new())
                 }
             } else {
                 let s = s.clone();
@@ -790,37 +969,66 @@ fn typecheck_pattern(
             }
         }
 
-        Pattern::As(_, s, pat) => {
+        Pattern::As(span, s, pat) => {
             let (t, mut append) = typecheck_pattern(env, pat, errors);
 
             if append.iter().any(|(v, _)| v == s) {
-                todo!()
+                errors.push(CheckError {
+                    message: "pattern has duplicate variables".to_string(),
+                    primary_label: format!("duplicate variable `{}` found", s),
+                    primary_label_loc: span.clone(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+            } else {
+                append.push((s.clone(), t.clone()));
             }
 
-            append.push((s.clone(), t.clone()));
             (t, append)
         }
 
         Pattern::Or(_, pats) => {
             let first = pats.first_mut().unwrap();
+            let first_span = first.span();
             let (mut t, mut append) = typecheck_pattern(env, first, errors);
+            let mut append_span = first_span.clone();
             for pat in pats.iter_mut().skip(1) {
                 let (mut t2, mut append2) = typecheck_pattern(env, pat, errors);
                 if !t.equals_up_to_env(&mut t2, env) {
-                    todo!()
+                    errors.push(CheckError {
+                        message: "patterns are not of the same type".to_string(),
+                        primary_label: format!("expected pattern of type `{}`, found type `{}`", t, t2),
+                        primary_label_loc: pat.span(),
+                        secondary_labels: vec![(format!("pattern has type `{}`", t), first_span.clone())],
+                        notes: Vec::new(),
+                    });
                 }
 
-                if append.len() != append2.len() {
-                    todo!()
+                let mut append2_span = pat.span();
+                if append.len() < append2.len() {
+                    std::mem::swap(&mut append, &mut append2);
+                    std::mem::swap(&mut append_span, &mut append2_span);
                 }
 
-                for (s, t) in append2.iter_mut().rev() {
-                    if let Some((_, t2)) = append.iter_mut().rev().find(|(s2, _)| s2 == s) {
+                for (s, t) in append.iter_mut().rev() {
+                    if let Some((_, t2)) = append2.iter_mut().rev().find(|(s2, _)| s2 == s) {
                         if !t.equals_up_to_env(t2, env) {
-                            todo!()
+                            errors.push(CheckError {
+                                message: "variable does not share the same type among patterns".to_string(),
+                                primary_label: format!("expected type `{}`, found type `{}`", t, t2),
+                                primary_label_loc: append2_span.clone(),
+                                secondary_labels: vec![(format!("`{}` has type `{}` in this pattern", s, t), append_span.clone())],
+                                notes: Vec::new(),
+                            })
                         }
                     } else {
-                        todo!()
+                        errors.push(CheckError {
+                            message: "unshared variable among patterns".to_string(),
+                            primary_label: format!("expected to find variable `{}` in this pattern; not found", s),
+                            primary_label_loc: append2_span.clone(),
+                            secondary_labels: vec![(format!("`{}` found in this pattern", s), append_span.clone())],
+                            notes: Vec::new(),
+                        })
                     }
                 }
             }
@@ -1047,12 +1255,11 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
         typecheck_helper(&mut env, ast, &mut errors);
     }
 
-    if env.check_constraints(&mut errors) {
-        for ast in asts.iter_mut() {
-            replace_type_vars(ast, &mut env, &mut errors);
-        }
-        env.update_vars();
+    env.check_constraints(&mut errors);
+    for ast in asts.iter_mut() {
+        replace_type_vars(ast, &mut env, &mut errors);
     }
+    env.update_vars();
 
     if errors.is_empty() {
         Ok(())
