@@ -1,3 +1,7 @@
+use std::ops::Range;
+
+pub type Span = Range<usize>;
+
 #[derive(Copy, Clone, Debug)]
 pub enum Token<'a> {
     Invalid(&'a str),
@@ -49,7 +53,7 @@ pub enum Token<'a> {
 
 pub struct Lexer<'a> {
     contents: &'a str,
-    prev_tokens: Vec<(Token<'a>, usize)>,
+    prev_tokens: Vec<(Token<'a>, Span)>,
     token_index: usize,
     pos: usize,
 }
@@ -70,6 +74,10 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    pub fn loc(&self) -> usize {
+        self.pos
+    }
+
     pub fn push(&self) -> LexerState {
         LexerState {
             token_index: self.token_index,
@@ -82,18 +90,18 @@ impl<'a> Lexer<'a> {
         self.pos = state.pos;
     }
 
-    pub fn peek(&mut self) -> Option<Token<'a>> {
+    pub fn peek(&mut self) -> Option<(Token<'a>, Span)> {
         let state = self.push();
         let token = self.lex();
         self.pop(state);
         token
     }
 
-    pub fn lex(&mut self) -> Option<Token<'a>> {
-        if let Some(&(token, pos)) = self.prev_tokens.get(self.token_index) {
+    pub fn lex(&mut self) -> Option<(Token<'a>, Span)> {
+        if let Some((token, span)) = self.prev_tokens.get(self.token_index) {
             self.token_index += 1;
-            self.pos = pos;
-            Some(token)
+            self.pos = span.end;
+            Some((*token, span.clone()))
         } else {
             let mut final_pos = self.pos;
 
@@ -250,9 +258,9 @@ impl<'a> Lexer<'a> {
                 State::Slash => Token::Slash,
             };
 
-            self.prev_tokens.push((token, final_pos));
+            self.prev_tokens.push((token, initial_pos..final_pos));
             self.token_index += 1;
-            Some(token)
+            Some((token, initial_pos..final_pos))
         }
     }
 }

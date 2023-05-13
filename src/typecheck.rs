@@ -312,7 +312,7 @@ fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
             replace_unknowns(env, right);
         }
 
-        Ast::FuncCall { func, args } => {
+        Ast::FuncCall { func, args, .. } => {
             replace_unknowns(env, func);
             for arg in args {
                 replace_unknowns(env, arg);
@@ -357,13 +357,13 @@ fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
             replace_unknowns(env, value);
         }
 
-        Ast::If { cond, then, elsy } => {
+        Ast::If { cond, then, elsy, .. } => {
             replace_unknowns(env, cond);
             replace_unknowns(env, then);
             replace_unknowns(env, elsy);
         }
 
-        Ast::Match { value, patterns } => {
+        Ast::Match { value, patterns, .. } => {
             replace_unknowns(env, value);
             for (_, val) in patterns {
                 replace_unknowns(env, val);
@@ -383,10 +383,10 @@ fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
 
 fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
     match ast {
-        Ast::Integer(_) => Ok(Type::Base(BaseType::I32)),
-        Ast::Bool(_) => Ok(Type::Base(BaseType::Bool)),
+        Ast::Integer(_, _) => Ok(Type::Base(BaseType::I32)),
+        Ast::Bool(_, _) => Ok(Type::Base(BaseType::Bool)),
 
-        Ast::Symbol(s) => {
+        Ast::Symbol(_, s) => {
             let (_, mut v, mut c) = env.find_variable(s).cloned().ok_or(())?;
             let mut generics = HashMap::new();
             v.convert_generics_to_type_vars(env, &mut generics);
@@ -399,7 +399,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             Ok(v)
         }
 
-        Ast::Binary { op, left, right } => {
+        Ast::Binary { op, left, right, .. } => {
             let mut left = typecheck_helper(env, left)?;
             let mut right = typecheck_helper(env, right)?;
 
@@ -441,7 +441,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             }
         }
 
-        Ast::FuncCall { func, args } => {
+        Ast::FuncCall { func, args, .. } => {
             let mut func = typecheck_helper(env, func)?;
             for arg in args {
                 let mut arg = typecheck_helper(env, arg)?;
@@ -481,6 +481,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             ret_type,
             value,
             context,
+            ..
         } => {
             for (arg, type_) in args.iter() {
                 env.push_variable(arg, type_, &[]);
@@ -542,7 +543,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
             }
         }
 
-        Ast::If { cond, then, elsy } => {
+        Ast::If { cond, then, elsy, .. } => {
             let mut cond = typecheck_helper(env, cond)?;
             let mut then = typecheck_helper(env, then)?;
             let mut elsy = typecheck_helper(env, elsy)?;
@@ -560,7 +561,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast) -> Result<Type, ()> {
 
         Ast::DatatypeDefinition { .. } => Ok(Type::Unknown),
 
-        Ast::Match { value, patterns } => {
+        Ast::Match { value, patterns, .. } => {
             let mut value = typecheck_helper(env, value)?;
             let mut result = None;
 
@@ -806,7 +807,7 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             replace_type_vars(right, env)
         }
 
-        Ast::FuncCall { func, args } => {
+        Ast::FuncCall { func, args, .. } => {
             replace_type_vars(func, env)?;
             for arg in args {
                 replace_type_vars(arg, env)?;
@@ -873,13 +874,13 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment) -> Result<(), ()> {
             replace_type_vars(value, env)
         }
 
-        Ast::If { cond, then, elsy } => {
+        Ast::If { cond, then, elsy, .. } => {
             replace_type_vars(cond, env)?;
             replace_type_vars(then, env)?;
             replace_type_vars(elsy, env)
         }
 
-        Ast::Match { value, patterns } => {
+        Ast::Match { value, patterns, .. } => {
             replace_type_vars(value, env)?;
             for (_, result) in patterns {
                 replace_type_vars(result, env)?;
@@ -946,13 +947,13 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), ()> {
                 }
             }
 
-            Ast::Class { name, generics, constraints, functions } => {
+            Ast::Class { name, generics, constraints, functions, .. } => {
                 let mut class_funcs = HashMap::new();
                 let mut constraints = constraints.clone();
                 constraints.push((name.clone(), generics.iter().cloned().map(Type::Generic).collect()));
                 for func in functions {
                     match func {
-                        Ast::EmptyLet { symbol, args, ret_type } => {
+                        Ast::EmptyLet { symbol, args, ret_type, .. } => {
                             let mut top = ret_type.clone();
                             for (_, type_) in args.iter().rev() {
                                 top = Type::Func(Box::new(type_.clone()), Box::new(top));

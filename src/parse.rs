@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::lexer::{Lexer, Token};
+use crate::lexer::{Lexer, Token, Span};
 
 #[derive(Debug, Clone)]
 pub enum BaseType {
@@ -153,22 +153,25 @@ impl Display for Pattern {
 
 #[derive(Debug, Clone)]
 pub enum Ast {
-    Integer(u128),
-    Bool(bool),
-    Symbol(String),
+    Integer(Span, u128),
+    Bool(Span, bool),
+    Symbol(Span, String),
 
     Binary {
+        span: Span,
         op: BinaryOp,
         left: Box<Ast>,
         right: Box<Ast>,
     },
 
     FuncCall {
+        span: Span,
         func: Box<Ast>,
         args: Vec<Ast>,
     },
 
     Let {
+        span: Span,
         mutable: bool,
         symbol: String,
         args: Vec<(String, Type)>,
@@ -178,12 +181,14 @@ pub enum Ast {
     },
 
     EmptyLet {
+        span: Span,
         symbol: String,
         args: Vec<(String, Type)>,
         ret_type: Type,
     },
 
     TopLet {
+        span: Span,
         symbol: String,
         constraints: Vec<(String, Vec<Type>)>,
         generics: Vec<String>,
@@ -194,12 +199,14 @@ pub enum Ast {
     },
 
     If {
+        span: Span,
         cond: Box<Ast>,
         then: Box<Ast>,
         elsy: Box<Ast>,
     },
 
     DatatypeDefinition {
+        span: Span,
         name: String,
         constraints: Vec<(String, Vec<Type>)>,
         generics: Vec<String>,
@@ -208,11 +215,13 @@ pub enum Ast {
     },
 
     Match {
+        span: Span,
         value: Box<Ast>,
         patterns: Vec<(Pattern, Ast)>,
     },
 
     Class {
+        span: Span,
         name: String,
         generics: Vec<String>,
         constraints: Vec<(String, Vec<Type>)>,
@@ -220,6 +229,7 @@ pub enum Ast {
     },
 
     Instance {
+        span: Span,
         name: String,
         parameters: Vec<Type>,
         generics: Vec<String>,
@@ -228,15 +238,35 @@ pub enum Ast {
     },
 }
 
+impl Ast {
+    pub fn span(&self) -> Span {
+        match self {
+            Ast::Integer(span, _)
+            | Ast::Bool(span, _)
+            | Ast::Symbol(span, _)
+            | Ast::Binary { span, .. }
+            | Ast::FuncCall { span, .. }
+            | Ast::Let { span, .. }
+            | Ast::EmptyLet { span, .. }
+            | Ast::TopLet { span, .. }
+            | Ast::If { span, .. }
+            | Ast::DatatypeDefinition { span, .. }
+            | Ast::Match { span, .. }
+            | Ast::Class { span, .. }
+            | Ast::Instance { span, .. } => span.clone()
+        }
+    }
+}
+
 impl Display for Ast {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Ast::Integer(n) => write!(f, "{}", n),
-            Ast::Bool(b) => write!(f, "{}", b),
-            Ast::Symbol(s) => write!(f, "{}", s),
-            Ast::Binary { op, left, right } => write!(f, "({} {} {})", left, op, right),
+            Ast::Integer(_, n) => write!(f, "{}", n),
+            Ast::Bool(_, b) => write!(f, "{}", b),
+            Ast::Symbol(_, s) => write!(f, "{}", s),
+            Ast::Binary { op, left, right, .. } => write!(f, "({} {} {})", left, op, right),
 
-            Ast::FuncCall { func, args } => {
+            Ast::FuncCall { func, args, .. } => {
                 write!(f, "({}", func)?;
                 for arg in args {
                     write!(f, " {}", arg)?;
@@ -251,6 +281,7 @@ impl Display for Ast {
                 ret_type,
                 value,
                 context,
+                ..
             } => {
                 write!(f, "let ")?;
                 if *mutable {
@@ -274,6 +305,7 @@ impl Display for Ast {
                 symbol,
                 args,
                 ret_type,
+                ..
             } => {
                 write!(f, "let {}", symbol)?;
                 for (arg, type_) in args {
@@ -295,6 +327,7 @@ impl Display for Ast {
                 args,
                 ret_type,
                 value,
+                ..
             } => {
                 if !generics.is_empty() || !dep_values.is_empty() {
                     write!(f, "forall")?;
@@ -337,7 +370,7 @@ impl Display for Ast {
                 write!(f, " = {}", value)
             }
 
-            Ast::If { cond, then, elsy } => write!(f, "(if {} then {} else {})", cond, then, elsy),
+            Ast::If { cond, then, elsy, .. } => write!(f, "(if {} then {} else {})", cond, then, elsy),
 
             Ast::DatatypeDefinition {
                 name,
@@ -345,6 +378,7 @@ impl Display for Ast {
                 constraints,
                 dep_values,
                 variants,
+                ..
             } => {
                 if !generics.is_empty() || !dep_values.is_empty() {
                     write!(f, "forall")?;
@@ -397,7 +431,7 @@ impl Display for Ast {
                 Ok(())
             }
 
-            Ast::Match { value, patterns } => {
+            Ast::Match { value, patterns, .. } => {
                 writeln!(f, "match {} with", value)?;
                 for (pat, val) in patterns {
                     writeln!(f, "| {} to {}", pat, val)?;
@@ -410,6 +444,7 @@ impl Display for Ast {
                 generics,
                 constraints,
                 functions,
+                ..
             } => {
                 write!(f, "class {}", name)?;
                 for generic in generics {
@@ -444,6 +479,7 @@ impl Display for Ast {
                 constraints,
                 parameters,
                 functions,
+                ..
             } => {
                 if !generics.is_empty() {
                     write!(f, "forall")?;
@@ -531,7 +567,7 @@ fn parse_base_type(
     parse_names: bool,
 ) -> Result<Type, ParseError> {
     let state = lexer.push();
-    match lexer.lex() {
+    match lexer.lex().map(|v| v.0) {
         Some(Token::Exclamation) => Ok(Type::Base(BaseType::Bottom)),
         Some(Token::Symbol("bool")) => Ok(Type::Base(BaseType::Bool)),
         Some(Token::Symbol("i8")) => Ok(Type::Base(BaseType::I8)),
@@ -555,7 +591,7 @@ fn parse_base_type(
 
         Some(Token::LParen) => {
             let type_ = parse_type(lexer, generics)?;
-            if let Some(Token::RParen) = lexer.lex() {
+            if let Some((Token::RParen, _)) = lexer.lex() {
                 Ok(type_)
             } else {
                 Err(ParseError::UnclosedBracket)
@@ -581,7 +617,7 @@ fn parse_child_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, 
         e @ Err(_) => return e,
     }
 
-    if let Some(Token::Symbol(s)) = try_token!(lexer, Some(Token::Symbol(_))) {
+    if let Some((Token::Symbol(s), _)) = try_token!(lexer, Some((Token::Symbol(_), _))) {
         Ok(Type::Base(BaseType::Named(
             s.to_string(),
             Vec::new(),
@@ -603,7 +639,7 @@ fn parse_parametarised_type(
     }
 
     match lexer.lex() {
-        Some(Token::Symbol(s)) => {
+        Some((Token::Symbol(s), _)) => {
             let mut parameters = Vec::new();
             let mut state = lexer.push();
             while let Ok(param) = parse_child_type(lexer, generics) {
@@ -624,19 +660,19 @@ fn parse_parametarised_type(
 }
 
 fn parse_refinement_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
-    if try_token!(lexer, Some(Token::LBrace)).is_some() {
+    if try_token!(lexer, Some((Token::LBrace, _))).is_some() {
         let base = match parse_parametarised_type(lexer, generics)? {
             Type::Base(v) => v,
             _ => return Err(ParseError::InvalidType),
         };
 
-        if try_token!(lexer, Some(Token::Colon)).is_none() {
+        if try_token!(lexer, Some((Token::Colon, _))).is_none() {
             return Err(ParseError::UnclosedBracket);
         }
 
         let constraint = parse_expr(lexer)?;
 
-        if try_token!(lexer, Some(Token::RBrace)).is_none() {
+        if try_token!(lexer, Some((Token::RBrace, _))).is_none() {
             return Err(ParseError::UnclosedBracket);
         }
 
@@ -649,7 +685,7 @@ fn parse_refinement_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<T
 fn parse_func_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
     let mut top = parse_parametarised_type(lexer, generics)?;
     let mut nodes = Vec::new();
-    while try_token!(lexer, Some(Token::Arrow)).is_some() {
+    while try_token!(lexer, Some((Token::Arrow, _))).is_some() {
         nodes.push(top);
         top = parse_parametarised_type(lexer, generics)?;
     }
@@ -666,12 +702,12 @@ fn parse_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseE
 
 fn parse_value(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     match lexer.lex() {
-        Some(Token::Integer(n)) => Ok(Ast::Integer(n)),
-        Some(Token::Bool(b)) => Ok(Ast::Bool(b)),
-        Some(Token::Symbol(s)) => Ok(Ast::Symbol(s.to_string())),
-        Some(Token::LParen) => {
+        Some((Token::Integer(n), span)) => Ok(Ast::Integer(span, n)),
+        Some((Token::Bool(b), span)) => Ok(Ast::Bool(span, b)),
+        Some((Token::Symbol(s), span)) => Ok(Ast::Symbol(span, s.to_string())),
+        Some((Token::LParen, _)) => {
             let value = parse_expr(lexer)?;
-            if let Some(Token::RParen) = lexer.lex() {
+            if let Some((Token::RParen, _)) = lexer.lex() {
                 Ok(value)
             } else {
                 Err(ParseError::UnclosedBracket)
@@ -696,6 +732,7 @@ fn parse_func_call(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         Ok(func)
     } else {
         Ok(Ast::FuncCall {
+            span: func.span().start..args.last().unwrap().span().end,
             func: Box::new(func),
             args,
         })
@@ -705,7 +742,7 @@ fn parse_func_call(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_muldiv(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_func_call(lexer)?;
-    while let Some(token) = try_token!(lexer, Some(Token::Astrisk | Token::Slash | Token::Percent))
+    while let Some((token, _)) = try_token!(lexer, Some((Token::Astrisk | Token::Slash | Token::Percent, _)))
     {
         let right = try_clean!(
             parse_func_call(lexer),
@@ -714,6 +751,7 @@ fn parse_muldiv(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             ParseError::InvalidInfix
         );
         top = Ast::Binary {
+            span: top.span().start..right.span().end,
             op: match token {
                 Token::Astrisk => BinaryOp::Mul,
                 Token::Slash => BinaryOp::Div,
@@ -731,9 +769,10 @@ fn parse_muldiv(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_muldiv(lexer)?;
-    while let Some(token) = try_token!(lexer, Some(Token::Plus | Token::Minus)) {
+    while let Some((token, _)) = try_token!(lexer, Some((Token::Plus | Token::Minus, _))) {
         let right = try_clean!(parse_muldiv(lexer), lexer, state, ParseError::InvalidInfix);
         top = Ast::Binary {
+            span: top.span().start..right.span().end,
             op: match token {
                 Token::Plus => BinaryOp::Add,
                 Token::Minus => BinaryOp::Sub,
@@ -750,12 +789,13 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_compare(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_addsub(lexer)?;
-    while let Some(token) = try_token!(
+    while let Some((token, _)) = try_token!(
         lexer,
-        Some(Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Eq | Token::Ne)
+        Some((Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Eq | Token::Ne, _))
     ) {
         let right = try_clean!(parse_addsub(lexer), lexer, state, ParseError::InvalidInfix);
         top = Ast::Binary {
+            span: top.span().start..right.span().end,
             op: match token {
                 Token::Lt => BinaryOp::Lt,
                 Token::Le => BinaryOp::Le,
@@ -776,9 +816,10 @@ fn parse_compare(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_and(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_compare(lexer)?;
-    while try_token!(lexer, Some(Token::LogicalAnd)).is_some() {
+    while try_token!(lexer, Some((Token::LogicalAnd, _))).is_some() {
         let right = try_clean!(parse_compare(lexer), lexer, state, ParseError::InvalidInfix);
         top = Ast::Binary {
+            span: top.span().start..right.span().end,
             op: BinaryOp::LogicalAnd,
             left: Box::new(top),
             right: Box::new(right),
@@ -791,9 +832,10 @@ fn parse_and(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 fn parse_or(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     let state = lexer.push();
     let mut top = parse_and(lexer)?;
-    while try_token!(lexer, Some(Token::LogicalOr)).is_some() {
+    while try_token!(lexer, Some((Token::LogicalOr, _))).is_some() {
         let right = try_clean!(parse_and(lexer), lexer, state, ParseError::InvalidInfix);
         top = Ast::Binary {
+            span: top.span().start..right.span().end,
             op: BinaryOp::LogicalAnd,
             left: Box::new(top),
             right: Box::new(right),
@@ -808,20 +850,20 @@ fn parse_argument(
     allow_type: bool,
     generics: &[String],
 ) -> Result<(String, Option<Type>), ParseError> {
-    if let Some(Token::Symbol(s)) = try_token!(lexer, Some(Token::Symbol(_))) {
+    if let Some((Token::Symbol(s), _)) = try_token!(lexer, Some((Token::Symbol(_), _))) {
         Ok((s.to_string(), None))
-    } else if try_token!(lexer, Some(Token::LParen)).is_some() {
-        if let Some(Token::Symbol(arg)) = try_token!(lexer, Some(Token::Symbol(_))) {
-            if try_token!(lexer, Some(Token::Colon)).is_none() {
+    } else if try_token!(lexer, Some((Token::LParen, _))).is_some() {
+        if let Some((Token::Symbol(arg), _)) = try_token!(lexer, Some((Token::Symbol(_), _))) {
+            if try_token!(lexer, Some((Token::Colon, _))).is_none() {
                 return Err(ParseError::InvalidArg);
             }
 
-            let type_ = if allow_type && try_token!(lexer, Some(Token::Type)).is_some() {
+            let type_ = if allow_type && try_token!(lexer, Some((Token::Type, _))).is_some() {
                 None
             } else {
                 Some(parse_type(lexer, generics)?)
             };
-            if try_token!(lexer, Some(Token::RParen)).is_none() {
+            if try_token!(lexer, Some((Token::RParen, _))).is_none() {
                 return Err(ParseError::InvalidArg);
             }
 
@@ -835,20 +877,21 @@ fn parse_argument(
 }
 
 fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    if try_token!(lexer, Some(Token::If)).is_some() {
+    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::If, _))) {
         let cond = parse_expr(lexer)?;
-        if try_token!(lexer, Some(Token::Then)).is_none() {
+        if try_token!(lexer, Some((Token::Then, _))).is_none() {
             return Err(ParseError::InvalidIf);
         }
 
         let then = parse_expr(lexer)?;
-        if try_token!(lexer, Some(Token::Else)).is_none() {
+        if try_token!(lexer, Some((Token::Else, _))).is_none() {
             return Err(ParseError::InvalidIf);
         }
 
         let elsy = parse_expr(lexer)?;
 
         Ok(Ast::If {
+            span: start..elsy.span().end,
             cond: Box::new(cond),
             then: Box::new(then),
             elsy: Box::new(elsy),
@@ -858,19 +901,8 @@ fn parse_if(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     }
 }
 
-/*
-pub enum Pattern {
-    Wildcard,
-    Symbol(String),
-    Constructor(String, Vec<Pattern>),
-    SymbolOrUnitConstructor(String),
-    As(String, Box<Pattern>),
-    Or(Vec<Pattern>),
-}
-*/
-
 fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
-    match lexer.peek() {
+    match lexer.peek().map(|v| v.0) {
         Some(Token::Symbol("_")) => {
             lexer.lex();
             Ok(Pattern::Wildcard)
@@ -880,7 +912,7 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
             lexer.lex();
 
             match lexer.peek() {
-                Some(Token::At) => {
+                Some((Token::At, _)) => {
                     lexer.lex();
                     match parse_pattern_child(lexer)? {
                         Pattern::As(_, _) => Err(ParseError::InvalidPattern),
@@ -891,7 +923,7 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
                 Some(_) => {
                     let mut fields = Vec::new();
                     loop {
-                        match lexer.peek() {
+                        match lexer.peek().map(|v| v.0) {
                             Some(Token::Symbol("_")) => fields.push(Pattern::Wildcard),
                             Some(Token::Symbol(v)) => {
                                 fields.push(Pattern::SymbolOrUnitConstructor(v.to_string()))
@@ -899,7 +931,7 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
                             Some(Token::LParen) => {
                                 lexer.lex();
                                 fields.push(parse_pattern(lexer)?);
-                                if let Some(Token::RParen) = lexer.peek() {
+                                if let Some((Token::RParen, _)) = lexer.peek() {
                                 } else {
                                     return Err(ParseError::InvalidPattern);
                                 }
@@ -925,7 +957,7 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
         Some(Token::LParen) => {
             lexer.lex();
             let v = parse_pattern(lexer)?;
-            if try_token!(lexer, Some(Token::RParen)).is_none() {
+            if try_token!(lexer, Some((Token::RParen, _))).is_none() {
                 return Err(ParseError::InvalidPattern);
             }
 
@@ -939,7 +971,7 @@ fn parse_pattern_child(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
 fn parse_pattern(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
     let mut children = vec![parse_pattern_child(lexer)?];
 
-    while try_token!(lexer, Some(Token::Pipe)).is_some() {
+    while try_token!(lexer, Some((Token::Pipe, _))).is_some() {
         children.push(parse_pattern_child(lexer)?);
     }
 
@@ -951,17 +983,17 @@ fn parse_pattern(lexer: &mut Lexer<'_>) -> Result<Pattern, ParseError> {
 }
 
 fn parse_match(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    if try_token!(lexer, Some(Token::Match)).is_some() {
+    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::Match, _))) {
         let value = parse_expr(lexer)?;
-        if try_token!(lexer, Some(Token::With)).is_none() {
+        if try_token!(lexer, Some((Token::With, _))).is_none() {
             return Err(ParseError::InvalidMatch);
         }
 
         let mut patterns = Vec::new();
-        while try_token!(lexer, Some(Token::Pipe)).is_some() {
+        while try_token!(lexer, Some((Token::Pipe, _))).is_some() {
             let pattern = parse_pattern(lexer)?;
 
-            if try_token!(lexer, Some(Token::To)).is_none() {
+            if try_token!(lexer, Some((Token::To, _))).is_none() {
                 return Err(ParseError::InvalidMatch);
             }
 
@@ -969,14 +1001,15 @@ fn parse_match(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             patterns.push((pattern, value));
         }
 
-        if try_token!(lexer, Some(Token::End)).is_none() {
-            return Err(ParseError::InvalidMatch);
+        if let Some((_, Span { end, .. })) = try_token!(lexer, Some((Token::End, _))) {
+            Ok(Ast::Match {
+                span: start..end,
+                value: Box::new(value),
+                patterns,
+            })
+        } else {
+            Err(ParseError::InvalidMatch)
         }
-
-        Ok(Ast::Match {
-            value: Box::new(value),
-            patterns,
-        })
     } else {
         Err(ParseError::NotStarted)
     }
@@ -989,33 +1022,33 @@ fn parse_let(
     allow_no_body: bool,
     constraints: &[(String, Vec<Type>)],
 ) -> Result<Ast, ParseError> {
-    if let Some(Token::Let) = lexer.peek() {
+    if let Some((Token::Let, Span { start, .. })) = lexer.peek() {
         lexer.lex();
 
-        if !top_level && !allow_no_body && try_token!(lexer, Some(Token::LParen)).is_some() {
+        if !top_level && !allow_no_body && try_token!(lexer, Some((Token::LParen, _))).is_some() {
             let pattern = parse_pattern(lexer)?;
 
-            if try_token!(lexer, Some(Token::RParen)).is_none() || try_token!(lexer, Some(Token::Equals)).is_none() {
+            if try_token!(lexer, Some((Token::RParen, _))).is_none() || try_token!(lexer, Some((Token::Equals, _))).is_none() {
                 return Err(ParseError::InvalidLet);
             }
 
             let value = parse_expr(lexer)?;
-            if try_token!(lexer, Some(Token::In)).is_none() {
+            if try_token!(lexer, Some((Token::In, _))).is_none() {
                 return Err(ParseError::InvalidLet);
             }
             let context = parse_expr(lexer)?;
 
             let mut patterns = vec![(pattern, context)];
-            if let Some(elsy) = try_token!(lexer, Some(Token::Else)).map(|_| parse_expr(lexer)) {
+            if let Some(elsy) = try_token!(lexer, Some((Token::Else, _))).map(|_| parse_expr(lexer)) {
                 patterns.push((Pattern::Wildcard, elsy?));
             }
 
-            return Ok(Ast::Match { value: Box::new(value), patterns });
+            return Ok(Ast::Match { span: start..patterns.last().unwrap().1.span().end, value: Box::new(value), patterns });
         }
 
-        let mutable = try_token!(lexer, Some(Token::Mut)).is_some();
-        let symbol = match try_token!(lexer, Some(Token::Symbol(_))) {
-            Some(Token::Symbol(v)) => v.to_string(),
+        let mutable = try_token!(lexer, Some((Token::Mut, _))).is_some();
+        let symbol = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+            Some((Token::Symbol(v), _)) => v.to_string(),
             _ => return Err(ParseError::InvalidLet),
         };
 
@@ -1031,9 +1064,9 @@ fn parse_let(
         }
 
         let ret_type = if if args.is_empty() {
-            try_token!(lexer, Some(Token::Colon))
+            try_token!(lexer, Some((Token::Colon, _)))
         } else {
-            try_token!(lexer, Some(Token::Arrow))
+            try_token!(lexer, Some((Token::Arrow, _)))
         }
         .is_some()
         {
@@ -1042,9 +1075,10 @@ fn parse_let(
             Type::Unknown
         };
 
-        if try_token!(lexer, Some(Token::Equals)).is_none() {
+        if try_token!(lexer, Some((Token::Equals, _))).is_none() {
             if allow_no_body && !mutable && args.iter().all(|(_, t)| !matches!(t, Type::Unknown)) && !matches!(ret_type, Type::Unknown) {
                 return Ok(Ast::EmptyLet {
+                    span: start..lexer.loc(),
                     symbol,
                     args,
                     ret_type,
@@ -1057,9 +1091,10 @@ fn parse_let(
         }
 
         let value = parse_expr(lexer)?;
-        if try_token!(lexer, Some(Token::In)).is_none() {
+        if try_token!(lexer, Some((Token::In, _))).is_none() {
             if top_level && !mutable {
                 return Ok(Ast::TopLet {
+                    span: start..value.span().end,
                     symbol,
                     generics: generics.to_vec(),
                     constraints: constraints.to_vec(),
@@ -1077,7 +1112,8 @@ fn parse_let(
 
         let context = parse_expr(lexer)?;
         Ok(Ast::Let {
-            mutable,
+            span: start..0,
+            mutable: false,
             symbol,
             args,
             ret_type,
@@ -1093,8 +1129,8 @@ fn parse_type_def_variant(
     lexer: &mut Lexer<'_>,
     generics: &[String],
 ) -> Result<(String, Vec<(Option<String>, Type)>), ParseError> {
-    let name = match try_token!(lexer, Some(Token::Symbol(_))) {
-        Some(Token::Symbol(v)) => v.to_string(),
+    let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+        Some((Token::Symbol(v), _)) => v.to_string(),
         _ => return Err(ParseError::InvalidTypeDef),
     };
 
@@ -1113,22 +1149,23 @@ fn parse_type_def_variant(
 }
 
 fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(String, Vec<Type>)]) -> Result<Ast, ParseError> {
-    if try_token!(lexer, Some(Token::Type)).is_some() {
-        let name = match try_token!(lexer, Some(Token::Symbol(_))) {
-            Some(Token::Symbol(v)) => v.to_string(),
+    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::Type, _))) {
+        let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+            Some((Token::Symbol(v), _)) => v.to_string(),
             _ => return Err(ParseError::InvalidTypeDef),
         };
 
-        if try_token!(lexer, Some(Token::Equals)).is_none() {
+        if try_token!(lexer, Some((Token::Equals, _))).is_none() {
             return Err(ParseError::InvalidTypeDef);
         }
 
         let mut variants = vec![parse_type_def_variant(lexer, generics)?];
-        while try_token!(lexer, Some(Token::Pipe)).is_some() {
+        while try_token!(lexer, Some((Token::Pipe, _))).is_some() {
             variants.push(parse_type_def_variant(lexer, generics)?);
         }
 
         Ok(Ast::DatatypeDefinition {
+            span: start..lexer.loc(),
             name,
             generics: generics.to_vec(),
             constraints: constraints.to_vec(),
@@ -1142,7 +1179,7 @@ fn parse_type_def(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(St
 
 // TODO: dependent values
 fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    if try_token!(lexer, Some(Token::Forall)).is_some() {
+    if try_token!(lexer, Some((Token::Forall, _))).is_some() {
         let mut generics = Vec::new();
         loop {
             match parse_argument(lexer, true, &[]) {
@@ -1154,10 +1191,10 @@ fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         }
 
         let mut constraints = Vec::new();
-        if try_token!(lexer, Some(Token::Where)).is_some() {
+        if try_token!(lexer, Some((Token::Where, _))).is_some() {
             while {
-                let name = match try_token!(lexer, Some(Token::Symbol(_))) {
-                    Some(Token::Symbol(v)) => v.to_string(),
+                let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+                    Some((Token::Symbol(v), _)) => v.to_string(),
                     _ => return Err(ParseError::InvalidInstance),
                 };
 
@@ -1171,7 +1208,7 @@ fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
                 }
 
                 constraints.push((name, parameters));
-                try_token!(lexer, Some(Token::Comma)).is_some()
+                try_token!(lexer, Some((Token::Comma, _))).is_some()
             } {}
         }
 
@@ -1194,22 +1231,22 @@ fn parse_forall(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 }
 
 fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
-    if try_token!(lexer, Some(Token::Class)).is_some() {
-        let name = match try_token!(lexer, Some(Token::Symbol(_))) {
-            Some(Token::Symbol(v)) => v.to_string(),
+    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::Class, _))) {
+        let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+            Some((Token::Symbol(v), _)) => v.to_string(),
             _ => return Err(ParseError::InvalidClass),
         };
 
         let mut generics = Vec::new();
-        while let Some(Token::Symbol(generic)) = try_token!(lexer, Some(Token::Symbol(_))) {
+        while let Some((Token::Symbol(generic), _)) = try_token!(lexer, Some((Token::Symbol(_), _))) {
             generics.push(generic.to_string());
         }
 
         let mut constraints = Vec::new();
-        if try_token!(lexer, Some(Token::Where)).is_some() {
+        if try_token!(lexer, Some((Token::Where, _))).is_some() {
             while {
-                let name = match try_token!(lexer, Some(Token::Symbol(_))) {
-                    Some(Token::Symbol(v)) => v.to_string(),
+                let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+                    Some((Token::Symbol(v), _)) => v.to_string(),
                     _ => return Err(ParseError::InvalidInstance),
                 };
 
@@ -1223,11 +1260,11 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
                 }
 
                 constraints.push((name, parameters));
-                try_token!(lexer, Some(Token::Comma)).is_some()
+                try_token!(lexer, Some((Token::Comma, _))).is_some()
             } {}
         }
 
-        if try_token!(lexer, Some(Token::Equals)).is_none() {
+        if try_token!(lexer, Some((Token::Equals, _))).is_none() {
             return Err(ParseError::InvalidClass);
         }
 
@@ -1246,25 +1283,26 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             }
         }
 
-        if try_token!(lexer, Some(Token::End)).is_none() {
-            return Err(ParseError::InvalidClass);
+        if let Some((_, Span { end, .. })) = try_token!(lexer, Some((Token::End, _))) {
+            Ok(Ast::Class {
+                span: start..end,
+                name,
+                generics,
+                constraints,
+                functions,
+            })
+        } else {
+            Err(ParseError::InvalidClass)
         }
-
-        Ok(Ast::Class {
-            name,
-            generics,
-            constraints,
-            functions,
-        })
     } else {
         Err(ParseError::NotStarted)
     }
 }
 
 fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(String, Vec<Type>)]) -> Result<Ast, ParseError> {
-    if try_token!(lexer, Some(Token::Instance)).is_some() {
-        let name = match try_token!(lexer, Some(Token::Symbol(_))) {
-            Some(Token::Symbol(v)) => v.to_string(),
+    if let Some((_, Span { start, .. })) = try_token!(lexer, Some((Token::Instance, _))) {
+        let name = match try_token!(lexer, Some((Token::Symbol(_), _))) {
+            Some((Token::Symbol(v), _)) => v.to_string(),
             _ => return Err(ParseError::InvalidInstance),
         };
 
@@ -1277,7 +1315,7 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(St
             }
         }
 
-        if try_token!(lexer, Some(Token::Equals)).is_none() {
+        if try_token!(lexer, Some((Token::Equals, _))).is_none() {
             return Err(ParseError::InvalidInstance);
         }
 
@@ -1297,17 +1335,18 @@ fn parse_instance(lexer: &mut Lexer<'_>, generics: &[String], constraints: &[(St
             }
         }
 
-        if try_token!(lexer, Some(Token::End)).is_none() {
-            return Err(ParseError::InvalidInstance);
+        if let Some((_, Span { end, .. })) = try_token!(lexer, Some((Token::End, _))) {
+            Ok(Ast::Instance {
+                span: start..end,
+                name,
+                generics: generics.to_vec(),
+                constraints: constraints.to_vec(),
+                parameters,
+                functions,
+            })
+        } else {
+            Err(ParseError::InvalidInstance)
         }
-
-        Ok(Ast::Instance {
-            name,
-            generics: generics.to_vec(),
-            constraints: constraints.to_vec(),
-            parameters,
-            functions,
-        })
     } else {
         Err(ParseError::NotStarted)
     }
