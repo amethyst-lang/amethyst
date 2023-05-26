@@ -2,9 +2,5 @@ type LType = L i32
 
 instance Linear LType = end
 
-let f (l: LType) =
-    if true then
-        l
-    else (L 0)
-
-let _ = f (L 69)
+let f x = g x
+let g x = f (x + 1)

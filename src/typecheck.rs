@@ -1293,7 +1293,17 @@ fn check_linearity(ast: &Ast, env: &mut Environment, errors: &mut Vec<CheckError
             env.pop_lin_var(errors);
         }
 
-        Ast::TopLet { scope, args, value, .. } => {
+        Ast::TopLet { span, scope, symbol, args, value, ret_type, .. } => {
+            if args.is_empty() && ret_type.linear(env) {
+                errors.push(CheckError {
+                    message: "top level definition cannot be linear".to_string(),
+                    primary_label: format!("top level variable `{}` is linear", symbol),
+                    primary_label_loc: span.clone(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+            }
+
             for (arg, _) in args {
                 env.push_lin_var(arg.clone(), *scope);
             }
