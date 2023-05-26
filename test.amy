@@ -1,12 +1,10 @@
-forall a
-type Option
-    = Some a
-    | None
+type LType = L i32
 
-type Other = No
+instance Linear LType = end
 
-let _ =
-    match (Some 2) with
-    | Some x to x
-    | None to false
-    end
+let f (l: LType) =
+    if true then
+        l
+    else (L 0)
+
+let _ = f (L 69)

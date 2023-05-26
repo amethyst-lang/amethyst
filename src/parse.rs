@@ -186,6 +186,7 @@ pub enum Ast {
     Let {
         span: Span,
         mutable: bool,
+        scope: usize,
         symbol: String,
         args: Vec<(String, Type)>,
         ret_type: Type,
@@ -195,6 +196,7 @@ pub enum Ast {
 
     EmptyLet {
         span: Span,
+        scope: usize,
         symbol: String,
         args: Vec<(String, Type)>,
         ret_type: Type,
@@ -202,6 +204,7 @@ pub enum Ast {
 
     TopLet {
         span: Span,
+        scope: usize,
         symbol: String,
         constraints: Vec<(String, Vec<Type>)>,
         generics: Vec<String>,
@@ -220,6 +223,7 @@ pub enum Ast {
 
     DatatypeDefinition {
         span: Span,
+        scope: usize,
         name: String,
         constraints: Vec<(String, Vec<Type>)>,
         generics: Vec<String>,
@@ -230,7 +234,7 @@ pub enum Ast {
     Match {
         span: Span,
         value: Box<Ast>,
-        patterns: Vec<(Pattern, Ast)>,
+        patterns: Vec<(Pattern, usize, Ast)>,
     },
 
     Class {
@@ -452,7 +456,7 @@ impl Display for Ast {
                 value, patterns, ..
             } => {
                 writeln!(f, "match {} with", value)?;
-                for (pat, val) in patterns {
+                for (pat, _, val) in patterns {
                     writeln!(f, "| {} to {}", pat, val)?;
                 }
                 writeln!(f, "end")
@@ -1348,7 +1352,7 @@ fn parse_match(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             }
 
             let value = parse_expr(lexer)?;
-            patterns.push((pattern, value));
+            patterns.push((pattern, 0, value));
         }
 
         match lexer.lex() {
@@ -1444,13 +1448,13 @@ fn parse_let(
             }
             let context = parse_expr(lexer)?;
 
-            let mut patterns = vec![(pattern, context)];
+            let mut patterns = vec![(pattern, 0, context)];
             if let Some((_, span)) = try_token!(lexer, Some((Token::Else, _))) {
-                patterns.push((Pattern::Wildcard(span), parse_expr(lexer)?));
+                patterns.push((Pattern::Wildcard(span), 0, parse_expr(lexer)?));
             }
 
             return Ok(Ast::Match {
-                span: start..patterns.last().unwrap().1.span().end,
+                span: start..patterns.last().unwrap().2.span().end,
                 value: Box::new(value),
                 patterns,
             });
@@ -1511,6 +1515,7 @@ fn parse_let(
             {
                 return Ok(Ast::EmptyLet {
                     span,
+                    scope: 0,
                     symbol,
                     args,
                     ret_type,
@@ -1568,6 +1573,7 @@ fn parse_let(
             if top_level && !mutable {
                 return Ok(Ast::TopLet {
                     span: start..value.span().end,
+                    scope: 0,
                     symbol,
                     generics: generics.to_vec(),
                     constraints: constraints.to_vec(),
@@ -1619,6 +1625,7 @@ fn parse_let(
         Ok(Ast::Let {
             span: start..0,
             mutable: false,
+            scope: 0,
             symbol,
             args,
             ret_type,
@@ -1731,6 +1738,7 @@ fn parse_type_def(
 
         Ok(Ast::DatatypeDefinition {
             span: start..lexer.loc(),
+            scope: 0,
             name,
             generics: generics.to_vec(),
             constraints: constraints.to_vec(),
@@ -2144,10 +2152,72 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     }
 }
 
+fn add_scope_data(ast: &mut Ast, last_scope_id: &mut usize) {
+    match ast {
+        Ast::Binary { left, right, .. } => {
+            add_scope_data(left, last_scope_id);
+            add_scope_data(right, last_scope_id);
+        }
+
+        Ast::FuncCall { func, args, .. } => {
+            add_scope_data(func, last_scope_id);
+            for arg in args {
+                add_scope_data(arg, last_scope_id);
+            }
+        }
+
+        Ast::Let { scope, value, context, .. } => {
+            *scope = *last_scope_id;
+            *last_scope_id += 1;
+            add_scope_data(value, last_scope_id);
+            add_scope_data(context, last_scope_id);
+        }
+
+        Ast::TopLet { scope, value, .. } => {
+            *scope = *last_scope_id;
+            *last_scope_id += 1;
+            add_scope_data(value, last_scope_id);
+        }
+
+        Ast::EmptyLet { scope, .. } => {
+            *last_scope_id += 1;
+            *scope = *last_scope_id;
+        }
+
+        Ast::If { cond, then, elsy, .. } => {
+            add_scope_data(cond, last_scope_id);
+            add_scope_data(then, last_scope_id);
+            add_scope_data(elsy, last_scope_id);
+        }
+
+        Ast::Match { value, patterns, .. } => {
+            add_scope_data(value, last_scope_id);
+            for (_, scope, body) in patterns.iter_mut() {
+                *scope = *last_scope_id;
+                *last_scope_id += 1;
+                add_scope_data(body, last_scope_id);
+            }
+        }
+
+        Ast::DatatypeDefinition { scope, .. } => {
+            *scope = *last_scope_id;
+            *last_scope_id += 1;
+        }
+
+        _ => ()
+    }
+}
+
 pub fn parse(lexer: &mut Lexer<'_>) -> Result<Vec<Ast>, ParseError> {
     let mut asts = Vec::new();
     while lexer.peek().is_some() {
         asts.push(parse_top(lexer)?);
     }
+
+    let mut last_scope_id = 0;
+    for ast in asts.iter_mut() {
+        add_scope_data(ast, &mut last_scope_id);
+    }
+
     Ok(asts)
 }

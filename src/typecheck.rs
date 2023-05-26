@@ -19,9 +19,20 @@ struct Class {
     funcs: HashMap<String, Type>,
 }
 
+#[derive(Debug, Clone)]
+struct Variable {
+    type_: Type,
+    constraints: Vec<(String, Vec<Type>)>,
+    scope: usize,
+    used: bool,
+    can_be_linear: bool,
+}
+
 #[derive(Debug, Default)]
 struct Environment {
-    variables: Vec<(String, Type, Vec<(String, Vec<Type>)>)>,
+    variables: Vec<(String, Variable)>,
+    saved_variable_usages: HashMap<(String, usize), Variable>,
+    variables_linear_pass: Vec<(String, Variable)>,
     constructors: HashMap<String, (Vec<Type>, Type)>,
     substitutions: Vec<Type>,
     classes: HashMap<String, Class>,
@@ -30,32 +41,74 @@ struct Environment {
 }
 
 impl Environment {
+    fn add_prelude(mut self) -> Self {
+        self.classes.insert("Linear".to_string(), Class {
+            generics: vec!["l".to_string()],
+            constraints: Vec::new(),
+            funcs: HashMap::new(),
+        });
+        self
+    }
+
     fn new_type_var(&mut self) -> Type {
         let t = Type::TypeVar(self.substitutions.len());
         self.substitutions.push(t.clone());
         t
     }
 
-    fn push_variable(&mut self, var: &str, type_: &Type, constraints: &[(String, Vec<Type>)]) {
-        self.variables
-            .push((var.to_string(), type_.clone(), constraints.to_vec()));
+    fn push_variable(&mut self, var: &str, type_: &Type, constraints: &[(String, Vec<Type>)], scope: usize) {
+        self.variables.push((var.to_string(), Variable {
+            type_: type_.clone(),
+            constraints: constraints.to_vec(),
+            scope,
+            used: false,
+            can_be_linear: false,
+        }));
     }
 
     fn pop_variable(&mut self) {
-        self.variables.pop();
+        if let Some((name, var)) = self.variables.pop() {
+            self.saved_variable_usages.insert((name, var.scope), var);
+        }
     }
 
-    fn find_variable(&mut self, var: &str) -> Option<&(String, Type, Vec<(String, Vec<Type>)>)> {
-        self.variables.iter().rev().find(|(v, ..)| v == var)
+    fn push_lin_var(&mut self, var_name: String, var_scope: usize) {
+        let var = self.saved_variable_usages.get(&(var_name.clone(), var_scope)).unwrap();
+        self.variables_linear_pass.push((var_name, var.clone()));
+    }
+
+    fn pop_lin_var(&mut self, errors: &mut Vec<CheckError>) {
+        if let Some((name, var)) = self.variables_linear_pass.pop() {
+            if !var.used && var.type_.linear(self) {
+                errors.push(CheckError {
+                    message: format!("linear variable `{}` unused", name),
+                    primary_label: "".to_string(),
+                    primary_label_loc: usize::MAX..usize::MAX,
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+            }
+        }
+    }
+
+    fn find_variable(&mut self, var: &str) -> Option<&mut Variable> {
+        self.variables_linear_pass.iter_mut().rev().find(|(v, ..)| v == var).map(|(_, v)| v).or_else(|| self.variables.iter_mut().find(|(v, ..)| v == var).map(|(_, v)| v))
     }
 
     fn update_vars(&mut self) {
         let mut temp = Vec::new();
         std::mem::swap(&mut temp, &mut self.variables);
-        for (_, var, _) in temp.iter_mut() {
-            var.replace_type_vars(self);
+        for (_, var) in temp.iter_mut() {
+            var.type_.replace_type_vars(self);
         }
         std::mem::swap(&mut temp, &mut self.variables);
+
+        let mut temp = HashMap::new();
+        std::mem::swap(&mut temp, &mut self.saved_variable_usages);
+        for (_, var) in temp.iter_mut() {
+            var.type_.replace_type_vars(self);
+        }
+        std::mem::swap(&mut temp, &mut self.saved_variable_usages);
 
         let mut temp = HashMap::new();
         std::mem::swap(&mut temp, &mut self.classes);
@@ -128,6 +181,51 @@ impl Environment {
 }
 
 impl Type {
+    fn linear(&self, env: &Environment) -> bool {
+        match self {
+            Type::Unknown => false,
+
+            Type::Base(BaseType::Named(name, gens, _)) => {
+                if gens.iter().any(|v| v.linear(env)) {
+                    return true;
+                }
+
+                for (constraint, params, _) in env.instances.iter() {
+                    if constraint != "Linear" || params.len() != 1 {
+                        continue;
+                    }
+
+                    match &params[0] {
+                        Type::Base(BaseType::Named(n, _, _)) if name == n => {
+                            return true;
+                        }
+
+                        _ => (),
+                    }
+                }
+
+                false
+            }
+
+            Type::Base(_) => false,
+
+            Type::Func(_, _) => false,
+            Type::Refined(_, _) => todo!(),
+            Type::Generic(_) => false,
+            Type::TypeVar(_) => {
+                let mut t = self.clone();
+                while let Type::TypeVar(x) = t {
+                    t = env.substitutions[x].clone();
+                    if matches!(t, Type::TypeVar(y) if x == y) {
+                        break;
+                    }
+                }
+
+                t.linear(env)
+            }
+        }
+    }
+
     fn equals_up_to_env(&mut self, other: &mut Type, env: &mut Environment) -> bool {
         match (self, other) {
             (Type::Base(BaseType::Bottom), _) | (_, Type::Base(BaseType::Bottom)) => true,
@@ -375,7 +473,7 @@ fn replace_unknowns(env: &mut Environment, ast: &mut Ast) {
             value, patterns, ..
         } => {
             replace_unknowns(env, value);
-            for (_, val) in patterns {
+            for (_, _, val) in patterns {
                 replace_unknowns(env, val);
             }
         }
@@ -396,7 +494,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
         Ast::Bool(_, _) => Type::Base(BaseType::Bool),
 
         Ast::Symbol(span, s) => {
-            let (_, mut v, mut c) = match env.find_variable(s).cloned() {
+            let var = match env.find_variable(s) {
                 Some(v) => v,
                 None => {
                     errors.push(CheckError {
@@ -409,15 +507,18 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
                     return Type::Base(BaseType::Bottom);
                 }
             };
+
             let mut generics = HashMap::new();
-            v.convert_generics_to_type_vars(env, &mut generics);
-            for (_, c) in c.iter_mut() {
+            let mut type_ = var.type_.clone();
+            let mut constraints = var.constraints.clone();
+            type_.convert_generics_to_type_vars(env, &mut generics);
+            for (_, c) in constraints.iter_mut() {
                 for c in c {
                     c.convert_generics_to_type_vars(env, &mut generics);
                 }
             }
-            env.constraints_applied.extend(c);
-            v
+            env.constraints_applied.extend(constraints);
+            type_
         }
 
         Ast::Binary {
@@ -566,6 +667,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
         Ast::Let {
             span,
             mutable: _,
+            scope,
             symbol,
             args,
             ret_type,
@@ -573,13 +675,9 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
             context,
         } => {
             for (arg, type_) in args.iter() {
-                env.push_variable(arg, type_, &[]);
+                env.push_variable(arg, type_, &[], *scope);
             }
             let mut r = typecheck_helper(env, value, errors);
-
-            for _ in args.iter() {
-                env.pop_variable();
-            }
 
             if !ret_type.equals_up_to_env(&mut r, env) {
                 errors.push(CheckError {
@@ -596,7 +694,11 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
                 r = Type::Func(Box::new(arg_type.clone()), Box::new(r));
             }
 
-            env.push_variable(symbol, &r, &[]);
+            for _ in args.iter() {
+                env.pop_variable();
+            }
+
+            env.push_variable(symbol, &r, &[], *scope);
             let t = typecheck_helper(env, context, errors);
             env.pop_variable();
             t
@@ -606,6 +708,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
 
         Ast::TopLet {
             span,
+            scope,
             args,
             ret_type,
             value,
@@ -615,14 +718,10 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
             for (arg, arg_type) in args.iter() {
                 let mut arg_type = arg_type.clone();
                 arg_type.convert_generics_to_type_vars(env, &mut generics);
-                env.push_variable(arg, &arg_type, &[]);
+                env.push_variable(arg, &arg_type, &[], *scope);
             }
 
             let mut t = typecheck_helper(env, value, errors);
-
-            for _ in args.iter() {
-                env.pop_variable();
-            }
 
             for (g, mut t) in generics {
                 if !t.equals_up_to_env(&mut Type::Generic(g.clone()), env) {
@@ -645,9 +744,15 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
                     notes: Vec::new(),
                 });
             }
-            for (_, arg) in args.iter().rev() {
-                t = Type::Func(Box::new(arg.clone()), Box::new(t));
+
+            for (_, arg_type) in args.iter().rev() {
+                t = Type::Func(Box::new(arg_type.clone()), Box::new(t));
             }
+
+            for _ in args.iter() {
+                env.pop_variable();
+            }
+
             t // TODO: actual type
         }
 
@@ -692,9 +797,9 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
         } => {
             let mut t_value = typecheck_helper(env, value, errors);
             let mut result = None;
-            let first_span = patterns.first().map(|(_, v)| v.span()).unwrap_or(0..0);
+            let first_span = patterns.first().map(|(_, _, v)| v.span()).unwrap_or(0..0);
 
-            for (pat, val) in patterns {
+            for (pat, scope, val) in patterns {
                 let (mut val_type, append_to_env) = typecheck_pattern(env, pat, errors);
                 if !t_value.equals_up_to_env(&mut val_type, env) {
                     t_value.replace_type_vars(env);
@@ -709,7 +814,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
                 }
 
                 for (var, t) in append_to_env.iter().rev() {
-                    env.push_variable(var, t, &[]);
+                    env.push_variable(var, t, &[], *scope);
                 }
 
                 let mut new = typecheck_helper(env, val, errors);
@@ -795,6 +900,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
                 for function in functions {
                     match function {
                         Ast::TopLet {
+                            scope,
                             symbol,
                             args,
                             ret_type,
@@ -811,7 +917,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
                                         .enumerate()
                                         .find(|(_, u)| g == **u)
                                         .map(|(i, _)| i)
-                                        .unwrap();
+                                        .unwrap(); // TODO
                                     if !parameters[i].equals_up_to_env(&mut v, env) {
                                         todo!()
                                     }
@@ -825,7 +931,7 @@ fn typecheck_helper(env: &mut Environment, ast: &mut Ast, errors: &mut Vec<Check
                                         }
 
                                         type_.replace_type_vars(env);
-                                        env.push_variable(name, type_, &[]);
+                                        env.push_variable(name, type_, &[], *scope);
                                         func = *r;
                                     } else {
                                         todo!()
@@ -1127,7 +1233,7 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Chec
             value, patterns, ..
         } => {
             replace_type_vars(value, env, errors);
-            for (_, result) in patterns {
+            for (_, _, result) in patterns {
                 replace_type_vars(result, env, errors);
             }
         }
@@ -1142,8 +1248,138 @@ fn replace_type_vars(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Chec
     }
 }
 
+fn check_linearity(ast: &Ast, env: &mut Environment, errors: &mut Vec<CheckError>) {
+    match ast {
+        Ast::Symbol(span, symbol) => {
+            if let Some(var) = env.find_variable(symbol) {
+                var.can_be_linear = !var.used;
+                var.used = true;
+                let type_ = var.type_.clone();
+                if !var.can_be_linear && type_.linear(env) {
+                    errors.push(CheckError {
+                        message: "linear variable used multiple times".to_string(),
+                        primary_label: format!("variable `{}` used another time here", symbol),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                }
+            }
+        }
+
+        Ast::Binary { left, right, .. } => {
+            check_linearity(left, env, errors);
+            check_linearity(right, env, errors);
+        }
+
+        Ast::FuncCall { func, args, .. } => {
+            check_linearity(func, env, errors);
+            for arg in args {
+                check_linearity(arg, env, errors);
+            }
+        }
+
+        Ast::Let { scope, symbol, args, value, context, .. } => {
+            for (arg, _) in args {
+                env.push_lin_var(arg.clone(), *scope);
+            }
+            check_linearity(value, env, errors);
+            for _ in args {
+                env.pop_lin_var(errors);
+            }
+
+            env.push_lin_var(symbol.clone(), *scope);
+            check_linearity(context, env, errors);
+            env.pop_lin_var(errors);
+        }
+
+        Ast::TopLet { scope, args, value, .. } => {
+            for (arg, _) in args {
+                env.push_lin_var(arg.clone(), *scope);
+            }
+
+            check_linearity(value, env, errors);
+
+            for _ in args {
+                env.pop_lin_var(errors);
+            }
+        }
+
+        Ast::If { span, cond, then, elsy } => {
+            check_linearity(cond, env, errors);
+            let after_cond = env.variables_linear_pass.clone();
+            check_linearity(then, env, errors);
+            let after_then = env.variables_linear_pass.clone();
+            env.variables_linear_pass = after_cond;
+            check_linearity(elsy, env, errors);
+            let after_elsy = env.variables_linear_pass.clone();
+
+            for (i, ((t_name, t_var), (e_name, e_var))) in after_then.into_iter().zip(after_elsy.into_iter()).enumerate() {
+                assert_eq!(t_name, e_name);
+                assert_eq!(t_var.scope, e_var.scope);
+
+                if t_var.can_be_linear != e_var.can_be_linear && t_var.type_.linear(env) {
+                    errors.push(CheckError {
+                        message: "linear type used inconsistently in if statement".to_string(),
+                        primary_label: format!("`{}` used in one branch but not the other", t_name),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                    env.variables_linear_pass[i].1.used = t_var.used | e_var.used;
+                    env.variables_linear_pass[i].1.can_be_linear = t_var.can_be_linear | e_var.can_be_linear;
+                }
+            }
+        }
+
+        Ast::Match { span, value, patterns } => {
+            check_linearity(value, env, errors);
+            let after_value = env.variables_linear_pass.clone();
+            for (_, scope, body) in patterns {
+                let mut count = 0;
+                for name in env.saved_variable_usages.iter().filter(|((_, s), _)| s == scope).map(|((n, _), _)| n.clone()).collect::<Vec<_>>() {
+                    env.push_lin_var(name.clone(), *scope);
+                    count += 1;
+                }
+
+                check_linearity(body, env, errors);
+                let after_body = env.variables_linear_pass.clone();
+
+                for (i, ((v_name, v_var), (e_name, e_var))) in after_value.iter().zip(after_body.into_iter()).enumerate() {
+                    assert_eq!(*v_name, e_name);
+                    assert_eq!(v_var.scope, e_var.scope);
+
+                    if v_var.can_be_linear != e_var.can_be_linear && v_var.type_.linear(env) {
+                        errors.push(CheckError {
+                            message: "linear type used inconsistently in if statement".to_string(),
+                            primary_label: format!("`{}` used in one branch but not the other", v_name),
+                            primary_label_loc: span.clone(),
+                            secondary_labels: Vec::new(),
+                            notes: Vec::new(),
+                        });
+                        env.variables_linear_pass[i].1.used = v_var.used | e_var.used;
+                        env.variables_linear_pass[i].1.can_be_linear = v_var.can_be_linear | e_var.can_be_linear;
+                    }
+                }
+
+                for _ in 0..count {
+                    env.pop_lin_var(errors);
+                }
+            }
+        }
+
+        Ast::Instance { functions, .. } => {
+            for func in functions {
+                check_linearity(func, env, errors);
+            }
+        }
+
+        _ => (),
+    }
+}
+
 pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
-    let mut env = Environment::default();
+    let mut env = Environment::default().add_prelude();
     let mut errors = Vec::new();
 
     for ast in asts.iter_mut() {
@@ -1153,6 +1389,7 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
     for ast in asts.iter() {
         match ast {
             Ast::TopLet {
+                scope,
                 symbol,
                 args,
                 ret_type,
@@ -1162,10 +1399,11 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
                 for (_, arg_type) in args.iter().rev() {
                     top = Type::Func(Box::new(arg_type.clone()), Box::new(top));
                 }
-                env.push_variable(symbol, &top, &[]);
+                env.push_variable(symbol, &top, &[], *scope);
             }
 
             Ast::DatatypeDefinition {
+                scope,
                 name,
                 generics,
                 variants,
@@ -1182,7 +1420,7 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
                     for (_, type_) in fields.iter().rev() {
                         top = Type::Func(Box::new(type_.clone()), Box::new(top));
                     }
-                    env.push_variable(cons_name, &top, &[]);
+                    env.push_variable(cons_name, &top, &[], *scope);
                     for (_, type_) in fields {
                         constructor.push(type_.clone());
                     }
@@ -1207,6 +1445,7 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
                 for func in functions {
                     match func {
                         Ast::EmptyLet {
+                            scope,
                             symbol,
                             args,
                             ret_type,
@@ -1216,15 +1455,15 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
                             for (_, type_) in args.iter().rev() {
                                 top = Type::Func(Box::new(type_.clone()), Box::new(top));
                             }
-                            class_funcs.insert(symbol.clone(), top);
+                            class_funcs.insert(symbol.clone(), (top, *scope));
                         }
 
                         _ => (),
                     }
                 }
 
-                for (a, b) in class_funcs.iter() {
-                    env.push_variable(a, b, &constraints);
+                for (name, (gens, scope)) in class_funcs.iter() {
+                    env.push_variable(name, gens, &constraints, *scope);
                 }
 
                 env.classes.insert(
@@ -1232,7 +1471,7 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
                     Class {
                         generics: generics.clone(),
                         constraints,
-                        funcs: class_funcs,
+                        funcs: class_funcs.into_iter().map(|(a, (b, _))| (a, b)).collect(),
                     },
                 );
             }
@@ -1253,13 +1492,11 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
 
     for ast in asts.iter_mut() {
         typecheck_helper(&mut env, ast, &mut errors);
-    }
-
-    env.check_constraints(&mut errors);
-    for ast in asts.iter_mut() {
+        env.check_constraints(&mut errors);
         replace_type_vars(ast, &mut env, &mut errors);
+        env.update_vars();
+        check_linearity(ast, &mut env, &mut errors);
     }
-    env.update_vars();
 
     if errors.is_empty() {
         Ok(())
