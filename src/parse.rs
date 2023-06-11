@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use crate::lexer::{Lexer, Span, Token};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BaseType {
     Bottom,
     Bool,
@@ -45,7 +45,7 @@ impl Display for BaseType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Monotype {
     Unknown,
     Base(BaseType),

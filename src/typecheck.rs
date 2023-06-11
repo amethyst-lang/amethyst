@@ -42,6 +42,50 @@ impl Environment {
         self.substitutions.push(t.clone());
         t
     }
+
+    fn find(&self, t: &Monotype) -> Monotype {
+        let mut t = t.clone();
+        while let Monotype::TypeVar(i) = t {
+            let t_new = &self.substitutions[i];
+            if matches!(t_new, &Monotype::TypeVar(j) if i == j) {
+                break;
+            }
+            t = t_new.clone();
+        }
+
+        t
+    }
+
+    fn unify(&mut self, ta: &mut Monotype, tb: &mut Monotype) -> bool {
+        *ta = self.find(ta);
+        *tb = self.find(tb);
+
+        match (ta, tb) {
+            (Monotype::Base(BaseType::Bottom), _) | (_, Monotype::Base(BaseType::Bottom)) => true,
+            (ta, tb) if ta == tb => true,
+
+            (Monotype::Base(BaseType::Named(c1, ts1)), Monotype::Base(BaseType::Named(c2, ts2))) if c1 == c2 && ts1.len() == ts2.len() => {
+                ts1.iter_mut().zip(ts2.iter_mut()).all(|(a, b)| self.unify(a, b))
+            }
+
+            (Monotype::Func(a1, r1), Monotype::Func(a2, r2)) => {
+                self.unify(a1, a2) && self.unify(r1, r2)
+            }
+
+            (v @ Monotype::TypeVar(_), t) | (t, v @ Monotype::TypeVar(_)) => {
+                if let Monotype::TypeVar(i) = v {
+                    self.substitutions[*i] = t.clone();
+                } else {
+                    unreachable!();
+                }
+
+                *v = t.clone();
+                true
+            }
+
+            _ => false,
+        }
+    }
 }
 
 impl Type {
@@ -87,10 +131,30 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
 
         Ast::Binary { span, op, left, right } => {
             if let Some(op_type) = env.find_var(op) {
+                let mut op_type = op_type.clone();
                 let t_left = typecheck_helper(left, env, errors);
                 let t_right = typecheck_helper(right, env, errors);
-                todo!()
+                let ret = env.new_var();
+                if env.unify(&mut op_type, &mut Monotype::Func(Box::new(t_left.clone()), Box::new(Monotype::Func(Box::new(t_right.clone()), Box::new(ret.clone()))))) {
+                    env.find(&ret)
+                } else {
+                    errors.push(CheckError {
+                        message: "cannot unify op and arguments".to_string(),
+                        primary_label: format!("operator {} has type {}, whereas arguments are of types {} and {}", op, op_type, t_left, t_right),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                    Monotype::Base(BaseType::Bottom)
+                }
             } else {
+                errors.push(CheckError {
+                    message: "op is undefined".to_string(),
+                    primary_label: format!("operator {} is undefined", op),
+                    primary_label_loc: span.clone(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
                 Monotype::Base(BaseType::Bottom)
             }
         }
