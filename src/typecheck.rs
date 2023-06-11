@@ -1,6 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap, HashSet};
-
-use crate::{parse::{Ast, BaseType, BinaryOp, Pattern, Type}, lexer::Span};
+use crate::{lexer::Span, parse::Ast};
 
 #[derive(Debug)]
 pub struct CheckError {
@@ -10,6 +8,15 @@ pub struct CheckError {
     pub secondary_labels: Vec<(String, Span)>,
     pub notes: Vec<String>,
 }
+
+pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
+    Ok(())
+}
+
+/*
+use std::collections::{hash_map::Entry, HashMap, HashSet};
+
+use crate::{parse::{Ast, BaseType, BinaryOp, Pattern, Type}, lexer::Span};
 
 #[derive(Debug, Clone)]
 #[allow(unused)]
@@ -1514,3 +1521,4 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
         Err(errors)
     }
 }
+*/

@@ -24,6 +24,7 @@ let g x = f (x + 1)
 - modules
 - refinement types
 - dependent types
+- algebraic effects
 - token locations for errors instead of spans
 
 # Standard library things
