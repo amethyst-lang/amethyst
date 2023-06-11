@@ -181,7 +181,29 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
             }
         }
 
-        Ast::FuncCall { span, func, args } => todo!(),
+        Ast::FuncCall { span, func, args } => {
+            let mut t_func = typecheck_helper(func, env, errors);
+            for arg in args {
+                let t_arg = typecheck_helper(arg, env, errors);
+                let ret = env.new_var();
+                if env.unify(&mut t_func, &mut Monotype::Func(Box::new(t_arg.clone()), Box::new(ret.clone()))) {
+                    if let Monotype::Func(_, r) = t_func {
+                        t_func = env.find(&*r);
+                    }
+                } else {
+                    errors.push(CheckError {
+                        message: "invalid function application".to_string(),
+                        primary_label: format!("applied value of type `{}` to argument of type `{}`", t_func, t_arg),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                    t_func = Monotype::Base(BaseType::Bottom);
+                }
+            }
+
+            t_func
+        }
 
         Ast::Let { symbol, args, value, context, .. } => {
             for arg in args.iter() {

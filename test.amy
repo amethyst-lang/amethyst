@@ -1,3 +1,3 @@
 let uwu =
-	let x = 34 in
-	x + x + 1
+	let f x = x + 1 in
+	f 68
