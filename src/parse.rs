@@ -68,9 +68,9 @@ impl Display for Monotype {
 
 #[derive(Debug, Clone)]
 pub struct Type {
-    foralls: Vec<String>,
-    constraints: Vec<(String, Vec<Type>)>,
-    monotype: Monotype,
+    pub foralls: Vec<String>,
+    pub constraints: Vec<(String, Vec<Type>)>,
+    pub monotype: Monotype,
 }
 
 impl Display for Type {
@@ -101,43 +101,6 @@ impl Type {
             foralls: Vec::new(),
             constraints: Vec::new(),
             monotype: Monotype::Unknown,
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    Eq,
-    Ne,
-    LogicalAnd,
-    LogicalOr,
-}
-
-impl Display for BinaryOp {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BinaryOp::Add => write!(f, "+"),
-            BinaryOp::Sub => write!(f, "-"),
-            BinaryOp::Mul => write!(f, "*"),
-            BinaryOp::Div => write!(f, "/"),
-            BinaryOp::Mod => write!(f, "%"),
-            BinaryOp::Lt => write!(f, "<"),
-            BinaryOp::Le => write!(f, "<="),
-            BinaryOp::Gt => write!(f, ">"),
-            BinaryOp::Ge => write!(f, ">="),
-            BinaryOp::Eq => write!(f, "=="),
-            BinaryOp::Ne => write!(f, "!="),
-            BinaryOp::LogicalAnd => write!(f, "&&"),
-            BinaryOp::LogicalOr => write!(f, "||"),
         }
     }
 }
@@ -206,7 +169,7 @@ pub enum Ast {
 
     Binary {
         span: Span,
-        op: BinaryOp,
+        op: String,
         left: Box<Ast>,
         right: Box<Ast>,
     },
@@ -220,7 +183,6 @@ pub enum Ast {
     Let {
         span: Span,
         mutable: bool,
-        scope: usize,
         symbol: String,
         args: Vec<String>,
         value: Box<Ast>,
@@ -229,7 +191,6 @@ pub enum Ast {
 
     EmptyLet {
         span: Span,
-        scope: usize,
         symbol: String,
         type_: Type,
         args: Vec<String>,
@@ -237,7 +198,6 @@ pub enum Ast {
 
     TopLet {
         span: Span,
-        scope: usize,
         symbol: String,
         args: Vec<String>,
         value: Box<Ast>,
@@ -252,7 +212,6 @@ pub enum Ast {
 
     DatatypeDefinition {
         span: Span,
-        scope: usize,
         name: String,
         constraints: Vec<(String, Vec<Monotype>)>,
         generics: Vec<String>,
@@ -800,11 +759,11 @@ fn parse_muldiv(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         top = Ast::Binary {
             span: top.span().start..right.span().end,
             op: match token {
-                Token::Astrisk => BinaryOp::Mul,
-                Token::Slash => BinaryOp::Div,
-                Token::Percent => BinaryOp::Mod,
+                Token::Astrisk => "*",
+                Token::Slash => "/",
+                Token::Percent => "%",
                 _ => unreachable!(),
-            },
+            }.to_string(),
             left: Box::new(top),
             right: Box::new(right),
         };
@@ -828,10 +787,10 @@ fn parse_addsub(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         top = Ast::Binary {
             span: top.span().start..right.span().end,
             op: match token {
-                Token::Plus => BinaryOp::Add,
-                Token::Minus => BinaryOp::Sub,
+                Token::Plus => "+",
+                Token::Minus => "-",
                 _ => unreachable!(),
-            },
+            }.to_string(),
             left: Box::new(top),
             right: Box::new(right),
         };
@@ -861,14 +820,14 @@ fn parse_compare(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         top = Ast::Binary {
             span: top.span().start..right.span().end,
             op: match token {
-                Token::Lt => BinaryOp::Lt,
-                Token::Le => BinaryOp::Le,
-                Token::Gt => BinaryOp::Gt,
-                Token::Ge => BinaryOp::Ge,
-                Token::Eq => BinaryOp::Eq,
-                Token::Ne => BinaryOp::Ne,
+                Token::Lt => "<",
+                Token::Le => "<=",
+                Token::Gt => ">",
+                Token::Ge => ">=",
+                Token::Eq => "==",
+                Token::Ne => "!=",
                 _ => unreachable!(),
-            },
+            }.to_string(),
             left: Box::new(top),
             right: Box::new(right),
         };
@@ -891,7 +850,7 @@ fn parse_and(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 
         top = Ast::Binary {
             span: top.span().start..right.span().end,
-            op: BinaryOp::LogicalAnd,
+            op: "&&".to_string(),
             left: Box::new(top),
             right: Box::new(right),
         };
@@ -914,7 +873,7 @@ fn parse_or(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 
         top = Ast::Binary {
             span: top.span().start..right.span().end,
-            op: BinaryOp::LogicalAnd,
+            op: "||".to_string(),
             left: Box::new(top),
             right: Box::new(right),
         };
@@ -1370,7 +1329,6 @@ fn parse_let(
             if allow_no_body && !matches!(type_.monotype, Monotype::Unknown) {
                 return Ok(Ast::EmptyLet {
                     span,
-                    scope: 0,
                     symbol,
                     type_,
                     args,
@@ -1418,7 +1376,6 @@ fn parse_let(
             if top_level {
                 return Ok(Ast::TopLet {
                     span: start..value.span().end,
-                    scope: 0,
                     symbol,
                     args,
                     value: Box::new(value),
@@ -1458,7 +1415,6 @@ fn parse_let(
         Ok(Ast::Let {
             span: start..0,
             mutable: false,
-            scope: 0,
             symbol,
             args,
             value: Box::new(value),
@@ -1572,7 +1528,6 @@ fn parse_type_def(
 
         Ok(Ast::DatatypeDefinition {
             span: start..lexer.loc(),
-            scope: 0,
             name,
             generics,
             constraints,
@@ -1885,71 +1840,10 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
     }
 }
 
-fn add_scope_data(ast: &mut Ast, last_scope_id: &mut usize) {
-    match ast {
-        Ast::Binary { left, right, .. } => {
-            add_scope_data(left, last_scope_id);
-            add_scope_data(right, last_scope_id);
-        }
-
-        Ast::FuncCall { func, args, .. } => {
-            add_scope_data(func, last_scope_id);
-            for arg in args {
-                add_scope_data(arg, last_scope_id);
-            }
-        }
-
-        Ast::Let { scope, value, context, .. } => {
-            *scope = *last_scope_id;
-            *last_scope_id += 1;
-            add_scope_data(value, last_scope_id);
-            add_scope_data(context, last_scope_id);
-        }
-
-        Ast::TopLet { scope, value, .. } => {
-            *scope = *last_scope_id;
-            *last_scope_id += 1;
-            add_scope_data(value, last_scope_id);
-        }
-
-        Ast::EmptyLet { scope, .. } => {
-            *last_scope_id += 1;
-            *scope = *last_scope_id;
-        }
-
-        Ast::If { cond, then, elsy, .. } => {
-            add_scope_data(cond, last_scope_id);
-            add_scope_data(then, last_scope_id);
-            add_scope_data(elsy, last_scope_id);
-        }
-
-        Ast::Match { value, patterns, .. } => {
-            add_scope_data(value, last_scope_id);
-            for (_, scope, body) in patterns.iter_mut() {
-                *scope = *last_scope_id;
-                *last_scope_id += 1;
-                add_scope_data(body, last_scope_id);
-            }
-        }
-
-        Ast::DatatypeDefinition { scope, .. } => {
-            *scope = *last_scope_id;
-            *last_scope_id += 1;
-        }
-
-        _ => ()
-    }
-}
-
 pub fn parse(lexer: &mut Lexer<'_>) -> Result<Vec<Ast>, ParseError> {
     let mut asts = Vec::new();
     while lexer.peek().is_some() {
         asts.push(parse_top(lexer)?);
-    }
-
-    let mut last_scope_id = 0;
-    for ast in asts.iter_mut() {
-        add_scope_data(ast, &mut last_scope_id);
     }
 
     Ok(asts)

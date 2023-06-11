@@ -85,8 +85,4 @@ fn main() {
 
         std::process::exit(1);
     }
-
-    for ast in asts {
-        println!("{}", ast);
-    }
 }

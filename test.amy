@@ -1,6 +1,1 @@
-type LType = L i32
-
-instance Linear LType = end
-
-let f x = g x
-let g x = f (x + 1)
+let x = 2
