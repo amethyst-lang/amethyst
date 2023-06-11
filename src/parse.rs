@@ -182,7 +182,6 @@ pub enum Ast {
 
     Let {
         span: Span,
-        mutable: bool,
         symbol: String,
         args: Vec<String>,
         value: Box<Ast>,
@@ -281,7 +280,6 @@ impl Display for Ast {
             }
 
             Ast::Let {
-                mutable,
                 symbol,
                 args,
                 value,
@@ -289,9 +287,6 @@ impl Display for Ast {
                 ..
             } => {
                 write!(f, "let ")?;
-                if *mutable {
-                    write!(f, "mut ")?;
-                }
                 write!(f, "{}", symbol)?;
                 for arg in args {
                     write!(f, " {}", arg)?;
@@ -1414,7 +1409,6 @@ fn parse_let(
         let context = parse_expr(lexer)?;
         Ok(Ast::Let {
             span: start..0,
-            mutable: false,
             symbol,
             args,
             value: Box::new(value),

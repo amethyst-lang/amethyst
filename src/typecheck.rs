@@ -27,6 +27,10 @@ impl Environment {
         self
     }
 
+    fn push_var(&mut self, var: String, type_: Type) {
+        self.variables.push((var, type_));
+    }
+
     fn find_var(&mut self, var: &str) -> Option<Monotype> {
         for (key, type_) in self.variables.iter().rev() {
             if key == var {
@@ -35,6 +39,10 @@ impl Environment {
         }
 
         return None;
+    }
+
+    fn pop_var(&mut self) -> Option<(String, Type)> {
+        self.variables.pop()
     }
 
     fn new_var(&mut self) -> Monotype {
@@ -127,7 +135,21 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
     match ast {
         Ast::Integer(_, _) => Monotype::Base(BaseType::I32),
         Ast::Bool(_, _) => Monotype::Base(BaseType::Bool),
-        Ast::Symbol(_, _) => todo!(),
+
+        Ast::Symbol(span, s) => {
+            if let Some(t) = env.find_var(s) {
+                t
+            } else {
+                errors.push(CheckError {
+                    message: "symbol not found".to_string(),
+                    primary_label: format!("symbol `{}` was not previously declared", s),
+                    primary_label_loc: span.clone(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+                Monotype::Base(BaseType::Bottom)
+            }
+        }
 
         Ast::Binary { span, op, left, right } => {
             if let Some(op_type) = env.find_var(op) {
@@ -140,7 +162,7 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
                 } else {
                     errors.push(CheckError {
                         message: "cannot unify op and arguments".to_string(),
-                        primary_label: format!("operator {} has type {}, whereas arguments are of types {} and {}", op, op_type, t_left, t_right),
+                        primary_label: format!("operator `{}` has type `{}`, whereas arguments are of types `{}` and `{}`", op, op_type, t_left, t_right),
                         primary_label_loc: span.clone(),
                         secondary_labels: Vec::new(),
                         notes: Vec::new(),
@@ -150,7 +172,7 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
             } else {
                 errors.push(CheckError {
                     message: "op is undefined".to_string(),
-                    primary_label: format!("operator {} is undefined", op),
+                    primary_label: format!("operator `{}` is undefined", op),
                     primary_label_loc: span.clone(),
                     secondary_labels: Vec::new(),
                     notes: Vec::new(),
@@ -160,7 +182,33 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
         }
 
         Ast::FuncCall { span, func, args } => todo!(),
-        Ast::Let { span, mutable, symbol, args, value, context } => todo!(),
+
+        Ast::Let { symbol, args, value, context, .. } => {
+            for arg in args.iter() {
+                let monotype = env.new_var();
+                env.push_var(arg.clone(), Type {
+                    foralls: Vec::new(),
+                    constraints: Vec::new(),
+                    monotype,
+                });
+            }
+
+            let mut monotype = typecheck_helper(value, env, errors);
+            for _ in args.iter() {
+                let (_, a) = env.pop_var().expect("variable was not popped");
+                monotype = Monotype::Func(Box::new(a.monotype), Box::new(monotype));
+            }
+
+            env.push_var(symbol.clone(), Type {
+                foralls: Vec::new(),
+                constraints: Vec::new(),
+                monotype,
+            });
+            let result = typecheck_helper(context, env, errors);
+            env.pop_var();
+            result
+        }
+
         Ast::EmptyLet { span, symbol, type_, args } => todo!(),
 
         Ast::TopLet { span, symbol, args, value } => {
