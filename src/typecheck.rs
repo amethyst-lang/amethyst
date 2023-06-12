@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{lexer::Span, parse::{Ast, Type, Monotype, BaseType, Pattern}};
 
@@ -103,6 +103,16 @@ impl Environment {
             _ => false,
         }
     }
+
+    fn update_all_var_types(&mut self) {
+        let mut variables = Vec::new();
+        std::mem::swap(&mut variables, &mut self.variables);
+        for (_, t) in variables.iter_mut() {
+            t.monotype = self.find(&t.monotype);
+            t.polymorphise(self);
+        }
+        std::mem::swap(&mut variables, &mut self.variables);
+    }
 }
 
 impl Type {
@@ -113,6 +123,15 @@ impl Type {
         }
 
         self.monotype.instantiate(&replacements)
+    }
+
+    fn polymorphise(&mut self, env: &Environment) {
+        let mut new_generics = HashSet::new();
+        self.monotype.polymorphise(env, &mut new_generics);
+
+        for new in new_generics {
+            self.foralls.push(new);
+        }
     }
 }
 
@@ -136,6 +155,35 @@ impl Monotype {
             }
 
             Monotype::TypeVar(_) => self,
+        }
+    }
+
+    fn polymorphise(&mut self, env: &Environment, new_generics: &mut HashSet<String>) {
+        match self {
+            Monotype::Base(BaseType::Named(_, ts)) => {
+                for t in ts {
+                    t.polymorphise(env, new_generics);
+                }
+            }
+
+            Monotype::Func(a, r) => {
+                a.polymorphise(env, new_generics);
+                r.polymorphise(env, new_generics);
+            }
+
+            Monotype::TypeVar(i) => {
+                let i = *i;
+                *self = env.find(self);
+                if let Monotype::TypeVar(_) = self {
+                    let new = format!("a${}", i);
+                    *self = Monotype::Generic(new.clone());
+                    new_generics.insert(new);
+                } else {
+                    self.polymorphise(env, new_generics);
+                }
+            }
+
+            _ => (),
         }
     }
 }
@@ -506,7 +554,7 @@ fn typecheck_pattern(pattern: &mut Pattern, env: &mut Environment, errors: &mut 
     }
 }
 
-pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
+pub fn typecheck(asts: &mut [Ast]) -> Result<HashMap<String, Type>, Vec<CheckError>> {
     let mut env = Environment::default().init_defaults();
     let mut errors = Vec::new();
 
@@ -556,12 +604,10 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
         typecheck_helper(ast, &mut env, &mut errors);
     }
 
-    for (var, type_) in env.variables.iter() {
-        println!("{}: {}", var, env.find(&type_.monotype));
-    }
+    env.update_all_var_types();
 
     if errors.is_empty() {
-        Ok(())
+        Ok(env.variables.into_iter().collect())
     } else {
         Err(errors)
     }
