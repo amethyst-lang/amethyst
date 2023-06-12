@@ -1,11 +1,4 @@
 # TODO
-- make linear types work across generics in functions
-- fix generics again istfg
-```ocaml
-let f x = g x
-let g x = f (x + 1)
-```
-- better error messages
 - operator overloading using typeclasses
   - operators are syntax sugar for function calls
 - linear types and pointers
@@ -22,16 +15,13 @@ let g x = f (x + 1)
 - strings
 - external functions
 - modules
-- refinement types
-- dependent types
 - algebraic effects
 - token locations for errors instead of spans
 
 # Standard library things
 - `Args x xs` datatype that lets you do varargs via syntax sugar
 ```ocaml
-forall x xs
-type Args = Args x xs
+type Args x xs = Args x xs
 ```
   - `Args 2 (Args true "uwu")` has type `Args i32 (Args bool string)`
   - uses `func (a, b, c)` syntax sugar

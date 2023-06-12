@@ -35,6 +35,7 @@ pub enum Token<'a> {
     LogicalOr,
     Exclamation,
     Let,
+    Val,
     In,
     Mut,
     If,
@@ -244,6 +245,7 @@ impl<'a> Lexer<'a> {
                 State::Symbol => match s {
                     "true" | "false" => Token::Bool(s == "true"),
                     "let" => Token::Let,
+                    "val" => Token::Val,
                     "in" => Token::In,
                     "mut" => Token::Mut,
                     "if" => Token::If,

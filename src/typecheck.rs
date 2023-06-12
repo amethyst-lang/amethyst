@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use crate::{lexer::Span, parse::{Ast, Type, Monotype, BaseType, Pattern}};
 
@@ -158,6 +158,41 @@ impl Monotype {
         }
     }
 
+    fn fresh(&mut self, env: &mut Environment, type_vars: &mut HashMap<usize, usize>) {
+        match self {
+            Monotype::Base(BaseType::Named(_, ts)) => {
+                for t in ts {
+                    t.fresh(env, type_vars);
+                }
+            }
+
+            Monotype::Func(a, r) => {
+                a.fresh(env, type_vars);
+                r.fresh(env, type_vars);
+            }
+
+            Monotype::TypeVar(i) => {
+                let i = *i;
+
+                match type_vars.entry(i) {
+                    Entry::Occupied(v) => {
+                        *self = Monotype::TypeVar(*v.get());
+                    }
+
+                    Entry::Vacant(v) => {
+                        let t = env.new_var();
+                        if let Monotype::TypeVar(j) = t {
+                            v.insert(j);
+                        }
+                        *self = t;
+                    }
+                }
+            }
+
+            _ => (),
+        }
+    }
+
     fn polymorphise(&mut self, env: &Environment, new_generics: &mut HashSet<String>) {
         match self {
             Monotype::Base(BaseType::Named(_, ts)) => {
@@ -305,6 +340,21 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
             for _ in args.iter().rev() {
                 let (_, a) = env.pop_var().expect("argument was never popped");
                 t = Monotype::Func(Box::new(a.monotype), Box::new(t));
+            }
+
+            let mut old = env.variables.iter().rev().find(|(n, _)| n == symbol).map(|(_, t)| t.clone()).expect("top level bindings are defined before typechecking starts");
+            if !old.foralls.is_empty() {
+                let mut t = env.find(&t);
+                t.fresh(env, &mut HashMap::new());
+                if !env.unify(&mut old.monotype, &mut t) {
+                    errors.push(CheckError {
+                        message: "top level binding cannot be typechecked".to_string(),
+                        primary_label: format!("`{}` has both types `{}` and `{}`", symbol, old, t),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                }
             }
 
             let mut old = env.find_var(symbol).expect("top level bindings are defined before typechecking starts");
@@ -560,17 +610,50 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<HashMap<String, Type>, Vec<CheckErr
 
     for ast in asts.iter() {
         match ast {
-            Ast::TopLet { symbol, args, .. } => {
+            Ast::EmptyLet { span, symbol, type_, .. } => {
+                if let Some((_, t)) = env.variables.iter_mut().rev().find(|(n, _)| n == symbol) {
+                    let mut type_ = type_.clone();
+                    std::mem::swap(&mut type_, t);
+                    let mut t = env.find_var(symbol).expect("we literally just had this");
+                    if !env.unify(&mut t, &mut type_.monotype) {
+                        errors.push(CheckError {
+                            message: "top level definition has conflicting types".to_string(),
+                            primary_label: format!("`{}` has both types `{}` and `{}`", symbol, t, type_),
+                            primary_label_loc: span.clone(),
+                            secondary_labels: Vec::new(),
+                            notes: Vec::new(),
+                        });
+                    }
+                } else {
+                    env.push_var(symbol.clone(), type_.clone());
+                }
+            }
+
+            Ast::TopLet { span, symbol, args, .. } => {
                 let mut monotype = env.new_var();
                 for _ in args {
                     monotype = Monotype::Func(Box::new(env.new_var()), Box::new(monotype));
                 }
 
-                env.push_var(symbol.clone(), Type {
-                    monotype,
+                let mut type_ = Type {
                     foralls: Vec::new(),
                     constraints: Vec::new(),
-                });
+                    monotype,
+                };
+
+                if let Some(mut t) = env.find_var(symbol) {
+                    if !env.unify(&mut t, &mut type_.monotype) {
+                        errors.push(CheckError {
+                            message: "top level definition has conflicting types".to_string(),
+                            primary_label: format!("`{}` has both types `{}` and `{}`", symbol, t, type_),
+                            primary_label_loc: span.clone(),
+                            secondary_labels: Vec::new(),
+                            notes: Vec::new(),
+                        });
+                    }
+                } else {
+                    env.push_var(symbol.clone(), type_.clone());
+                }
             }
 
             Ast::DatatypeDefinition { name, constraints, generics, variants, .. } => {

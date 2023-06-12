@@ -2,6 +2,7 @@ type List a
 	= Nil
 	| Cons a (List a)
 
+val map : forall a b. (a -> b) -> List a -> List b
 let map f xs =
 	match xs with
 	| Cons x xs to Cons (f x) (map f xs)
@@ -10,3 +11,10 @@ let map f xs =
 
 let f x = g (x + 1)
 let g x = f x
+let h x = h x
+
+let foldl f a xs =
+	match xs with
+	| Nil to a
+	| Cons x xs to foldl f (f a x) xs
+	end
