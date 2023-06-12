@@ -1,6 +1,38 @@
+class Eq a =
+	val eq : a -> a -> bool
+end
+
+instance Eq i32 =
+	let eq a b = a == b
+end
+
+class Ord a where Eq a =
+	val lt : a -> a -> bool
+end
+
+instance Ord i32 =
+	let lt a b = a < b
+end
+
 type List a
 	= Nil
 	| Cons a (List a)
+
+instance forall a where Eq a. Eq (List a) =
+	let eq xs ys = false // wont actually implement for this example but you get the idea
+end
+
+val sorted : forall a where Ord a. List a -> bool
+let sorted xs =
+	match xs with
+	| Nil | Cons _ Nil to true
+	| Cons x (Cons y xs) to
+		if lt x y then
+			sorted (Cons y xs)
+		else if eq x y then
+			sorted (Cons y xs)
+		else false
+	end
 
 val map : forall a b. (a -> b) -> List a -> List b
 let map f xs =

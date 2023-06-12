@@ -236,7 +236,7 @@ pub enum Ast {
         name: String,
         generics: Vec<String>,
         parameters: Vec<Monotype>,
-        constraints: Vec<(String, Vec<Type>)>,
+        constraints: Vec<(String, Vec<Monotype>)>,
         functions: Vec<Ast>,
     },
 }
@@ -301,7 +301,7 @@ impl Display for Ast {
                 args,
                 ..
             } => {
-                write!(f, "let {}", symbol)?;
+                write!(f, "val {}", symbol)?;
                 for arg in args {
                     write!(f, " {}", arg)?;
                 }
@@ -637,32 +637,99 @@ fn parse_func_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Monotyp
     Ok(top)
 }
 
-fn parse_type(lexer: &mut Lexer<'_>, generics: &[String]) -> Result<Type, ParseError> {
-    let mut foralls = generics.to_vec();
-    if try_token!(lexer, Some((Token::Forall, _))).is_some() {
-        loop {
-            match lexer.lex() {
-                Some((Token::Symbol(s), _)) => foralls.push(s.to_string()),
-                Some((Token::Dot, _)) => break,
-                Some((_, span)) => return Err(ParseError::Error {
-                    message: "invalid universal type".to_string(),
-                    primary_label: "expected either a symbol or a period".to_string(),
-                    primary_label_loc: span,
-                    secondary_labels: Vec::new(),
-                    notes: Vec::new(),
-                }),
-                None => return Err(ParseError::Error {
-                    message: "invalid universal type".to_string(),
-                    primary_label: "expected either a symbol or a period".to_string(),
-                    primary_label_loc: lexer.loc()..lexer.loc(),
-                    secondary_labels: Vec::new(),
-                    notes: Vec::new(),
-                }),
+fn parse_type(lexer: &mut Lexer<'_>, foralls: &[String], constraints: &[(String, Vec<Monotype>)]) -> Result<Type, ParseError> {
+    let mut foralls = foralls.to_vec();
+    let mut constraints = constraints.to_vec();
+
+    if foralls.is_empty() {
+        if let Some((_, span)) = try_token!(lexer, Some((Token::Forall, _))) {
+            let mut has_constraints = false;
+            loop {
+                match lexer.lex() {
+                    Some((Token::Symbol(s), _)) => foralls.push(s.to_string()),
+                    Some((Token::Dot, _)) => break,
+                    Some((Token::Where, _)) => {
+                        has_constraints = true;
+                        break;
+                    }
+
+                    Some((_, span)) => return Err(ParseError::Error {
+                        message: "invalid universal type".to_string(),
+                        primary_label: "expected either a symbol or a period".to_string(),
+                        primary_label_loc: span,
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    }),
+                    None => return Err(ParseError::Error {
+                        message: "invalid universal type".to_string(),
+                        primary_label: "expected either a symbol or a period".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    }),
+                }
+            }
+
+            if has_constraints {
+                while {
+                    let name = match lexer.lex() {
+                        Some((Token::Symbol(v), _)) => v.to_string(),
+
+                        Some((_, s2)) => {
+                            return Err(ParseError::Error {
+                                message: "invalid universal type".to_string(),
+                                primary_label: "expected constraint".to_string(),
+                                primary_label_loc: s2,
+                                secondary_labels: vec![(
+                                    "universal type starts here".to_string(),
+                                    span,
+                                )],
+                                notes: Vec::new(),
+                            })
+                        }
+
+                        None => {
+                            return Err(ParseError::Error {
+                                message: "invalid universal type".to_string(),
+                                primary_label: "expected constraint".to_string(),
+                                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                                secondary_labels: vec![(
+                                    "universal type starts here".to_string(),
+                                    span,
+                                )],
+                                notes: Vec::new(),
+                            })
+                        }
+                    };
+
+                    let mut parameters = Vec::new();
+                    loop {
+                        match parse_base_type(lexer, &foralls, true) {
+                            Ok(v) => parameters.push(v),
+                            Err(ParseError::NotStarted) => break,
+                            Err(e) => return Err(e),
+                        }
+                    }
+
+                    constraints.push((name, parameters));
+                    try_token!(lexer, Some((Token::Comma, _))).is_some()
+                } {}
+
+                if try_token!(lexer, Some((Token::Dot, _))).is_none() {
+                    return Err(ParseError::Error {
+                        message: "invalid universal type".to_string(),
+                        primary_label: "expected constraint".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![(
+                            "universal type starts here".to_string(),
+                            span,
+                        )],
+                        notes: Vec::new(),
+                    });
+                }
             }
         }
     }
-
-    let constraints = Vec::new(); // TODO
 
     let monotype = parse_func_type(lexer, &foralls)?;
     Ok(Type {
@@ -1388,8 +1455,9 @@ fn parse_let(
 fn parse_val(
     lexer: &mut Lexer<'_>,
     generics: &[String],
+    constraints: &[(String, Vec<Monotype>)],
 ) -> Result<Ast, ParseError> {
-    if let Some((Token::Val, span @ Span { start, .. })) = lexer.peek() {
+    if let Some((Token::Val, span)) = lexer.peek() {
         lexer.lex();
 
         let symbol = match lexer.lex() {
@@ -1425,7 +1493,7 @@ fn parse_val(
         }
 
         let type_ = if try_token!(lexer, Some((Token::Colon, _))).is_some() {
-            parse_type(lexer, generics)?
+            parse_type(lexer, generics, constraints)?
         } else {
             Type::unknown()
         };
@@ -1670,8 +1738,9 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         }
 
         let mut functions = Vec::new();
+        let constraints_for_funcs = vec![(name.clone(), generics.iter().map(|v| Monotype::Generic(v.to_string())).collect())];
         loop {
-            match parse_val(lexer, &generics) {
+            match parse_val(lexer, &generics, &constraints_for_funcs) {
                 Ok(v) => functions.push(v),
 
                 Err(ParseError::NotStarted) => break,
@@ -1711,10 +1780,98 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 
 fn parse_instance(
     lexer: &mut Lexer<'_>,
-    generics: &[String],
-    constraints: &[(String, Vec<Type>)],
 ) -> Result<Ast, ParseError> {
     if let Some((_, span @ Span { start, .. })) = try_token!(lexer, Some((Token::Instance, _))) {
+        let mut foralls = Vec::new();
+        let mut constraints = Vec::new();
+        if let Some((_, span)) = try_token!(lexer, Some((Token::Forall, _))) {
+            let mut has_constraints = false;
+            loop {
+                match lexer.lex() {
+                    Some((Token::Symbol(s), _)) => foralls.push(s.to_string()),
+                    Some((Token::Dot, _)) => break,
+                    Some((Token::Where, _)) => {
+                        has_constraints = true;
+                        break;
+                    }
+
+                    Some((_, span)) => return Err(ParseError::Error {
+                        message: "invalid universal type".to_string(),
+                        primary_label: "expected either a symbol or a period".to_string(),
+                        primary_label_loc: span,
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    }),
+                    None => return Err(ParseError::Error {
+                        message: "invalid universal type".to_string(),
+                        primary_label: "expected either a symbol or a period".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    }),
+                }
+            }
+
+            if has_constraints {
+                while {
+                    let name = match lexer.lex() {
+                        Some((Token::Symbol(v), _)) => v.to_string(),
+
+                        Some((_, s2)) => {
+                            return Err(ParseError::Error {
+                                message: "invalid universal type".to_string(),
+                                primary_label: "expected constraint".to_string(),
+                                primary_label_loc: s2,
+                                secondary_labels: vec![(
+                                    "universal type starts here".to_string(),
+                                    span,
+                                )],
+                                notes: Vec::new(),
+                            })
+                        }
+
+                        None => {
+                            return Err(ParseError::Error {
+                                message: "invalid universal type".to_string(),
+                                primary_label: "expected constraint".to_string(),
+                                primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                                secondary_labels: vec![(
+                                    "universal type starts here".to_string(),
+                                    span,
+                                )],
+                                notes: Vec::new(),
+                            })
+                        }
+                    };
+
+                    let mut parameters = Vec::new();
+                    loop {
+                        match parse_base_type(lexer, &foralls, true) {
+                            Ok(v) => parameters.push(v),
+                            Err(ParseError::NotStarted) => break,
+                            Err(e) => return Err(e),
+                        }
+                    }
+
+                    constraints.push((name, parameters));
+                    try_token!(lexer, Some((Token::Comma, _))).is_some()
+                } {}
+
+                if try_token!(lexer, Some((Token::Dot, _))).is_none() {
+                    return Err(ParseError::Error {
+                        message: "invalid universal type".to_string(),
+                        primary_label: "expected constraint".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![(
+                            "universal type starts here".to_string(),
+                            span,
+                        )],
+                        notes: Vec::new(),
+                    });
+                }
+            }
+        }
+
         let name = match lexer.lex() {
             Some((Token::Symbol(v), _)) => v.to_string(),
 
@@ -1741,7 +1898,7 @@ fn parse_instance(
 
         let mut parameters = Vec::new();
         loop {
-            match parse_base_type(lexer, generics, true) {
+            match parse_base_type(lexer, &foralls, true) {
                 Ok(v) => parameters.push(v),
                 Err(ParseError::NotStarted) => break,
                 Err(e) => return Err(e),
@@ -1784,8 +1941,8 @@ fn parse_instance(
             Some((Token::End, Span { end, .. })) => Ok(Ast::Instance {
                 span: start..end,
                 name,
-                generics: generics.to_vec(),
-                constraints: constraints.to_vec(),
+                generics: foralls,
+                constraints,
                 parameters,
                 functions,
             }),
@@ -1843,7 +2000,7 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         e @ Err(_) => return e,
     }
 
-    match parse_instance(lexer, &[], &[]) {
+    match parse_instance(lexer) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e @ Err(_) => return e,
@@ -1855,7 +2012,7 @@ fn parse_top(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
         e @ Err(_) => return e,
     }
 
-    match parse_val(lexer, &[]) {
+    match parse_val(lexer, &[], &[]) {
         v @ Ok(_) => return v,
         Err(ParseError::NotStarted) => (),
         e @ Err(_) => return e,

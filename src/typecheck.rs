@@ -14,6 +14,7 @@ pub struct CheckError {
 #[derive(Default, Debug)]
 struct Environment {
     variables: Vec<(String, Type)>,
+    // types_defined: HashMap<String, Type>, // TODO: check if a type used was previously defined
     substitutions: Vec<Monotype>,
     constructors: HashMap<String, Type>,
 }
@@ -40,6 +41,10 @@ impl Environment {
         }
 
         return None;
+    }
+
+    fn find_var_no_inst(&self, var: &str) -> Option<Type> {
+        self.variables.iter().rev().find(|(v, _)| v == var).map(|(_, t)| t.clone())
     }
 
     fn find_cons(&mut self, cons: &str) -> Option<Monotype> {
@@ -445,8 +450,48 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
             t
         }
 
-        Ast::Class { span, name, generics, constraints, functions } => todo!(),
-        Ast::Instance { span, name, generics, parameters, constraints, functions } => todo!(),
+        Ast::Class { span, name, generics, constraints, functions } => {
+            // TODO
+            Monotype::Base(BaseType::Bottom)
+        }
+
+        // TODO: dealing with constraints
+        Ast::Instance { parameters, functions, .. } => {
+            for func in functions.iter_mut() {
+                if let Ast::TopLet { span, symbol, args, value } = func {
+                    for arg in args.iter() {
+                        let monotype = env.new_var();
+                        env.push_var(arg.to_string(), Type {
+                            foralls: Vec::new(),
+                            constraints: Vec::new(),
+                            monotype,
+                        });
+                    }
+
+                    let mut t = typecheck_helper(value, env, errors);
+
+                    for _ in args.iter().rev() {
+                        let (_, a) = env.pop_var().expect("argument was never popped");
+                        t = Monotype::Func(Box::new(a.monotype), Box::new(t));
+                    }
+
+                    let old = env.find_var_no_inst(symbol).expect("top level bindings are defined before typechecking starts");
+                    let replacements = old.foralls.iter().cloned().zip(parameters.iter().cloned()).collect();
+                    let mut old = old.monotype.instantiate(&replacements);
+                    if !env.unify(&mut t, &mut old) {
+                        errors.push(CheckError {
+                            message: "top level binding cannot be typechecked".to_string(),
+                            primary_label: format!("`{}` has both types `{}` and `{}`", symbol, old, t),
+                            primary_label_loc: span.clone(),
+                            secondary_labels: Vec::new(),
+                            notes: Vec::new(),
+                        });
+                    }
+                }
+            }
+
+            Monotype::Base(BaseType::Bottom)
+        }
     }
 }
 
@@ -677,6 +722,18 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<HashMap<String, Type>, Vec<CheckErr
                     env.constructors.insert(cons.clone(), type_.clone());
                     env.push_var(cons.clone(), type_);
                 }
+            }
+
+            Ast::Class { span, name, generics, constraints, functions } => {
+                for func in functions {
+                    if let Ast::EmptyLet { symbol, type_, .. } = func {
+                        env.push_var(symbol.clone(), type_.clone());
+                    }
+                }
+            }
+
+            Ast::Instance { span, name, generics, parameters, constraints, functions } => {
+                println!("{}", ast);
             }
 
             _ => (),
