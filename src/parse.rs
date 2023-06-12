@@ -220,7 +220,7 @@ pub enum Ast {
     Match {
         span: Span,
         value: Box<Ast>,
-        patterns: Vec<(Pattern, usize, Ast)>,
+        patterns: Vec<(Pattern, Ast)>,
     },
 
     Class {
@@ -382,7 +382,7 @@ impl Display for Ast {
                 value, patterns, ..
             } => {
                 writeln!(f, "match {} with", value)?;
-                for (pat, _, val) in patterns {
+                for (pat, val) in patterns {
                     writeln!(f, "| {} to {}", pat, val)?;
                 }
                 writeln!(f, "end")
@@ -1174,7 +1174,7 @@ fn parse_match(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
             }
 
             let value = parse_expr(lexer)?;
-            patterns.push((pattern, 0, value));
+            patterns.push((pattern, value));
         }
 
         match lexer.lex() {
@@ -1269,13 +1269,13 @@ fn parse_let(
             }
             let context = parse_expr(lexer)?;
 
-            let mut patterns = vec![(pattern, 0, context)];
+            let mut patterns = vec![(pattern, context)];
             if let Some((_, span)) = try_token!(lexer, Some((Token::Else, _))) {
-                patterns.push((Pattern::Wildcard(span), 0, parse_expr(lexer)?));
+                patterns.push((Pattern::Wildcard(span), parse_expr(lexer)?));
             }
 
             return Ok(Ast::Match {
-                span: start..patterns.last().unwrap().2.span().end,
+                span: start..patterns.last().unwrap().1.span().end,
                 value: Box::new(value),
                 patterns,
             });

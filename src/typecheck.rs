@@ -237,8 +237,37 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
             typecheck_helper(value, env, errors)
         }
 
-        Ast::If { span, cond, then, elsy } => todo!(),
-        Ast::DatatypeDefinition { span, name, constraints, generics, variants } => todo!(),
+        Ast::If { span, cond, then, elsy } => {
+            let mut t_cond = typecheck_helper(cond, env, errors);
+            if !env.unify(&mut t_cond, &mut Monotype::Base(BaseType::Bool)) {
+                errors.push(CheckError {
+                    message: "expected value of type `bool` in condition of if expression".to_string(),
+                    primary_label: format!("value has type `{}` instead of `bool`", t_cond),
+                    primary_label_loc: cond.span(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+            }
+
+            let mut t_then = typecheck_helper(then, env, errors);
+            let mut t_elsy = typecheck_helper(elsy, env, errors);
+
+            if env.unify(&mut t_then, &mut t_elsy) {
+                env.find(&t_then)
+            } else {
+                errors.push(CheckError {
+                    message: "branches of if expression do not match".to_string(),
+                    primary_label: format!("`{}` and `{}` are not equivalent types", t_then, t_elsy),
+                    primary_label_loc: span.clone(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+                Monotype::Base(BaseType::Bottom)
+            }
+        }
+
+        Ast::DatatypeDefinition { .. } => Monotype::Base(BaseType::Bottom),
+
         Ast::Match { span, value, patterns } => todo!(),
         Ast::Class { span, name, generics, constraints, functions } => todo!(),
         Ast::Instance { span, name, generics, parameters, constraints, functions } => todo!(),
@@ -248,7 +277,25 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
 pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
     let mut env = Environment::default().init_defaults();
     let mut errors = Vec::new();
-    for ast in asts {
+
+    /*
+    for ast in asts.iter() {
+        if let Ast::TopLet { symbol, args, .. } = ast {
+            let mut monotype = env.new_var();
+            for _ in args {
+                monotype = Monotype::Func(Box::new(env.new_var()), Box::new(monotype));
+            }
+
+            env.push_var(symbol.clone(), Type {
+                monotype,
+                foralls: Vec::new(),
+                constraints: Vec::new(),
+            });
+        }
+    }
+    */
+
+    for ast in asts.iter_mut() {
         let t = typecheck_helper(ast, &mut env, &mut errors);
         println!("{}: {}", ast, t);
     }
