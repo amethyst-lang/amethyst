@@ -1,10 +1,12 @@
 type List a
-	= nil
-	| cons a (List a)
+	= Nil
+	| Cons a (List a)
 
-let x =
-	match cons 2 (cons 3 nil) with
-	| cons x (cons y nil) to x + y
-	| cons x nil to x
-	| nil to 0
+let map f xs =
+	match xs with
+	| Cons x xs to Cons (f x) (map f xs)
+	| Nil to Nil
 	end
+
+let f x = g (x + 1)
+let g x = f x

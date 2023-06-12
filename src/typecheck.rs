@@ -240,10 +240,37 @@ fn typecheck_helper(ast: &mut Ast, env: &mut Environment, errors: &mut Vec<Check
             result
         }
 
-        Ast::EmptyLet { span, symbol, type_, args } => todo!(),
+        Ast::EmptyLet { .. } => Monotype::Base(BaseType::Bottom),
 
         Ast::TopLet { span, symbol, args, value } => {
-            typecheck_helper(value, env, errors)
+            for arg in args.iter() {
+                let monotype = env.new_var();
+                env.push_var(arg.to_string(), Type {
+                    foralls: Vec::new(),
+                    constraints: Vec::new(),
+                    monotype,
+                });
+            }
+
+            let mut t = typecheck_helper(value, env, errors);
+
+            for _ in args.iter().rev() {
+                let (_, a) = env.pop_var().expect("argument was never popped");
+                t = Monotype::Func(Box::new(a.monotype), Box::new(t));
+            }
+
+            let mut old = env.find_var(symbol).expect("top level bindings are defined before typechecking starts");
+            if !env.unify(&mut t, &mut old) {
+                errors.push(CheckError {
+                    message: "top level binding cannot be typechecked".to_string(),
+                    primary_label: format!("`{}` has both types `{}` and `{}`", symbol, old, t),
+                    primary_label_loc: span.clone(),
+                    secondary_labels: Vec::new(),
+                    notes: Vec::new(),
+                });
+            }
+
+            Monotype::Base(BaseType::Bottom)
         }
 
         Ast::If { span, cond, then, elsy } => {
@@ -485,7 +512,18 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
 
     for ast in asts.iter() {
         match ast {
-            Ast::TopLet { span, symbol, args, value } => (),
+            Ast::TopLet { symbol, args, .. } => {
+                let mut monotype = env.new_var();
+                for _ in args {
+                    monotype = Monotype::Func(Box::new(env.new_var()), Box::new(monotype));
+                }
+
+                env.push_var(symbol.clone(), Type {
+                    monotype,
+                    foralls: Vec::new(),
+                    constraints: Vec::new(),
+                });
+            }
 
             Ast::DatatypeDefinition { name, constraints, generics, variants, .. } => {
                 let t = Type {
@@ -512,27 +550,14 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
 
             _ => (),
         }
-
-        /*
-        if let Ast::TopLet { symbol, args, .. } = ast {
-            let mut monotype = env.new_var();
-            for _ in args {
-                monotype = Monotype::Func(Box::new(env.new_var()), Box::new(monotype));
-            }
-
-            env.push_var(symbol.clone(), Type {
-                monotype,
-                foralls: Vec::new(),
-                constraints: Vec::new(),
-            });
-        }
-        */
     }
 
     for ast in asts.iter_mut() {
-        let t = typecheck_helper(ast, &mut env, &mut errors);
-        let t = env.find(&t);
-        println!("{}: {}", ast, t);
+        typecheck_helper(ast, &mut env, &mut errors);
+    }
+
+    for (var, type_) in env.variables.iter() {
+        println!("{}: {}", var, env.find(&type_.monotype));
     }
 
     if errors.is_empty() {
