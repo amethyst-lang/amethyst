@@ -69,7 +69,7 @@ impl Display for Monotype {
 #[derive(Debug, Clone)]
 pub struct Type {
     pub foralls: Vec<String>,
-    pub constraints: Vec<(String, Vec<Type>)>,
+    pub constraints: Vec<(String, Vec<Monotype>)>,
     pub monotype: Monotype,
 }
 
@@ -1487,32 +1487,34 @@ fn parse_type_def(
             }
         };
 
-        match lexer.lex() {
-            Some((Token::Equals, _)) => (),
+        let mut generics = Vec::new();
+        loop {
+            match lexer.lex() {
+                Some((Token::Symbol(s), _)) => generics.push(s.to_string()),
+                Some((Token::Equals, _)) => break,
+                Some((_, s2)) => {
+                    return Err(ParseError::Error {
+                        message: "invalid type definition".to_string(),
+                        primary_label: "expected `=`".to_string(),
+                        primary_label_loc: s2,
+                        secondary_labels: vec![("type definition starts here".to_string(), span)],
+                        notes: Vec::new(),
+                    });
+                }
 
-            Some((_, s2)) => {
-                return Err(ParseError::Error {
-                    message: "invalid type definition".to_string(),
-                    primary_label: "expected `=`".to_string(),
-                    primary_label_loc: s2,
-                    secondary_labels: vec![("type definition starts here".to_string(), span)],
-                    notes: Vec::new(),
-                });
-            }
-
-            None => {
-                return Err(ParseError::Error {
-                    message: "invalid type definition".to_string(),
-                    primary_label: "expected `=`".to_string(),
-                    primary_label_loc: lexer.loc()..lexer.loc() + 1,
-                    secondary_labels: vec![("type definition starts here".to_string(), span)],
-                    notes: Vec::new(),
-                });
+                None => {
+                    return Err(ParseError::Error {
+                        message: "invalid type definition".to_string(),
+                        primary_label: "expected `=`".to_string(),
+                        primary_label_loc: lexer.loc()..lexer.loc() + 1,
+                        secondary_labels: vec![("type definition starts here".to_string(), span)],
+                        notes: Vec::new(),
+                    });
+                }
             }
         }
 
         // TODO
-        let generics = Vec::new();
         let constraints = Vec::new();
 
         let mut variants = vec![parse_type_def_variant(lexer, &generics)?];

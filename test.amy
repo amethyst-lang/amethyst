@@ -1,5 +1,5 @@
-let uwu =
-	if true then
-		2
-	else
-		3
+type List a
+	= nil
+	| cons a (List a)
+
+let int_list = cons 1 (cons 2 (cons 3 nil))

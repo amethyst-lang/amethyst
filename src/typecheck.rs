@@ -11,7 +11,7 @@ pub struct CheckError {
     pub notes: Vec<String>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Environment {
     variables: Vec<(String, Type)>,
     substitutions: Vec<Monotype>,
@@ -61,7 +61,11 @@ impl Environment {
             t = t_new.clone();
         }
 
-        t
+        match t {
+            Monotype::Base(BaseType::Named(s, ts)) => Monotype::Base(BaseType::Named(s, ts.into_iter().map(|v| self.find(&v)).collect())),
+            Monotype::Func(a, r) => Monotype::Func(Box::new(self.find(&a)), Box::new(self.find(&r))),
+            t => t
+        }
     }
 
     fn unify(&mut self, ta: &mut Monotype, tb: &mut Monotype) -> bool {
@@ -278,8 +282,35 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
     let mut env = Environment::default().init_defaults();
     let mut errors = Vec::new();
 
-    /*
     for ast in asts.iter() {
+        match ast {
+            Ast::TopLet { span, symbol, args, value } => (),
+
+            Ast::DatatypeDefinition { name, constraints, generics, variants, .. } => {
+                let t = Type {
+                    foralls: generics.clone(),
+                    constraints: constraints.clone(),
+                    monotype: Monotype::Base(BaseType::Named(name.clone(), generics.iter().map(|v| Monotype::Generic(v.clone())).collect())),
+                };
+
+                for (cons, fields) in variants {
+                    let mut monotype = t.monotype.clone();
+                    for (_, field_type) in fields.iter().rev() {
+                        monotype = Monotype::Func(Box::new(field_type.clone()), Box::new(monotype));
+                    }
+
+                    env.push_var(cons.clone(), Type {
+                        foralls: t.foralls.clone(),
+                        constraints: t.constraints.clone(),
+                        monotype,
+                    });
+                }
+            }
+
+            _ => (),
+        }
+
+        /*
         if let Ast::TopLet { symbol, args, .. } = ast {
             let mut monotype = env.new_var();
             for _ in args {
@@ -292,11 +323,12 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<(), Vec<CheckError>> {
                 constraints: Vec::new(),
             });
         }
+        */
     }
-    */
 
     for ast in asts.iter_mut() {
         let t = typecheck_helper(ast, &mut env, &mut errors);
+        let t = env.find(&t);
         println!("{}: {}", ast, t);
     }
 
