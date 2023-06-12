@@ -2,4 +2,9 @@ type List a
 	= nil
 	| cons a (List a)
 
-let int_list = cons 1 (cons 2 (cons 3 nil))
+let x =
+	match cons 2 (cons 3 nil) with
+	| cons x (cons y nil) to x + y
+	| cons x nil to x
+	| nil to 0
+	end
