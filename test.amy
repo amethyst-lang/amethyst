@@ -3,7 +3,7 @@ class Eq a =
 end
 
 instance Eq i32 =
-	let eq a b = a == b
+	let eq a b = true
 end
 
 class Ord a where Eq a =
@@ -11,15 +11,35 @@ class Ord a where Eq a =
 end
 
 instance Ord i32 =
-	let lt a b = a < b
+	let lt a b = false
 end
 
 type List a
 	= Nil
 	| Cons a (List a)
 
+type Pair a b = Pair a b
+
+instance forall a b where Eq a, Eq b. Eq (Pair a b) =
+	let eq a b =
+		match Pair a b with
+		| Pair (Pair a b) (Pair c d) to
+			if eq a c then
+				eq b d
+			else false
+		end
+end
+
 instance forall a where Eq a. Eq (List a) =
-	let eq xs ys = false // wont actually implement for this example but you get the idea
+	let eq xs ys =
+		match Pair xs ys with
+		| Pair (Cons x xs) (Cons y ys) to
+			if eq x y then
+				eq xs ys
+			else false
+		| Pair Nil Nil to true
+		| _ to false
+		end
 end
 
 val sorted : forall a where Ord a. List a -> bool
@@ -40,10 +60,6 @@ let map f xs =
 	| Cons x xs to Cons (f x) (map f xs)
 	| Nil to Nil
 	end
-
-let f x = g (x + 1)
-let g x = f x
-let h x = h x
 
 let foldl f a xs =
 	match xs with

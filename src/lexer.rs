@@ -7,16 +7,9 @@ pub enum Token<'a> {
     Invalid(&'a str),
     Integer(u128),
     Bool(bool),
-    Plus,
-    Minus,
-    Astrisk,
-    Slash,
-    Percent,
     Equals,
-    Pipe,
     Colon,
     Arrow,
-    At,
     Dot,
     Comma,
     LParen,
@@ -25,31 +18,18 @@ pub enum Token<'a> {
     RBrack,
     LBrace,
     RBrace,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    Eq,
-    Ne,
-    LogicalAnd,
-    LogicalOr,
-    Exclamation,
+    Def,
+    Do,
+    End,
     Let,
-    Val,
-    In,
-    Mut,
     If,
     Then,
     Else,
     Match,
-    With,
+    As,
     To,
-    End,
-    Forall,
     Type,
-    Class,
-    Instance,
-    Where,
+    Operator(&'a str, bool, i32),
     Symbol(&'a str),
 }
 
@@ -107,18 +87,13 @@ impl<'a> Lexer<'a> {
         } else {
             let mut final_pos = self.pos;
 
-            enum State {
+            enum State<'a> {
                 Initial,
                 Invalid,
                 Number,
-                SingleChar,
                 Symbol,
-                Minus,
-                AppendEq,
-                Not,
-                Double,
-                Slash,
                 SingleComment,
+                Done(Token<'a>),
             }
 
             let mut state = State::Initial;
@@ -126,14 +101,7 @@ impl<'a> Lexer<'a> {
                 match state {
                     State::Initial => match c {
                         '0'..='9' => state = State::Number,
-                        '+' | '*' | '%' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | '@' | ',' | '.' => {
-                            state = State::SingleChar
-                        }
-                        '/' => state = State::Slash,
-                        '|' | '&' => state = State::Double,
-                        '<' | '>' | '=' => state = State::AppendEq,
-                        '!' => state = State::Not,
-                        '-' => state = State::Minus,
+                        '#' => state = State::SingleComment,
                         ' ' | '\t' | '\n' | '\r' => self.pos += c.len_utf8(),
                         'a'..='z' | 'A'..='Z' | '_' => state = State::Symbol,
                         _ => state = State::Invalid,
@@ -146,45 +114,10 @@ impl<'a> Lexer<'a> {
                         _ => break,
                     },
 
-                    State::SingleChar => break,
-
                     State::Symbol => match c {
                         'a'..='z' | 'A'..='Z' | '_' | '0'..='9' => (),
                         _ => break,
                     },
-
-                    State::Minus => match c {
-                        '>' => state = State::SingleChar,
-                        _ => break,
-                    },
-
-                    State::AppendEq => {
-                        state = State::SingleChar;
-                        if c != '=' {
-                            break;
-                        }
-                    }
-
-                    State::Not => match c {
-                        '=' => state = State::SingleChar,
-                        _ => break,
-                    },
-
-                    State::Double => {
-                        state = State::SingleChar;
-                        if c != self.contents[self.pos..].chars().next().unwrap() {
-                            break;
-                        }
-                    }
-
-                    State::Slash => {
-                        if c == '/' {
-                            self.pos += c.len_utf8() * 2;
-                            state = State::SingleComment;
-                        } else {
-                            break;
-                        }
-                    }
 
                     State::SingleComment => {
                         if c == '\n' {
@@ -192,6 +125,8 @@ impl<'a> Lexer<'a> {
                         }
                         self.pos += c.len_utf8();
                     }
+
+                    State::Done(_) => break,
                 }
 
                 final_pos += c.len_utf8();
@@ -206,64 +141,26 @@ impl<'a> Lexer<'a> {
 
             let s = &self.contents[initial_pos..final_pos];
             let token = match state {
-                State::Initial | State::AppendEq | State::Double | State::SingleComment => {
+                State::Initial | State::SingleComment => {
                     unreachable!()
                 }
+
                 State::Invalid => Token::Invalid(s),
                 State::Number => Token::Integer(s.parse().unwrap()),
-                State::Not => Token::Exclamation,
-                State::SingleChar => match s {
-                    "+" => Token::Plus,
-                    "-" => Token::Minus,
-                    "*" => Token::Astrisk,
-                    "/" => Token::Slash,
-                    "%" => Token::Percent,
-                    "(" => Token::LParen,
-                    ")" => Token::RParen,
-                    "[" => Token::LBrack,
-                    "]" => Token::RBrack,
-                    "{" => Token::LBrace,
-                    "}" => Token::RBrace,
-                    "|" => Token::Pipe,
-                    ":" => Token::Colon,
-                    "->" => Token::Arrow,
-                    "@" => Token::At,
-                    "." => Token::Dot,
-                    "," => Token::Comma,
-                    "=" => Token::Equals,
-                    "==" => Token::Eq,
-                    ">=" => Token::Ge,
-                    "<=" => Token::Le,
-                    ">" => Token::Gt,
-                    "<" => Token::Lt,
-                    "!=" => Token::Ne,
-                    "&" => Token::Invalid(s),
-                    "&&" => Token::LogicalAnd,
-                    "||" => Token::LogicalOr,
-                    _ => unreachable!("{:?}", s),
-                },
                 State::Symbol => match s {
                     "true" | "false" => Token::Bool(s == "true"),
                     "let" => Token::Let,
-                    "val" => Token::Val,
-                    "in" => Token::In,
-                    "mut" => Token::Mut,
                     "if" => Token::If,
                     "then" => Token::Then,
                     "else" => Token::Else,
                     "match" => Token::Match,
-                    "with" => Token::With,
                     "to" => Token::To,
                     "end" => Token::End,
-                    "forall" => Token::Forall,
                     "type" => Token::Type,
-                    "class" => Token::Class,
-                    "instance" => Token::Instance,
-                    "where" => Token::Where,
                     _ => Token::Symbol(s),
                 },
-                State::Minus => Token::Minus,
-                State::Slash => Token::Slash,
+
+                State::Done(token) => token,
             };
 
             self.prev_tokens.push((token, initial_pos..final_pos));

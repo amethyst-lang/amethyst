@@ -11,12 +11,29 @@ pub struct CheckError {
     pub notes: Vec<String>,
 }
 
+#[derive(Debug)]
+struct Instance {
+    generics: Vec<String>,
+    parameters: Vec<Monotype>,
+    constraints: Vec<(String, Vec<Monotype>)>,
+}
+
+#[derive(Debug)]
+struct Class {
+    parameter_count: usize,
+    instances: Vec<Instance>,
+    superclasses: HashMap<String, Vec<usize>>,
+}
+
 #[derive(Default, Debug)]
 struct Environment {
     variables: Vec<(String, Type)>,
-    // types_defined: HashMap<String, Type>, // TODO: check if a type used was previously defined
-    substitutions: Vec<Monotype>,
     constructors: HashMap<String, Type>,
+    // types_defined: HashMap<String, Type>, // TODO: check if a type used was previously defined
+    classes: HashMap<String, Class>,
+
+    substitutions: Vec<Monotype>,
+    class_constraints: Vec<Vec<(String, usize)>>, // kinda silly but states that, for a given type variable t, it is the ith argument of some instance of the given class
 }
 
 impl Environment {
@@ -58,6 +75,7 @@ impl Environment {
     fn new_var(&mut self) -> Monotype {
         let t = Monotype::TypeVar(self.substitutions.len());
         self.substitutions.push(t.clone());
+        self.class_constraints.push(Vec::new());
         t
     }
 
@@ -123,8 +141,22 @@ impl Environment {
 impl Type {
     fn instantiate(self, env: &mut Environment) -> Monotype {
         let mut replacements = HashMap::new();
-        for generic in self.foralls.iter() {
+        for generic in self.foralls {
             replacements.insert(generic.clone(), env.new_var());
+        }
+
+        let mut constraint_map = HashMap::new();
+        for (class_name, params) in self.constraints {
+            // TODO: error handling
+            if let Some(class) = env.classes.get(&class_name) {
+                for (i, param) in params.into_iter().enumerate() {
+                    param.instantiate(&replacements).create_typevar_constraints(i, &class_name, class, &mut constraint_map);
+                }
+            }
+        }
+
+        for (i, vals) in constraint_map {
+            env.class_constraints[i].extend(vals);
         }
 
         self.monotype.instantiate(&replacements)
@@ -141,6 +173,35 @@ impl Type {
 }
 
 impl Monotype {
+    fn create_typevar_constraints(self, i: usize, class_name: &str, class: &Class, constraint_map: &mut HashMap<usize, Vec<(String, usize)>>) {
+        match self {
+            Monotype::Base(BaseType::Named(_, ts)) => {
+                for t in ts {
+                    t.create_typevar_constraints(i, class_name, class, constraint_map);
+                }
+            }
+
+            Monotype::Func(a, r) => {
+                a.create_typevar_constraints(i, class_name, class, constraint_map);
+                r.create_typevar_constraints(i, class_name, class, constraint_map);
+            }
+
+            Monotype::TypeVar(j) => {
+                match constraint_map.entry(j) {
+                    Entry::Occupied(mut v) => {
+                        v.get_mut().push((class_name.to_string(), i));
+                    }
+
+                    Entry::Vacant(v) => {
+                        v.insert(vec![(class_name.to_string(), i)]);
+                    }
+                }
+            }
+
+            _ => (),
+        }
+    }
+
     fn instantiate(self, replacements: &HashMap<String, Monotype>) -> Self {
         match self {
             Monotype::Unknown => self,
@@ -725,6 +786,57 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<HashMap<String, Type>, Vec<CheckErr
             }
 
             Ast::Class { span, name, generics, constraints, functions } => {
+                let mut class = Class {
+                    parameter_count: generics.len(),
+                    instances: Vec::new(),
+                    superclasses: HashMap::new(),
+                };
+
+                'a: for (superclass, s_generics) in constraints {
+                    if !env.classes.contains_key(superclass) {
+                        errors.push(CheckError {
+                            message: "superclass is undefined".to_string(),
+                            primary_label: format!("superclass `{}` was referenced here", superclass),
+                            primary_label_loc: span.clone(),
+                            secondary_labels: Vec::new(),
+                            notes: Vec::new(),
+                        });
+                        continue;
+                    }
+
+                    let mut built = Vec::new();
+                    for g in s_generics {
+                        let Some((i, _)) = generics.iter().enumerate().find(|(_, s)| *s == g)
+                        else {
+                            errors.push(CheckError {
+                                message: "typevariable not found".to_string(),
+                                primary_label: format!("typevariable `{}` never defined", g),
+                                primary_label_loc: span.clone(),
+                                secondary_labels: Vec::new(),
+                                notes: Vec::new(),
+                            });
+                            continue 'a;
+                        };
+                        built.push(i);
+                    }
+
+                    class.superclasses.insert(superclass.clone(), built);
+                }
+
+                let Entry::Vacant(entry) = env.classes.entry(name.clone())
+                else {
+                    errors.push(CheckError {
+                        message: "class defined multiple times".to_string(),
+                        primary_label: format!("class `{}` defined a second time here", name),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                    continue;
+                };
+
+                entry.insert(class);
+
                 for func in functions {
                     if let Ast::EmptyLet { symbol, type_, .. } = func {
                         env.push_var(symbol.clone(), type_.clone());
@@ -732,8 +844,37 @@ pub fn typecheck(asts: &mut [Ast]) -> Result<HashMap<String, Type>, Vec<CheckErr
                 }
             }
 
-            Ast::Instance { span, name, generics, parameters, constraints, functions } => {
-                println!("{}", ast);
+            Ast::Instance { span, name, generics, parameters, constraints, .. } => {
+                let instance = Instance {
+                    generics: generics.clone(),
+                    parameters: parameters.clone(),
+                    constraints: constraints.clone(),
+                };
+
+                let Some(class) = env.classes.get_mut(name)
+                else {
+                    errors.push(CheckError {
+                        message: "attempted to create instance of nonexistent class".to_string(),
+                        primary_label: format!("class `{}` is undefined", name),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                    continue;
+                };
+
+                if parameters.len() != class.parameter_count {
+                    errors.push(CheckError {
+                        message: "mismatched number of parameters".to_string(),
+                        primary_label: format!("class `{}` expects {} parameters, received {} parameters", name, class.parameter_count, parameters.len()),
+                        primary_label_loc: span.clone(),
+                        secondary_labels: Vec::new(),
+                        notes: Vec::new(),
+                    });
+                    continue;
+                }
+
+                class.instances.push(instance);
             }
 
             _ => (),

@@ -227,7 +227,7 @@ pub enum Ast {
         span: Span,
         name: String,
         generics: Vec<String>,
-        constraints: Vec<(String, Vec<Monotype>)>,
+        constraints: Vec<(String, Vec<String>)>,
         functions: Vec<Ast>,
     },
 
@@ -1701,10 +1701,9 @@ fn parse_class(lexer: &mut Lexer<'_>) -> Result<Ast, ParseError> {
 
                 let mut parameters = Vec::new();
                 loop {
-                    match parse_base_type(lexer, &generics, true) {
-                        Ok(v) => parameters.push(v),
-                        Err(ParseError::NotStarted) => break,
-                        Err(e) => return Err(e),
+                    match try_token!(lexer, Some((Token::Symbol(_), _))) {
+                        Some((Token::Symbol(s), _)) => parameters.push(s.to_string()),
+                        _ => break,
                     }
                 }
 
