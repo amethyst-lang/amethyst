@@ -9,6 +9,7 @@ pub enum Token {
     Symbol(String),
     Operator(String),
     Integer(u64),
+    Declfix,
     Def,
     Do,
     End,
@@ -36,6 +37,13 @@ impl Lexer {
     pub fn new(string: &str) -> Self {
         Lexer {
             string: string.to_owned(),
+            index: 0,
+        }
+    }
+
+    pub fn clone_clean(&self) -> Self {
+        Lexer {
+            string: self.string.clone(),
             index: 0,
         }
     }
@@ -128,6 +136,7 @@ impl Lexer {
 
             State::Symbol => {
                 match &self.string[index..index + len] {
+                    "declfix" => Token::Declfix,
                     "def" => Token::Def,
                     "do" => Token::Do,
                     "end" => Token::End,

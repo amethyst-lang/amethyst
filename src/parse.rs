@@ -379,7 +379,7 @@ impl Parser {
 
     fn parse_def(&mut self) -> Result<TopLevel, ParseError> {
         consume_token!(self.lexer, Token::Def, "function declaration starts with `def`");
-        let (Token::Symbol(name), ..) = consume_token!(self.lexer, Token::Symbol(_), "symbol must follow `def`")
+        let (Token::Symbol(name) | Token::Operator(name), ..) = consume_token!(self.lexer, (Token::Symbol(_) | Token::Operator(_)), "symbol or operator must follow `def`")
         else {
             unreachable!();
         };
@@ -406,7 +406,15 @@ impl Parser {
     pub fn parse(mut self) -> Result<Vec<TopLevel>, ParseError> {
         let mut result = Vec::new();
         while !self.lexer.eof() {
-            if let (Token::Def, ..) = self.lexer.peek() {
+            if let (Token::Declfix, ..) = self.lexer.peek() {
+                self.lexer.lex();
+                self.lexer.lex();
+                if let (Token::Symbol(v), ..) = self.lexer.lex() {
+                    if v == "left" || v == "right" {
+                        self.lexer.lex();
+                    }
+                }
+            } else if let (Token::Def, ..) = self.lexer.peek() {
                 result.push(self.parse_def()?)
             } else {
                 let (_, index, len) = self.lexer.peek();
@@ -419,5 +427,53 @@ impl Parser {
 
         consume_token!(self.lexer, Token::Eof, "expected eof");
         Ok(result)
+    }
+
+    pub fn extract_op_data(&self) -> Vec<(String, OpType)> {
+        let mut lexer = self.lexer.clone_clean();
+        let mut result = Vec::new();
+        loop {
+            match lexer.lex() {
+                (Token::Eof, ..) => break,
+                (Token::Declfix, ..) => {
+                    let (Token::Operator(op), ..) = lexer.lex()
+                    else {
+                        continue;
+                    };
+
+                    let (Token::Symbol(v), ..) = lexer.lex()
+                    else {
+                        continue;
+                    };
+
+                    match v.as_str() {
+                        "prefix" => result.push((op, OpType::Prefix)),
+
+                        "left" => {
+                            let (Token::Integer(prec), ..) = lexer.lex()
+                            else {
+                                continue;
+                            };
+                            result.push((op, OpType::Infix(prec as usize, OpAssoc::Left)));
+                        }
+
+                        "right" => {
+                            let (Token::Integer(prec), ..) = lexer.lex()
+                            else {
+                                continue;
+                            };
+                            result.push((op, OpType::Infix(prec as usize, OpAssoc::Right)));
+                        }
+
+                        "postfix" => result.push((op, OpType::Prefix)),
+                        _ => (),
+                    }
+                }
+
+                _ => (),
+            }
+        }
+
+        result
     }
 }
