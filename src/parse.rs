@@ -252,7 +252,28 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_statement(&mut self) -> Result<Statement, ParseError> {
+    fn parse_let(&mut self) -> Result<Statement, ParseError> {
+        consume_token!(self.lexer, Token::Let, "let binding must start with `let`");
+        let (Token::Symbol(name), ..) = consume_token!(self.lexer, Token::Symbol(_), "let binding currently only supports symbol patterns")
+        else {
+            unreachable!();
+        };
+        consume_token!(self.lexer, Token::Equal, "let pattern binding must be followed by `=`");
+        let value = self.parse_expr()?;
+        Ok(Statement::Let { name, value })
+    }
+
+    fn parse_set(&mut self) -> Result<Statement, ParseError> {
+        let (Token::Symbol(name), ..) = consume_token!(self.lexer, Token::Symbol(_), "currently only symbols can be set")
+        else {
+            unreachable!();
+        };
+        consume_token!(self.lexer, Token::Equal, "pattern being set must be followed by `=`");
+        let value = self.parse_expr()?;
+        Ok(Statement::Set { name, value })
+    }
+
+    fn parse_func_call_stat(&mut self) -> Result<Statement, ParseError> {
         let (Token::Symbol(func), ..) = consume_token!(self.lexer, Token::Symbol(_), "expected function name")
         else {
             unreachable!();
@@ -275,6 +296,26 @@ impl Parser {
             func,
             args,
         })
+    }
+
+    fn parse_statement(&mut self) -> Result<Statement, ParseError> {
+        if matches!(self.lexer.peek(), (Token::Let, ..)) {
+            self.parse_let()
+        } else {
+            let state = self.lexer.push_state();
+            if matches!(self.lexer.lex(), (Token::Symbol(_), ..)) {
+                if matches!(self.lexer.peek(), (Token::LParen, ..)) {
+                    self.lexer.pop_state(state);
+                    self.parse_func_call_stat()
+                } else {
+                    self.lexer.pop_state(state);
+                    self.parse_set()
+                }
+            } else {
+                self.lexer.pop_state(state);
+                self.parse_set()
+            }
+        }
     }
 
     fn parse_def(&mut self) -> Result<TopLevel, ParseError> {

@@ -5,12 +5,14 @@ pub enum Token {
     LParen,
     RParen,
     Comma,
+    Equal,
     Symbol(String),
     Operator(String),
     Integer(u64),
     Def,
     Do,
     End,
+    Let,
 }
 
 pub struct Lexer {
@@ -123,6 +125,7 @@ impl Lexer {
                     "def" => Token::Def,
                     "do" => Token::Do,
                     "end" => Token::End,
+                    "let" => Token::Let,
                     s => Token::Symbol(s.to_owned()),
                 }
             }
@@ -132,6 +135,7 @@ impl Lexer {
             State::Operator => {
                 match &self.string[index..index + len] {
                     "," => Token::Comma,
+                    "=" => Token::Equal,
                     s => Token::Operator(s.to_owned())
                 }
             }
