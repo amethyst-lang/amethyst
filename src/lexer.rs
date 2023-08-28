@@ -21,9 +21,9 @@ fn valid_operator_char(c: char) -> bool {
 }
 
 impl Lexer {
-    pub fn new(s: &str) -> Self {
+    pub fn new(string: &str) -> Self {
         Lexer {
-            string: s.to_owned(),
+            string: string.to_owned(),
             index: 0,
         }
     }
@@ -128,7 +128,7 @@ impl Lexer {
         (token, index, len)
     }
 
-    pub fn peak(&mut self) -> (Token, usize, usize) {
+    pub fn peek(&mut self) -> (Token, usize, usize) {
         let state = self.push_state();
         let result = self.lex();
         self.pop_state(state);
