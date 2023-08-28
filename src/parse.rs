@@ -45,6 +45,13 @@ pub enum Statement {
         value: Expr,
     },
 
+    Loop {
+        body: Vec<Statement>,
+    },
+
+    Break,
+    Continue,
+
     If {
         cond: Expr,
         then: Vec<Statement>,
@@ -54,11 +61,6 @@ pub enum Statement {
     Match {
         value: Expr,
         branches: Vec<(Pattern, Vec<Statement>)>,
-    },
-
-    While {
-        cond: Expr,
-        body: Vec<Statement>,
     },
 }
 
@@ -279,6 +281,17 @@ impl Parser {
         Ok(Statement::Let { name, value })
     }
 
+    fn parse_loop(&mut self) -> Result<Statement, ParseError> {
+        consume_token!(self.lexer, Token::Loop, "loop must start with `loop`");
+        let mut body = Vec::new();
+        while !matches!(self.lexer.peek(), (Token::End, ..)) {
+            body.push(self.parse_statement()?);
+        }
+
+        consume_token!(self.lexer, Token::End, "loop must end with `end`");
+        Ok(Statement::Loop { body })
+    }
+
     fn parse_set(&mut self) -> Result<Statement, ParseError> {
         let (Token::Symbol(name), ..) = consume_token!(self.lexer, Token::Symbol(_), "currently only symbols can be set")
         else {
@@ -315,21 +328,23 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
-        if matches!(self.lexer.peek(), (Token::Let, ..)) {
-            self.parse_let()
-        } else {
-            let state = self.lexer.push_state();
-            if matches!(self.lexer.lex(), (Token::Symbol(_), ..)) {
-                if matches!(self.lexer.peek(), (Token::LParen, ..)) {
-                    self.lexer.pop_state(state);
-                    self.parse_func_call_stat()
+        match self.lexer.peek() {
+            (Token::Let, ..) => self.parse_let(),
+            (Token::Loop, ..) => self.parse_loop(),
+            _ => {
+                let state = self.lexer.push_state();
+                if matches!(self.lexer.lex(), (Token::Symbol(_), ..)) {
+                    if matches!(self.lexer.peek(), (Token::LParen, ..)) {
+                        self.lexer.pop_state(state);
+                        self.parse_func_call_stat()
+                    } else {
+                        self.lexer.pop_state(state);
+                        self.parse_set()
+                    }
                 } else {
                     self.lexer.pop_state(state);
                     self.parse_set()
                 }
-            } else {
-                self.lexer.pop_state(state);
-                self.parse_set()
             }
         }
     }
