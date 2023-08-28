@@ -4,8 +4,12 @@ pub enum Token {
     Eof,
     LParen,
     RParen,
+    LBrack,
+    RBrack,
     Comma,
     Equal,
+    Colon,
+    RArrow,
     Symbol(String),
     Operator(String),
     Integer(u64),
@@ -75,7 +79,7 @@ impl Lexer {
                     match c {
                         'a'..='z' | 'A'..='Z' | '_' => state = State::Symbol,
                         '0'..='9' => state = State::Number,
-                        '(' | ')' => state = State::SingleChar,
+                        '(' | ')' | '[' | ']' => state = State::SingleChar,
 
                         ' ' | '\t' | '\n' | '\r' => {
                             self.index += c.len_utf8();
@@ -157,6 +161,8 @@ impl Lexer {
                 match &self.string[index..index + len] {
                     "," => Token::Comma,
                     "=" => Token::Equal,
+                    ":" => Token::Colon,
+                    "->" => Token::RArrow,
                     s => Token::Operator(s.to_owned())
                 }
             }
@@ -165,6 +171,8 @@ impl Lexer {
                 match &self.string[index..index + len] {
                     "(" => Token::LParen,
                     ")" => Token::RParen,
+                    "[" => Token::LBrack,
+                    "]" => Token::RBrack,
                     _ => unreachable!(),
                 }
             }

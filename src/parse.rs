@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range};
+use std::{collections::{HashMap, HashSet}, ops::Range};
 
 use crate::lexer::{Lexer, Token};
 
@@ -391,8 +391,58 @@ impl Parser {
             unreachable!();
         };
 
+        let mut generics = HashSet::new();
+        if let (Token::LBrack, ..) = self.lexer.peek() {
+            self.lexer.lex();
+            while !matches!(self.lexer.peek(), (Token::RBrack, ..)) {
+                let (Token::Symbol(generic), index, len) = consume_token!(self.lexer, Token::Symbol(_), "generic must be a symbol")
+                else {
+                    unreachable!();
+                };
+
+                if !generics.insert(generic.clone()) {
+                    return Err(ParseError {
+                        range: index..index + len,
+                        message: format!("generic `{}` was already defined in the function", generic),
+                    });
+                }
+
+                let (Token::Comma, ..) = self.lexer.peek()
+                else {
+                    break;
+                };
+                self.lexer.lex();
+            }
+
+            consume_token!(self.lexer, Token::RBrack, "function generics list must be followed by a right bracket");
+        }
+
         consume_token!(self.lexer, Token::LParen, "function name must be followed by argument list");
+        let mut args = Vec::new();
+        while !matches!(self.lexer.peek(), (Token::RParen, ..)) {
+            let (Token::Symbol(arg), ..) = consume_token!(self.lexer, Token::Symbol(_), "argument must be a symbol")
+            else {
+                unreachable!();
+            };
+            consume_token!(self.lexer, Token::Colon, "function definition argument must be followed by a colon");
+            let type_ = self.parse_type(&generics)?;
+            args.push((arg, type_));
+            let (Token::Comma, ..) = self.lexer.peek()
+            else {
+                break;
+            };
+            self.lexer.lex();
+        }
+
         consume_token!(self.lexer, Token::RParen, "function argument list must be followed by a right parenthesis");
+
+        let ret = if let (Token::RArrow, ..) = self.lexer.peek() {
+            self.lexer.lex();
+            self.parse_type(&generics)?
+        } else {
+            Type::Name("unit".to_owned())
+        };
+
         consume_token!(self.lexer, Token::Do, "function body must start with `do`");
 
         let mut stats = Vec::new();
@@ -404,10 +454,42 @@ impl Parser {
 
         Ok(TopLevel::FuncDef {
             name,
-            args: Vec::new(),
-            ret: Type::Name("unit".to_string()),
+            args,
+            ret,
             stats,
         })
+    }
+
+    fn parse_type(&mut self, generics: &HashSet<String>) -> Result<Type, ParseError> {
+        let (Token::Symbol(head), ..) = consume_token!(self.lexer, Token::Symbol(_), "type head must be a symbol")
+        else {
+            unreachable!();
+        };
+        let head = if generics.contains(&head) {
+            Type::Generic(head)
+        } else {
+            Type::Name(head)
+        };
+
+        if let (Token::LBrack, ..) = self.lexer.peek() {
+            self.lexer.lex();
+            let mut args = vec![self.parse_type(generics)?];
+            if let (Token::Comma, ..) = self.lexer.peek() {
+                self.lexer.lex();
+                while !matches!(self.lexer.peek(), (Token::LBrack, ..)) {
+                    args.push(self.parse_type(generics)?);
+                    let (Token::Comma, ..) = self.lexer.peek()
+                    else {
+                        break;
+                    };
+                    self.lexer.lex();
+                }
+            }
+            consume_token!(self.lexer, Token::RBrack, "type arguments must terminate in a `]`");
+            Ok(Type::App(Box::new(head), args))
+        } else {
+            Ok(head)
+        }
     }
 
     pub fn parse(mut self) -> Result<Vec<TopLevel>, ParseError> {
