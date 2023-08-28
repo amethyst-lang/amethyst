@@ -292,6 +292,31 @@ impl Parser {
         Ok(Statement::Loop { body })
     }
 
+    fn parse_if(&mut self) -> Result<Statement, ParseError> {
+        consume_token!(self.lexer, Token::If, "if must start with `if`");
+        let cond = self.parse_expr()?;
+
+        consume_token!(self.lexer, Token::Then, "if condition must be followed by `then`");
+        let mut then = Vec::new();
+        while !matches!(self.lexer.peek(), (Token::End | Token::Else, ..)) {
+            then.push(self.parse_statement()?);
+        }
+
+        let mut elsy = Vec::new();
+        if matches!(self.lexer.peek(), (Token::End, ..)) {
+            self.lexer.lex();
+            Ok(Statement::If { cond, then, elsy })
+        } else {
+            consume_token!(self.lexer, Token::Else, "then clause of if must be followed by `else` or `end`");
+            while !matches!(self.lexer.peek(), (Token::End, ..)) {
+                elsy.push(self.parse_statement()?);
+            }
+
+            consume_token!(self.lexer, Token::End, "if must end with `end`");
+            Ok(Statement::If { cond, then, elsy })
+        }
+    }
+
     fn parse_set(&mut self) -> Result<Statement, ParseError> {
         let (Token::Symbol(name), ..) = consume_token!(self.lexer, Token::Symbol(_), "currently only symbols can be set")
         else {
@@ -331,6 +356,7 @@ impl Parser {
         match self.lexer.peek() {
             (Token::Let, ..) => self.parse_let(),
             (Token::Loop, ..) => self.parse_loop(),
+            (Token::If, ..) => self.parse_if(),
             _ => {
                 let state = self.lexer.push_state();
                 if matches!(self.lexer.lex(), (Token::Symbol(_), ..)) {
@@ -389,6 +415,7 @@ impl Parser {
             }
         }
 
+        consume_token!(self.lexer, Token::Eof, "expected eof");
         Ok(result)
     }
 }

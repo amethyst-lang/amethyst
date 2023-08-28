@@ -14,6 +14,9 @@ pub enum Token {
     End,
     Let,
     Loop,
+    If,
+    Then,
+    Else,
 }
 
 pub struct Lexer {
@@ -128,6 +131,9 @@ impl Lexer {
                     "end" => Token::End,
                     "let" => Token::Let,
                     "loop" => Token::Loop,
+                    "if" => Token::If,
+                    "then" => Token::Then,
+                    "else" => Token::Else,
                     s => Token::Symbol(s.to_owned()),
                 }
             }
