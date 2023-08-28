@@ -165,15 +165,22 @@ impl Parser {
         let (token, index, len) = self.lexer.lex();
         let mut value = match token {
             Token::LParen => {
-                let subexpr = self.parse_expr()?;
-                let (Token::RParen, _, _) = self.lexer.lex()
-                else {
-                    return Err(ParseError {
-                        range: index..index + len,
-                        message: "left parenthesis unterminated".to_string(),
-                    });
-                };
-                subexpr
+                let mut op = None;
+                let state = self.lexer.push_state();
+                if let (Token::Operator(op_name), ..) = self.lexer.lex() {
+                    if let (Token::RParen, ..) = self.lexer.lex() {
+                        op = Some(Expr::Symbol(op_name));
+                    }
+                }
+
+                if let Some(op) = op {
+                    op
+                } else {
+                    self.lexer.pop_state(state);
+                    let subexpr = self.parse_expr()?;
+                    consume_token!(self.lexer, Token::RParen, "left parenthesis unterminated");
+                    subexpr
+                }
             }
 
             Token::Symbol(s) => Expr::Symbol(s),
