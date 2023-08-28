@@ -24,6 +24,8 @@ pub enum Token {
     If,
     Then,
     Else,
+    Type,
+    As,
 }
 
 pub struct Lexer {
@@ -151,6 +153,8 @@ impl Lexer {
                     "if" => Token::If,
                     "then" => Token::Then,
                     "else" => Token::Else,
+                    "type" => Token::Type,
+                    "as" => Token::As,
                     s => Token::Symbol(s.to_owned()),
                 }
             }

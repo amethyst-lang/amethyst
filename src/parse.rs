@@ -460,6 +460,119 @@ impl Parser {
         })
     }
 
+    fn parse_type_def(&mut self) -> Result<TopLevel, ParseError> {
+        consume_token!(self.lexer, Token::Type, "type declaration starts with `type`");
+        let (Token::Symbol(name_type) , ..) = consume_token!(self.lexer, Token::Symbol(_), "symbol must follow `type`")
+        else {
+            unreachable!();
+        };
+
+        let mut generics = HashSet::new();
+        let mut generics_ordered = Vec::new();
+        if let (Token::LBrack, ..) = self.lexer.peek() {
+            self.lexer.lex();
+            while !matches!(self.lexer.peek(), (Token::RBrack, ..)) {
+                let (Token::Symbol(generic), index, len) = consume_token!(self.lexer, Token::Symbol(_), "generic must be a symbol")
+                else {
+                    unreachable!();
+                };
+
+                if !generics.insert(generic.clone()) {
+                    return Err(ParseError {
+                        range: index..index + len,
+                        message: format!("generic `{}` was already defined in the type", generic),
+                    });
+                }
+                generics_ordered.push(generic);
+
+                let (Token::Comma, ..) = self.lexer.peek()
+                else {
+                    break;
+                };
+                self.lexer.lex();
+            }
+
+            consume_token!(self.lexer, Token::RBrack, "type generics list must be followed by a right bracket");
+        }
+
+        consume_token!(self.lexer, Token::As, "type variants must be preceeded by `as`");
+
+        let mut variants = Vec::new();
+        while !matches!(self.lexer.peek(), (Token::End, ..)) {
+            let (Token::Symbol(name) | Token::Operator(name), ..) = consume_token!(self.lexer, (Token::Symbol(_) | Token::Operator(_)), "type variant must be a symbol or operator")
+            else {
+                unreachable!();
+            };
+
+            let mut fields = Vec::new();
+            if let (Token::LParen, ..) = self.lexer.peek() {
+                self.lexer.lex();
+                while !matches!(self.lexer.peek(), (Token::RParen, ..)) {
+                    fields.push(self.parse_type(&generics)?);
+                    let (Token::Comma, ..) = self.lexer.peek()
+                    else {
+                        break;
+                    };
+                    self.lexer.lex();
+                }
+                self.lexer.lex();
+            }
+
+            let result = if let (Token::RArrow, ..) = self.lexer.peek() {
+                self.lexer.lex();
+                let (_, index, len) = self.lexer.peek();
+                let t = self.parse_type(&generics)?;
+                if let Type::Name(n) = &t {
+                    if *n != name_type || !generics_ordered.is_empty() {
+                        return Err(ParseError {
+                            range: index..index + len,
+                            message: "type of variant is not a subtype of the variant's supertype".to_string(),
+                        });
+                    }
+                } else if let Type::App(t, gs) = &t {
+                    if let Type::Name(n) = &**t {
+                        if *n != name_type || generics_ordered.len() != gs.len() {
+                            return Err(ParseError {
+                                range: index..index + len,
+                                message: "type of variant is not a subtype of the variant's supertype".to_string(),
+                            });
+                        }
+                    } else {
+                        return Err(ParseError {
+                            range: index..index + len,
+                            message: "type of variant is not a subtype of the variant's supertype".to_string(),
+                        });
+                    }
+                } else {
+                    return Err(ParseError {
+                        range: index..index + len,
+                        message: "type of variant is not a subtype of the variant's supertype".to_string(),
+                    });
+                }
+                t
+            } else {
+                if generics_ordered.is_empty() {
+                    Type::Name(name_type.clone())
+                } else {
+                    Type::App(Box::new(Type::Name(name_type.clone())), generics_ordered.iter().map(|v| Type::Generic(v.clone())).collect())
+                }
+            };
+
+            variants.push(Variant {
+                name,
+                fields,
+                result,
+            });
+        }
+
+        self.lexer.lex();
+        Ok(TopLevel::TypeDef {
+            name: name_type,
+            generics: generics_ordered,
+            variants,
+        })
+    }
+
     fn parse_type(&mut self, generics: &HashSet<String>) -> Result<Type, ParseError> {
         let (Token::Symbol(head), ..) = consume_token!(self.lexer, Token::Symbol(_), "type head must be a symbol")
         else {
@@ -505,6 +618,10 @@ impl Parser {
                 }
             } else if let (Token::Def, ..) = self.lexer.peek() {
                 result.push(self.parse_def()?)
+            } else if let (Token::Type, ..) = self.lexer.peek() {
+                result.push(self.parse_type_def()?)
+            } else if let (Token::Eof, ..) = self.lexer.peek() {
+                break;
             } else {
                 let (_, index, len) = self.lexer.peek();
                 return Err(ParseError {
