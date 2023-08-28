@@ -13,9 +13,7 @@ pub enum Type {
 #[derive(Debug)]
 pub enum Expr {
     Integer(u64),
-    Bool(bool),
     Symbol(String),
-
     FuncCall {
         func: Box<Expr>,
         args: Vec<Expr>,
@@ -186,6 +184,24 @@ impl Parser {
             }),
         };
 
+        if matches!(self.lexer.peek(), (Token::LParen, ..)) {
+            self.lexer.lex();
+            let mut args = Vec::new();
+            while !matches!(self.lexer.peek(), (Token::RParen, ..)) {
+                args.push(self.parse_expr()?);
+                let (Token::Comma, ..) = self.lexer.peek()
+                else {
+                    break;
+                };
+                self.lexer.lex();
+            }
+
+            consume_token!(self.lexer, Token::RParen, "function call's arguments must be followed by a right parenthesis");
+            value = Expr::FuncCall {
+                func: Box::new(value),
+                args,
+            }
+        }
 
         while let (Token::Operator(op), _, _) = self.lexer.peek() {
             let Some(OpType::Postfix) = self.op_data.get(&op)
