@@ -1,5 +1,8 @@
+# def main() do
+#    println("hello! what is your name?")
+#    let name = readln("> ")
+#    println("hello ", name, "! nice to meet you!")
+# end
+
 def main() do
-    println("hello! what is your name?")
-    let name = readln("> ")
-    println("hello ", name, "! nice to meet you!")
 end

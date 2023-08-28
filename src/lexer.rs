@@ -4,9 +4,13 @@ pub enum Token {
     Eof,
     LParen,
     RParen,
+    Comma,
     Symbol(String),
     Operator(String),
     Integer(u64),
+    Def,
+    Do,
+    End,
 }
 
 pub struct Lexer {
@@ -113,9 +117,25 @@ impl Lexer {
         let token = match state {
             State::Start | State::Comment => Token::Eof,
             State::Invalid => Token::Invalid,
-            State::Symbol => Token::Symbol(self.string[index..index + len].to_owned()),
+
+            State::Symbol => {
+                match &self.string[index..index + len] {
+                    "def" => Token::Def,
+                    "do" => Token::Do,
+                    "end" => Token::End,
+                    s => Token::Symbol(s.to_owned()),
+                }
+            }
+
             State::Number => Token::Integer(self.string[index..index + len].parse().unwrap()),
-            State::Operator => Token::Operator(self.string[index..index + len].to_owned()),
+
+            State::Operator => {
+                match &self.string[index..index + len] {
+                    "," => Token::Comma,
+                    s => Token::Operator(s.to_owned())
+                }
+            }
+
             State::SingleChar => {
                 match &self.string[index..index + len] {
                     "(" => Token::LParen,
@@ -133,5 +153,9 @@ impl Lexer {
         let result = self.lex();
         self.pop_state(state);
         result
+    }
+
+    pub fn eof(&self) -> bool {
+        self.index >= self.string.len()
     }
 }

@@ -2,6 +2,7 @@ use std::{collections::HashMap, ops::Range};
 
 use crate::lexer::{Lexer, Token};
 
+#[derive(Debug)]
 pub enum Type {
     Typevar(usize),
     Name(String),
@@ -21,6 +22,7 @@ pub enum Expr {
     },
 }
 
+#[derive(Debug)]
 pub enum Pattern {
     Wildcard,
     Symbol(String),
@@ -28,6 +30,7 @@ pub enum Pattern {
     Or(Vec<Pattern>),
 }
 
+#[derive(Debug)]
 pub enum Statement {
     FuncCall {
         func: String,
@@ -61,12 +64,14 @@ pub enum Statement {
     },
 }
 
+#[derive(Debug)]
 pub struct Variant {
     pub name: String,
     pub fields: Vec<Type>,
     pub result: Type,
 }
 
+#[derive(Debug)]
 pub enum TopLevel {
     TypeDef {
         name: String,
@@ -104,6 +109,20 @@ pub enum OpType {
 pub struct Parser {
     lexer: Lexer,
     pub op_data: HashMap<String, OpType>,
+}
+
+macro_rules! consume_token {
+    ($lexer: expr, $p: pat, $msg: literal) => {{
+        let (token, index, len) = $lexer.peek();
+        let $p = token
+        else {
+            return Err(ParseError {
+                range: index..index + len,
+                message: $msg.to_owned(),
+            });
+        };
+        $lexer.lex()
+    }};
 }
 
 impl Parser {
@@ -146,7 +165,7 @@ impl Parser {
         let (token, index, len) = self.lexer.lex();
         let mut value = match token {
             Token::LParen => {
-                let subexpr = self.parse_infix()?;
+                let subexpr = self.parse_expr()?;
                 let (Token::RParen, _, _) = self.lexer.lex()
                 else {
                     return Err(ParseError {
@@ -190,9 +209,9 @@ impl Parser {
         Ok(value)
     }
 
-    fn parse_infix(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         let left = self.parse_value()?;
-        self.parse_infix_tail(left, 0)
+        self.parse_expr_tail(left, 0)
     }
 
     fn is_infix_of_min_prec(&mut self, min_prec: usize, can_eq: bool) -> Option<(String, usize, OpAssoc)> {
@@ -217,11 +236,11 @@ impl Parser {
         }
     }
 
-    fn parse_infix_tail(&mut self, mut left: Expr, min_prec: usize) -> Result<Expr, ParseError> {
+    fn parse_expr_tail(&mut self, mut left: Expr, min_prec: usize) -> Result<Expr, ParseError> {
         while let Some((op, op_prec, _)) = self.is_infix_of_min_prec(min_prec, true) {
             let mut right = self.parse_value()?;
             while let Some((_, prec, _)) = self.is_infix_of_min_prec(op_prec, false) {
-                right = self.parse_infix_tail(right, op_prec + (prec > op_prec) as usize)?;
+                right = self.parse_expr_tail(right, op_prec + (prec > op_prec) as usize)?;
             }
 
             left = Expr::FuncCall {
@@ -233,7 +252,71 @@ impl Parser {
         Ok(left)
     }
 
-    pub fn parse(mut self) -> Result<Expr, ParseError> {
-        self.parse_infix()
+    fn parse_statement(&mut self) -> Result<Statement, ParseError> {
+        let (Token::Symbol(func), ..) = consume_token!(self.lexer, Token::Symbol(_), "expected function name")
+        else {
+            unreachable!();
+        };
+
+        consume_token!(self.lexer, Token::LParen, "function call must be followed by argument list");
+        let mut args = Vec::new();
+        while !matches!(self.lexer.peek(), (Token::RParen, ..)) {
+            args.push(self.parse_expr()?);
+            let (Token::Comma, ..) = self.lexer.peek()
+            else {
+                break;
+            };
+            self.lexer.lex();
+        }
+
+        consume_token!(self.lexer, Token::RParen, "function call's arguments must be followed by a right parenthesis");
+
+        Ok(Statement::FuncCall {
+            func,
+            args,
+        })
+    }
+
+    fn parse_def(&mut self) -> Result<TopLevel, ParseError> {
+        consume_token!(self.lexer, Token::Def, "function declaration starts with `def`");
+        let (Token::Symbol(name), ..) = consume_token!(self.lexer, Token::Symbol(_), "symbol must follow `def`")
+        else {
+            unreachable!();
+        };
+
+        consume_token!(self.lexer, Token::LParen, "function name must be followed by argument list");
+        consume_token!(self.lexer, Token::RParen, "function argument list must be followed by a right parenthesis");
+        consume_token!(self.lexer, Token::Do, "function body must start with `do`");
+
+        let mut stats = Vec::new();
+        while !matches!(self.lexer.peek(), (Token::End, ..)) {
+            stats.push(self.parse_statement()?);
+        }
+
+        consume_token!(self.lexer, Token::End, "function body must start with `end`");
+
+        Ok(TopLevel::FuncDef {
+            name,
+            args: Vec::new(),
+            ret: Type::Name("unit".to_string()),
+            stats,
+        })
+    }
+
+    pub fn parse(mut self) -> Result<Vec<TopLevel>, ParseError> {
+        let mut result = Vec::new();
+        while !self.lexer.eof() {
+            if let (Token::Def, ..) = self.lexer.peek() {
+                result.push(self.parse_def()?)
+            } else {
+                let (_, index, len) = self.lexer.peek();
+                return Err(ParseError {
+                    range: index..index + len,
+                    message: "invalid top level construct".to_owned(),
+                });
+            }
+        }
+
+        Ok(result)
     }
 }
