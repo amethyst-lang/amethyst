@@ -356,6 +356,8 @@ impl Parser {
         match self.lexer.peek() {
             (Token::Let, ..) => self.parse_let(),
             (Token::Loop, ..) => self.parse_loop(),
+            (Token::Break, ..) => Ok(Statement::Break),
+            (Token::Continue, ..) => Ok(Statement::Continue),
             (Token::If, ..) => self.parse_if(),
             _ => {
                 let state = self.lexer.push_state();
