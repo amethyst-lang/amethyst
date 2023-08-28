@@ -125,12 +125,26 @@ impl Parser {
         map.insert("*".to_owned(), Infix(20, Left));
         map.insert("/".to_owned(), Infix(20, Left));
         map.insert("**".to_owned(), Infix(30, Right));
+        map.insert("?".to_owned(), Postfix);
+        map.insert(".*".to_owned(), Postfix);
+        map.insert("~".to_owned(), Prefix);
+        map.insert("!".to_owned(), Prefix);
         map
     }
 
     fn parse_value(&mut self) -> Result<Expr, ParseError> {
+        let mut prefixes = Vec::new();
+        while let (Token::Operator(op), _, _) = self.lexer.peek() {
+            let Some(OpType::Prefix) = self.op_data.get(&op)
+            else {
+                break;
+            };
+            prefixes.push(op);
+            self.lexer.lex();
+        }
+
         let (token, index, len) = self.lexer.lex();
-        match token {
+        let mut value = match token {
             Token::LParen => {
                 let subexpr = self.parse_infix()?;
                 let (Token::RParen, _, _) = self.lexer.lex()
@@ -140,18 +154,40 @@ impl Parser {
                         message: "left parenthesis unterminated".to_string(),
                     });
                 };
-                Ok(subexpr)
+                subexpr
             }
 
-            Token::Symbol(s) => Ok(Expr::Symbol(s)),
+            Token::Symbol(s) => Expr::Symbol(s),
 
-            Token::Integer(i) => Ok(Expr::Integer(i)),
+            Token::Integer(i) => Expr::Integer(i),
 
-            t => Err(ParseError {
+            t => return Err(ParseError {
                 range: index..index + len,
                 message: format!("expected symbol, number, or subexpression; got {:?} instead", t)
             }),
+        };
+
+
+        while let (Token::Operator(op), _, _) = self.lexer.peek() {
+            let Some(OpType::Postfix) = self.op_data.get(&op)
+            else {
+                break;
+            };
+            value = Expr::FuncCall {
+                func: Box::new(Expr::Symbol(op)),
+                args: vec![value],
+            };
+            self.lexer.lex();
         }
+
+        for op in prefixes.into_iter().rev() {
+            value = Expr::FuncCall {
+                func: Box::new(Expr::Symbol(op)),
+                args: vec![value],
+            };
+        }
+
+        Ok(value)
     }
 
     fn parse_infix(&mut self) -> Result<Expr, ParseError> {
