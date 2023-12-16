@@ -12,6 +12,7 @@ pub enum Token {
     RArrow,
     Symbol(String),
     Operator(String),
+    String(String),
     Integer(u64),
     Declfix,
     Def,
@@ -71,6 +72,8 @@ impl Lexer {
             Number,
             Operator,
             SingleChar,
+            String(bool),
+            StringEnd,
         }
 
         let mut len = 0;
@@ -93,6 +96,8 @@ impl Lexer {
                             self.index += c.len_utf8();
                             continue;
                         }
+
+                        '"' => state = State::String(false),
 
                         _ if valid_operator_char(c) => state = State::Operator,
                         _ => state = State::Invalid,
@@ -129,6 +134,24 @@ impl Lexer {
                 }
 
                 State::SingleChar => break,
+
+                State::String(true) => {
+                    if c == 'n' || c == 'r' || c == 't' || c == '\'' || c == '"' {
+                        state = State::String(false);
+                    } else {
+                        state = State::Invalid;
+                    }
+                }
+
+                State::String(false) => {
+                    if c == '"' {
+                        state = State::StringEnd;
+                    } else if c == '\\' {
+                        state = State::String(true);
+                    }
+                }
+
+                State::StringEnd => break,
             }
 
             len += c.len_utf8();
@@ -138,7 +161,7 @@ impl Lexer {
         self.index += len;
         let token = match state {
             State::Start | State::Comment => Token::Eof,
-            State::Invalid => Token::Invalid,
+            State::Invalid | State::String(_) => Token::Invalid,
 
             State::Symbol => {
                 match &self.string[index..index + len] {
@@ -179,6 +202,30 @@ impl Lexer {
                     "]" => Token::RBrack,
                     _ => unreachable!(),
                 }
+            }
+
+            State::StringEnd => {
+                let mut s = String::new();
+                let mut backslash = false;
+                for c in self.string[index + 1..index + len - 1].chars() {
+                    if backslash {
+                        s.push(match c {
+                            'n' => '\n',
+                            'r' => '\r',
+                            't' => '\t',
+                            '"' => '\"',
+                            '\'' => '\'',
+                            _ => unreachable!("already checked"),
+                        });
+                        backslash = false;
+                    } else if c == '\\' {
+                        backslash = true;
+                    } else {
+                        s.push(c);
+                    }
+                }
+
+                Token::String(s)
             }
         };
 

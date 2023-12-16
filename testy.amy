@@ -1,0 +1,20 @@
+type Option[a] as
+    Some(a)
+    None
+end
+
+type List[a] as
+    ::(a, List[a])
+    Nil
+end
+
+type Bool as
+    True
+    False
+end
+
+type Gadt[a] as
+    I(Int) -> Gadt[Int]
+    B(Bool) -> Gadt[Bool]
+end
+

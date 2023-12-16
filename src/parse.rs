@@ -14,6 +14,7 @@ pub enum Type {
 pub enum Expr {
     Integer(u64),
     Symbol(String),
+    String(String),
     FuncCall {
         func: Box<Expr>,
         args: Vec<Expr>,
@@ -186,6 +187,8 @@ impl Parser {
             Token::Symbol(s) => Expr::Symbol(s),
 
             Token::Integer(i) => Expr::Integer(i),
+
+            Token::String(s) => Expr::String(s),
 
             t => return Err(ParseError {
                 range: index..index + len,
