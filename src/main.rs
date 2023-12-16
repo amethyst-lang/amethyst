@@ -1,29 +1,32 @@
+use clap::Parser as ArgParser;
+
 use amethyst::parse::Parser;
 
+#[derive(ArgParser)]
+struct Args {
+    filename: String,
+}
+
 fn main() {
-    let mut parser = Parser::new(
-        "
-        type Option[a] as
-            Some(a)
-            None
-        end
+    let args = Args::parse();
+    let contents = match std::fs::read_to_string(args.filename) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error reading file: {}", e);
+            std::process::exit(1);
+        }
+    };
 
-        type List[a] as
-            ::(a, List[a])
-            Nil
-        end
-
-        type Bool as
-            True
-            False
-        end
-
-        type Gadt[a] as
-            I(Int) -> Gadt[Int]
-            B(Bool) -> Gadt[Bool]
-        end
-        ");
+    let mut parser = Parser::new(&contents);
     parser.op_data = Parser::default_op_data();
     parser.op_data.extend(parser.extract_op_data());
-    println!("{:?}", parser.parse());
+    let ast = match parser.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error parsing: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+
+    println!("{:?}", ast);
 }
