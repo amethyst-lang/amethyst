@@ -30,11 +30,20 @@ pub enum Token {
     As,
     Match,
     To,
+    OrPat,
+    RangePat,
+    WildcardPat,
+}
+
+pub enum LexerContext {
+    Normal,
+    Pattern,
 }
 
 pub struct Lexer {
     string: String,
     index: usize,
+    pub context: LexerContext,
 }
 
 pub struct LexerState(usize);
@@ -48,6 +57,7 @@ impl Lexer {
         Lexer {
             string: string.to_owned(),
             index: 0,
+            context: LexerContext::Normal,
         }
     }
 
@@ -55,6 +65,7 @@ impl Lexer {
         Lexer {
             string: self.string.clone(),
             index: 0,
+            context: LexerContext::Normal,
         }
     }
 
@@ -184,6 +195,7 @@ impl Lexer {
                     "as" => Token::As,
                     "match" => Token::Match,
                     "to" => Token::To,
+                    "_" if matches!(self.context, LexerContext::Pattern) => Token::WildcardPat,
                     s => Token::Symbol(s.to_owned()),
                 }
             }
@@ -196,6 +208,8 @@ impl Lexer {
                     "=" => Token::Equal,
                     ":" => Token::Colon,
                     "->" => Token::RArrow,
+                    "|" if matches!(self.context, LexerContext::Pattern) => Token::OrPat,
+                    ".." if matches!(self.context, LexerContext::Pattern) => Token::RangePat,
                     s => Token::Operator(s.to_owned())
                 }
             }

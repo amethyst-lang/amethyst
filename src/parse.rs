@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}, ops::Range};
 
-use crate::lexer::{Lexer, Token};
+use crate::lexer::{Lexer, Token, LexerContext};
 
 #[derive(Debug)]
 pub enum Type {
@@ -25,7 +25,11 @@ pub enum Expr {
 pub enum Pattern {
     Wildcard,
     Symbol(String),
-    Variant(String, Vec<Pattern>),
+    Variant {
+        name: String,
+        args: Vec<Pattern>,
+        exhaustive: bool,
+    },
     Or(Vec<Pattern>),
 }
 
@@ -364,9 +368,121 @@ impl Parser {
         })
     }
 
+    fn parse_base_pattern(&mut self) -> Result<Pattern, ParseError> {
+        let (token, index, len) = self.lexer.lex();
+        match token {
+            Token::LParen => {
+                let subpat = self.parse_pattern_helper();
+                consume_token!(self.lexer, Token::RParen, "left parenthesis unterminated");
+                subpat
+            }
+
+            Token::Symbol(s) => {
+                if matches!(self.lexer.peek(), (Token::LParen, ..)) {
+                    self.lexer.lex();
+                    let mut args = Vec::new();
+                    let mut exhaustive = true;
+                    while !matches!(self.lexer.peek(), (Token::RParen, ..)) {
+                        if matches!(self.lexer.peek(), (Token::RangePat, ..)) {
+                            exhaustive = false;
+                            break;
+                        }
+
+                        args.push(self.parse_pattern_helper()?);
+                        let (Token::Comma, ..) = self.lexer.peek()
+                        else {
+                            break;
+                        };
+                        self.lexer.lex();
+                    }
+
+                    consume_token!(self.lexer, Token::RParen, "function call's arguments must be followed by a right parenthesis");
+
+                    Ok(Pattern::Variant {
+                        name: s,
+                        args,
+                        exhaustive,
+                    })
+                } else {
+                    Ok(Pattern::Symbol(s))
+                }
+            }
+
+            Token::WildcardPat => Ok(Pattern::Wildcard),
+
+            t => Err(ParseError {
+                range: index..index + len,
+                message: format!("expected symbol, wildcard, variant, or subpattern; got {:?} instead", t)
+            }),
+        }
+    }
+
+    fn parse_pattern_tail(&mut self, mut left: Pattern, min_prec: usize) -> Result<Pattern, ParseError> {
+        while let Some((op, op_prec, _)) = self.is_infix_of_min_prec(min_prec, true) {
+            let mut right = self.parse_base_pattern()?;
+            while let Some((_, prec, _)) = self.is_infix_of_min_prec(op_prec, false) {
+                right = self.parse_pattern_tail(right, op_prec + (prec > op_prec) as usize)?;
+            }
+
+            left = Pattern::Variant {
+                name: op,
+                args: vec![left, right],
+                exhaustive: true,
+            };
+        }
+
+        Ok(left)
+    }
+
+    fn parse_pattern_helper(&mut self) -> Result<Pattern, ParseError> {
+        let left = self.parse_base_pattern()?;
+        let mut pats = vec![self.parse_pattern_tail(left, 0)?];
+
+        while matches!(self.lexer.peek(), (Token::OrPat, ..)) {
+            self.lexer.lex();
+            let left = self.parse_base_pattern()?;
+            pats.push(self.parse_pattern_tail(left, 0)?);
+        }
+
+        if pats.len() == 1 {
+            Ok(pats.remove(0))
+        } else {
+            Ok(Pattern::Or(pats))
+        }
+    }
+
+    fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
+        self.lexer.context = LexerContext::Pattern;
+        let pattern = self.parse_pattern_helper();
+        self.lexer.context = LexerContext::Normal;
+        pattern
+    }
+
     fn parse_match(&mut self) -> Result<Statement, ParseError> {
         consume_token!(self.lexer, Token::Match, "match must start with `match`");
-        todo!()
+        let value = self.parse_expr()?;
+        let mut branches = Vec::new();
+
+        while !matches!(self.lexer.peek(), (Token::End, ..)) {
+            consume_token!(self.lexer, Token::As, "match arm must start with `as`");
+            let pattern = self.parse_pattern()?;
+
+            consume_token!(self.lexer, Token::To, "match pattern must be followed by `to`");
+
+            let mut stats = Vec::new();
+            while !matches!(self.lexer.peek(), (Token::End | Token::As, ..)) {
+                stats.push(self.parse_statement()?);
+            }
+
+            branches.push((pattern, stats));
+        }
+
+        consume_token!(self.lexer, Token::End, "match must end with `end`");
+
+        Ok(Statement::Match {
+            value,
+            branches,
+        })
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
@@ -474,7 +590,7 @@ impl Parser {
             stats.push(self.parse_statement()?);
         }
 
-        consume_token!(self.lexer, Token::End, "function body must start with `end`");
+        consume_token!(self.lexer, Token::End, "function body must end with `end`");
 
         Ok(TopLevel::FuncDef {
             name,
@@ -523,11 +639,13 @@ impl Parser {
 
         let mut variants = Vec::new();
         while !matches!(self.lexer.peek(), (Token::End, ..)) {
+            self.lexer.context = LexerContext::Pattern;
             let (Token::Symbol(name) | Token::Operator(name), ..) = consume_token!(self.lexer, (Token::Symbol(_) | Token::Operator(_)), "type variant must be a symbol or operator")
             else {
                 unreachable!();
             };
 
+            self.lexer.context = LexerContext::Normal;
             let mut fields = Vec::new();
             if let (Token::LParen, ..) = self.lexer.peek() {
                 self.lexer.lex();
