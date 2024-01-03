@@ -1,5 +1,4 @@
 def main() do
-   println("hello! what is your name?")
-   let name = readln("> ")
-   println("hello ", name, "! nice to meet you!")
+   return 0
+   return
 end

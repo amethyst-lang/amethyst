@@ -22,11 +22,14 @@ pub enum Token {
     Loop,
     Break,
     Continue,
+    Return,
     If,
     Then,
     Else,
     Type,
     As,
+    Match,
+    To,
 }
 
 pub struct Lexer {
@@ -173,11 +176,14 @@ impl Lexer {
                     "loop" => Token::Loop,
                     "break" => Token::Break,
                     "continue" => Token::Continue,
+                    "return" => Token::Return,
                     "if" => Token::If,
                     "then" => Token::Then,
                     "else" => Token::Else,
                     "type" => Token::Type,
                     "as" => Token::As,
+                    "match" => Token::Match,
+                    "to" => Token::To,
                     s => Token::Symbol(s.to_owned()),
                 }
             }

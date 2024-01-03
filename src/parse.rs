@@ -53,6 +53,8 @@ pub enum Statement {
     Break,
     Continue,
 
+    Return(Option<Expr>),
+
     If {
         cond: Expr,
         then: Vec<Statement>,
@@ -362,13 +364,32 @@ impl Parser {
         })
     }
 
+    fn parse_match(&mut self) -> Result<Statement, ParseError> {
+        consume_token!(self.lexer, Token::Match, "match must start with `match`");
+        todo!()
+    }
+
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         match self.lexer.peek() {
             (Token::Let, ..) => self.parse_let(),
             (Token::Loop, ..) => self.parse_loop(),
             (Token::Break, ..) => Ok(Statement::Break),
             (Token::Continue, ..) => Ok(Statement::Continue),
+            (Token::Return, ..) => {
+                self.lexer.lex();
+                let state = self.lexer.push_state();
+                match self.parse_expr() {
+                    Ok(v) => Ok(Statement::Return(Some(v))),
+                    Err(_) => {
+                        self.lexer.pop_state(state);
+                        Ok(Statement::Return(None))
+                    }
+                }
+            }
+
             (Token::If, ..) => self.parse_if(),
+            (Token::Match, ..) => self.parse_match(),
+
             _ => {
                 let state = self.lexer.push_state();
                 if matches!(self.lexer.lex(), (Token::Symbol(_), ..)) {
