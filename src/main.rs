@@ -1,6 +1,6 @@
 use clap::Parser as ArgParser;
 
-use amethyst::parse::Parser;
+use amethyst::{parse::Parser, typecheck};
 
 #[derive(ArgParser)]
 struct Args {
@@ -27,6 +27,14 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    match typecheck::typecheck(&ast) {
+        Ok(_) => println!("successfully typechecked!"),
+        Err(e) => {
+            eprintln!("error typechecking: {}", e.message);
+            std::process::exit(1);
+        }
+    }
 
     println!("{:?}", ast);
 }

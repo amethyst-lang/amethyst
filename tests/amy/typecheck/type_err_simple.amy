@@ -1,0 +1,7 @@
+def test() do
+	return 1
+end
+
+def test2() -> Int do
+	return
+end
