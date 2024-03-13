@@ -98,7 +98,6 @@ pub enum Statement {
 pub struct Variant {
     pub name: String,
     pub fields: Vec<Type>,
-    pub result: Type,
 }
 
 #[derive(Debug)]

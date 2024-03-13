@@ -36,6 +36,11 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
         params: Vec::new(),
         variants: Vec::new(),
     });
+    defined_types.insert("String".to_owned(), TypeData {
+        va_params: false,
+        params: Vec::new(),
+        variants: Vec::new(),
+    });
 
     // get all globals (functions and type definitions)
     for top in ast {
@@ -46,6 +51,14 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
                     return Err(TypeError {
                         message: format!("redefinition of {name}"),
                     });
+                };
+
+                let self_type = if generics.is_empty() {
+                    Type::Name(name.clone())
+                } else {
+                    Type::App(
+                        Box::new(Type::Name(name.clone())),
+                        generics.iter().map(|g| Type::Generic(g.clone())).collect())
                 };
 
                 for variant in variants {
@@ -60,7 +73,7 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
                         Box::new(Type::Name("Fn".to_owned())),
                         vec![
                             Type::App(Box::new(Type::Name("Tuple".to_owned())), variant.fields.clone()),
-                            variant.result.clone()]));
+                            self_type.clone()]));
                 }
 
                 let data = TypeData {
@@ -87,6 +100,12 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
         }
     }
 
+    // verify types in globals (type variants are globals so this is sufficient)
+    for (_, t) in globals.iter() {
+        verify_type(t, &defined_types)?;
+    }
+
+    // typecheck statements
     for top in ast {
         let TopLevel::FuncDef { args, ret, stats, .. } = top
         else {
@@ -142,8 +161,63 @@ fn typecheck_expr(
     match expr {
         Expr::Integer(_) => Ok(Type::Name("Int".to_string())),
         Expr::Symbol(_) => todo!(),
-        Expr::String(_) => todo!(),
+        Expr::String(_) => Ok(Type::Name("String".to_string())),
         Expr::FuncCall { func, args } => todo!(),
+    }
+}
+
+fn verify_type(t: &Type, defined_types: &HashMap<String, TypeData>) -> Result<(), TypeError> {
+    fn helper(t: &Type, defined_types: &HashMap<String, TypeData>) -> Result<Option<usize>, TypeError> {
+        match t {
+            Type::Typevar(_) | Type::Generic(_) => Ok(None),
+
+            Type::Name(n) => {
+                let Some(data) = defined_types.get(n)
+                else {
+                    return Err(TypeError {
+                        message: format!("type {} was never defined", t),
+                    });
+                };
+
+                if data.va_params {
+                    Ok(None)
+                } else {
+                    Ok(Some(data.params.len()))
+                }
+            }
+
+            Type::App(f, a) => {
+                for a in a {
+                    if let Some(0) | None = helper(a, defined_types)? { }
+                    else {
+                        return Err(TypeError {
+                            message: format!("type parameter {a} should have 0 expected type parameters"),
+                        });
+                    }
+                }
+
+                let Some(expected_count) = helper(f, defined_types)?
+                else {
+                    return Ok(Some(0))
+                };
+
+                if expected_count != a.len() {
+                    return Err(TypeError {
+                        message: format!("expected {expected_count} type parameters for type {t}, got {}", a.len()),
+                    });
+                }
+
+                Ok(Some(0))
+            }
+        }
+    }
+
+    if let Some(0) | None = helper(t, defined_types)? {
+        Ok(())
+    } else {
+        Err(TypeError {
+            message: format!("type {t} should expect 0 type parameters"),
+        })
     }
 }
 

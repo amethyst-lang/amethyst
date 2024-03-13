@@ -569,50 +569,9 @@ impl Parser {
                 self.lexer.lex();
             }
 
-            let result = if let (Token::RArrow, ..) = self.lexer.peek() {
-                self.lexer.lex();
-                let (_, index, len) = self.lexer.peek();
-                let t = self.parse_type(&generics)?;
-                if let Type::Name(n) = &t {
-                    if *n != name_type || !generics_ordered.is_empty() {
-                        return Err(ParseError {
-                            range: index..index + len,
-                            message: "type of variant is not a subtype of the variant's supertype".to_string(),
-                        });
-                    }
-                } else if let Type::App(t, gs) = &t {
-                    if let Type::Name(n) = &**t {
-                        if *n != name_type || generics_ordered.len() != gs.len() {
-                            return Err(ParseError {
-                                range: index..index + len,
-                                message: "type of variant is not a subtype of the variant's supertype".to_string(),
-                            });
-                        }
-                    } else {
-                        return Err(ParseError {
-                            range: index..index + len,
-                            message: "type of variant is not a subtype of the variant's supertype".to_string(),
-                        });
-                    }
-                } else {
-                    return Err(ParseError {
-                        range: index..index + len,
-                        message: "type of variant is not a subtype of the variant's supertype".to_string(),
-                    });
-                }
-                t
-            } else {
-                if generics_ordered.is_empty() {
-                    Type::Name(name_type.clone())
-                } else {
-                    Type::App(Box::new(Type::Name(name_type.clone())), generics_ordered.iter().map(|v| Type::Generic(v.clone())).collect())
-                }
-            };
-
             variants.push(Variant {
                 name,
                 fields,
-                result,
             });
         }
 
