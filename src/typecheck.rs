@@ -132,9 +132,30 @@ fn typecheck_stat(
     expected_ret: &Type
 ) -> Result<(), TypeError> {
     match stat {
-        Statement::FuncCall { func, args } => todo!(),
-        Statement::Let { name, value } => todo!(),
-        Statement::Set { name, value } => todo!(),
+        Statement::FuncCall { func, args } => {
+            let mut a = Vec::new();
+            for arg in args {
+                a.push(typecheck_expr(globals, scopes, arg)?);
+            }
+
+            let f = lookup(globals, scopes, func)?;
+            unify(valid_call(f, &a)?, &Type::Name("Unit".to_string()))?;
+            Ok(())
+        }
+
+        Statement::Let { name, value } => {
+            let ty = typecheck_expr(globals, scopes, value)?;
+            scopes.last_mut().unwrap().insert(name.clone(), ty);
+            Ok(())
+        }
+
+        Statement::Set { name, value } => {
+            let ty = typecheck_expr(globals, scopes, value)?;
+            unify(lookup_local(scopes, name)?, &ty)?;
+            Ok(())
+        }
+
+        #[allow(unused)]
         Statement::Loop { body } => todo!(),
         Statement::Break => todo!(),
         Statement::Continue => todo!(),
@@ -148,7 +169,10 @@ fn typecheck_stat(
             Ok(())
         }
 
+        #[allow(unused)]
         Statement::If { cond, then, elsy } => todo!(),
+
+        #[allow(unused)]
         Statement::Match { value, branches } => todo!(),
     }
 }
@@ -161,7 +185,7 @@ fn typecheck_expr(
     match expr {
         Expr::Integer(_) => Ok(Type::Name("Int".to_string())),
         Expr::String(_) => Ok(Type::Name("String".to_string())),
-        Expr::Symbol(s) => lookup(globals, scopes, s),
+        Expr::Symbol(s) => lookup(globals, scopes, s).cloned(),
 
         Expr::FuncCall { func, args } => {
             let f = typecheck_expr(globals, scopes, &func)?;
@@ -175,19 +199,34 @@ fn typecheck_expr(
     }
 }
 
-fn lookup(
-    globals: &HashMap<String, Type>,
-    scopes: &Vec<HashMap<String, Type>>,
+fn lookup_local<'a>(
+    scopes: &'a Vec<HashMap<String, Type>>,
     ident: &str,
-) -> Result<Type, TypeError> {
+) -> Result<&'a Type, TypeError> {
     for scope in scopes.iter().rev() {
         if let Some(t) = scope.get(ident) {
-            return Ok(t.clone());
+            return Ok(t);
+        }
+    }
+
+    Err(TypeError {
+        message: format!("identifier {ident} was never defined locally"),
+    })
+}
+
+fn lookup<'a>(
+    globals: &'a HashMap<String, Type>,
+    scopes: &'a Vec<HashMap<String, Type>>,
+    ident: &str,
+) -> Result<&'a Type, TypeError> {
+    for scope in scopes.iter().rev() {
+        if let Some(t) = scope.get(ident) {
+            return Ok(t);
         }
     }
 
     if let Some(t) = globals.get(ident) {
-        Ok(t.clone())
+        Ok(t)
     } else {
         Err(TypeError {
             message: format!("identifier {ident} was never defined"),

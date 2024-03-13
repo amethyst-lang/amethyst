@@ -1,0 +1,5 @@
+def test() do
+	let x = 2
+	x = 3
+	x = test()
+end

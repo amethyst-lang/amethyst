@@ -1,0 +1,3 @@
+def v(x: Int) -> Int do
+	return v(x, x)
+end
