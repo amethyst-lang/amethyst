@@ -160,9 +160,38 @@ fn typecheck_expr(
 ) -> Result<Type, TypeError> {
     match expr {
         Expr::Integer(_) => Ok(Type::Name("Int".to_string())),
-        Expr::Symbol(_) => todo!(),
         Expr::String(_) => Ok(Type::Name("String".to_string())),
-        Expr::FuncCall { func, args } => todo!(),
+        Expr::Symbol(s) => lookup(globals, scopes, s),
+
+        Expr::FuncCall { func, args } => {
+            let f = typecheck_expr(globals, scopes, &func)?;
+            let mut a = Vec::new();
+            for a_orig in args {
+                a.push(typecheck_expr(globals, scopes, a_orig)?)
+            }
+
+            valid_call(&f, &a).cloned()
+        }
+    }
+}
+
+fn lookup(
+    globals: &HashMap<String, Type>,
+    scopes: &Vec<HashMap<String, Type>>,
+    ident: &str,
+) -> Result<Type, TypeError> {
+    for scope in scopes.iter().rev() {
+        if let Some(t) = scope.get(ident) {
+            return Ok(t.clone());
+        }
+    }
+
+    if let Some(t) = globals.get(ident) {
+        Ok(t.clone())
+    } else {
+        Err(TypeError {
+            message: format!("identifier {ident} was never defined"),
+        })
     }
 }
 
@@ -217,6 +246,38 @@ fn verify_type(t: &Type, defined_types: &HashMap<String, TypeData>) -> Result<()
     } else {
         Err(TypeError {
             message: format!("type {t} should expect 0 type parameters"),
+        })
+    }
+}
+
+fn valid_call<'a>(f: &'a Type, args: &[Type]) -> Result<&'a Type, TypeError> {
+    match f {
+        Type::App(fa, v) => {
+            let Type::Name(n) = &**fa
+            else {
+                return Err(TypeError {
+                    message: format!("type {f} is not callable"),
+                });
+            };
+
+            if n != "Fn" {
+                return Err(TypeError {
+                    message: format!("type {f} is not callable"),
+                });
+            }
+
+            if v.len() != 2 {
+                return Err(TypeError {
+                    message: format!("type {f} is not a valid function type"),
+                })
+            }
+
+            unify(&v[0], &Type::App(Box::new(Type::Name("Tuple".to_owned())), args.to_owned()))?;
+            Ok(&v[1])
+        }
+
+        _ => Err(TypeError {
+            message: format!("type {f} is not callable"),
         })
     }
 }

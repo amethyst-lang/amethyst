@@ -1,0 +1,7 @@
+def +(x: Int, y: Int) -> Int do
+	return 0
+end
+
+def double(x: Int) -> Int do
+	return x + x
+end
