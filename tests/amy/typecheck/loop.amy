@@ -1,0 +1,6 @@
+def main() do
+	loop
+		break
+		continue
+	end
+end

@@ -398,8 +398,17 @@ impl Parser {
         match self.lexer.peek() {
             (Token::Let, ..) => self.parse_let(),
             (Token::Loop, ..) => self.parse_loop(),
-            (Token::Break, ..) => Ok(Statement::Break),
-            (Token::Continue, ..) => Ok(Statement::Continue),
+
+            (Token::Break, ..) => {
+                self.lexer.lex();
+                Ok(Statement::Break)
+            }
+
+            (Token::Continue, ..) => {
+                self.lexer.lex();
+                Ok(Statement::Continue)
+            }
+
             (Token::Return, ..) => {
                 self.lexer.lex();
                 let state = self.lexer.push_state();

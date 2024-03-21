@@ -123,7 +123,7 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
         }
 
         for stat in stats {
-            typecheck_stat(&mut type_vars, &defined_types, &globals, &mut scopes, stat, &ret)?;
+            typecheck_stat(&mut type_vars, &defined_types, &globals, &mut scopes, stat, &ret, false)?;
         }
 
         for i in 0..type_vars.len() {
@@ -144,7 +144,8 @@ fn typecheck_stat(
     globals: &HashMap<String, Type>,
     scopes: &mut Vec<HashMap<String, Type>>,
     stat: &Statement,
-    expected_ret: &Type
+    expected_ret: &Type,
+    in_loop: bool,
 ) -> Result<(), TypeError> {
     match stat {
         Statement::FuncCall { func, args } => {
@@ -172,10 +173,25 @@ fn typecheck_stat(
             Ok(())
         }
 
-        #[allow(unused)]
-        Statement::Loop { body } => todo!(),
-        Statement::Break => todo!(),
-        Statement::Continue => todo!(),
+        Statement::Loop { body } => {
+            scopes.push(HashMap::new());
+            for stat in body {
+                typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, true)?;
+            }
+
+            scopes.pop();
+            Ok(())
+        }
+
+        Statement::Break | Statement::Continue => {
+            if in_loop {
+                Ok(())
+            } else {
+                Err(TypeError {
+                    message: "tried to use loop control flow outside of a loop".to_string(),
+                })
+            }
+        }
 
         Statement::Return(v) => {
             let ty = match v {
@@ -206,9 +222,17 @@ fn typecheck_stat(
                         });
                     }
 
-                    for stat in then.iter().chain(elsy.iter()) {
-                        typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret)?;
+                    scopes.push(HashMap::new());
+                    for stat in then.iter() {
+                        typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, in_loop)?;
                     }
+                    scopes.pop();
+
+                    scopes.push(HashMap::new());
+                    for stat in elsy.iter() {
+                        typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, in_loop)?;
+                    }
+                    scopes.pop();
 
                     Ok(())
                 }
