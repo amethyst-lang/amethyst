@@ -1,0 +1,18 @@
+def id[a](x: a) -> a do
+	return x
+end
+
+type X as X end
+
+type Option[a] as
+	Some(a)
+	None
+end
+
+def main() do
+	let _ = id(2)
+	let _ = id(X)
+	let _ = id(Some(2))
+	let x = id(None)
+	x = Some(X)
+end

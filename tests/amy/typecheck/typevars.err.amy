@@ -1,0 +1,8 @@
+type Option[a] as
+	Some(a)
+	None
+end
+
+def main() do
+	let x = None
+end

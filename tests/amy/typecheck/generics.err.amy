@@ -1,0 +1,11 @@
+type Option[a] as
+	Some(a)
+	None
+end
+
+type X as X end
+
+def main() do
+	let x = Some(2)
+	x = Some(X)
+end

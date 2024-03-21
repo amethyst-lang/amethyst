@@ -16,6 +16,7 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
     // set up scopes
     let mut globals = HashMap::new();
     let mut defined_types = HashMap::new();
+    let mut type_vars = Vec::new();
     defined_types.insert("Fn".to_owned(), TypeData {
         va_params: false,
         params: vec!["A".to_owned(), "R".to_owned()],
@@ -111,7 +112,7 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
 
     // typecheck statements
     for top in ast {
-        let TopLevel::FuncDef { args, ret, stats, .. } = top
+        let TopLevel::FuncDef { name, args, ret, stats } = top
         else {
             continue;
         };
@@ -122,7 +123,15 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
         }
 
         for stat in stats {
-            typecheck_stat(&defined_types, &globals, &mut scopes, stat, &ret)?;
+            typecheck_stat(&mut type_vars, &defined_types, &globals, &mut scopes, stat, &ret)?;
+        }
+
+        for i in 0..type_vars.len() {
+            if is_typevar_unset(&type_vars, i) {
+                return Err(TypeError {
+                    message: format!("type variable {i} remains unset after type checking {name}"),
+                });
+            }
         }
     }
 
@@ -130,6 +139,7 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
 }
 
 fn typecheck_stat(
+    type_vars: &mut Vec<Type>,
     defined_types: &HashMap<String, TypeData>,
     globals: &HashMap<String, Type>,
     scopes: &mut Vec<HashMap<String, Type>>,
@@ -140,23 +150,25 @@ fn typecheck_stat(
         Statement::FuncCall { func, args } => {
             let mut a = Vec::new();
             for arg in args {
-                a.push(typecheck_expr(globals, scopes, arg)?);
+                a.push(typecheck_expr(type_vars, globals, scopes, arg)?);
             }
 
-            let f = lookup(globals, scopes, func)?;
-            unify(valid_call(f, &a)?, &Type::Name("Unit".to_string()))?;
+            let f = lookup(type_vars, globals, scopes, func)?;
+            let ret = valid_call(type_vars, &f, &a)?;
+            unify(type_vars, ret, &Type::Name("Unit".to_string()))?;
             Ok(())
         }
 
         Statement::Let { name, value } => {
-            let ty = typecheck_expr(globals, scopes, value)?;
+            let ty = typecheck_expr(type_vars, globals, scopes, value)?;
             scopes.last_mut().unwrap().insert(name.clone(), ty);
             Ok(())
         }
 
         Statement::Set { name, value } => {
-            let ty = typecheck_expr(globals, scopes, value)?;
-            unify(lookup_local(scopes, name)?, &ty)?;
+            let ty = typecheck_expr(type_vars, globals, scopes, value)?;
+            let local = &lookup_local(type_vars, scopes, name)?;
+            unify(type_vars, local, &ty)?;
             Ok(())
         }
 
@@ -167,15 +179,15 @@ fn typecheck_stat(
 
         Statement::Return(v) => {
             let ty = match v {
-                Some(v) => typecheck_expr(globals, scopes, &v)?,
+                Some(v) => typecheck_expr(type_vars, globals, scopes, &v)?,
                 None => Type::Name("Unit".to_owned()),
             };
-            unify(&ty, expected_ret)?;
+            unify(type_vars, &ty, expected_ret)?;
             Ok(())
         }
 
         Statement::If { cond, then, elsy } => {
-            let ty = typecheck_expr(globals, scopes, cond)?;
+            let ty = typecheck_expr(type_vars, globals, scopes, cond)?;
             match ty.func_of_app() {
                 Type::Name(n) => {
                     let Some(data) = defined_types.get(n)
@@ -195,7 +207,7 @@ fn typecheck_stat(
                     }
 
                     for stat in then.iter().chain(elsy.iter()) {
-                        typecheck_stat(defined_types, globals, scopes, stat, expected_ret)?;
+                        typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret)?;
                     }
 
                     Ok(())
@@ -213,6 +225,7 @@ fn typecheck_stat(
 }
 
 fn typecheck_expr(
+    type_vars: &mut Vec<Type>,
     globals: &HashMap<String, Type>,
     scopes: &mut Vec<HashMap<String, Type>>,
     expr: &Expr,
@@ -220,27 +233,43 @@ fn typecheck_expr(
     match expr {
         Expr::Integer(_) => Ok(Type::Name("Int".to_string())),
         Expr::String(_) => Ok(Type::Name("String".to_string())),
-        Expr::Symbol(s) => lookup(globals, scopes, s).cloned(),
+        Expr::Symbol(s) => lookup(type_vars, globals, scopes, s),
 
         Expr::FuncCall { func, args } => {
-            let f = typecheck_expr(globals, scopes, &func)?;
+            let f = typecheck_expr(type_vars, globals, scopes, &func)?;
             let mut a = Vec::new();
             for a_orig in args {
-                a.push(typecheck_expr(globals, scopes, a_orig)?)
+                a.push(typecheck_expr(type_vars, globals, scopes, a_orig)?)
             }
 
-            valid_call(&f, &a).cloned()
+            valid_call(type_vars, &f, &a).cloned()
         }
     }
 }
 
+#[allow(unused)]
+fn lookup_global<'a>(
+    type_vars: &mut Vec<Type>,
+    globals: &'a HashMap<String, Type>,
+    ident: &str,
+) -> Result<Type, TypeError> {
+    if let Some(t) = globals.get(ident) {
+        Ok(instantiate_generics(type_vars, t))
+    } else {
+        Err(TypeError {
+            message: format!("global {ident} does not exist"),
+        })
+    }
+}
+
 fn lookup_local<'a>(
+    type_vars: &mut Vec<Type>,
     scopes: &'a Vec<HashMap<String, Type>>,
     ident: &str,
-) -> Result<&'a Type, TypeError> {
+) -> Result<Type, TypeError> {
     for scope in scopes.iter().rev() {
         if let Some(t) = scope.get(ident) {
-            return Ok(t);
+            return Ok(instantiate_generics(type_vars, t));
         }
     }
 
@@ -250,23 +279,63 @@ fn lookup_local<'a>(
 }
 
 fn lookup<'a>(
+    type_vars: &mut Vec<Type>,
     globals: &'a HashMap<String, Type>,
     scopes: &'a Vec<HashMap<String, Type>>,
     ident: &str,
-) -> Result<&'a Type, TypeError> {
+) -> Result<Type, TypeError> {
     for scope in scopes.iter().rev() {
         if let Some(t) = scope.get(ident) {
-            return Ok(t);
+            return Ok(instantiate_generics(type_vars, t));
         }
     }
 
     if let Some(t) = globals.get(ident) {
-        Ok(t)
+        Ok(instantiate_generics(type_vars, t))
     } else {
         Err(TypeError {
             message: format!("identifier {ident} was never defined"),
         })
     }
+}
+
+fn create_typevar(type_vars: &mut Vec<Type>) -> Type {
+    let v = type_vars.len();
+    type_vars.push(Type::Typevar(v));
+    Type::Typevar(v)
+}
+
+fn instantiate_generics(
+    type_vars: &mut Vec<Type>,
+    t: &Type,
+) -> Type {
+    fn helper(
+        generics: &mut HashMap<String, Type>,
+        type_vars: &mut Vec<Type>,
+        t: &Type,
+    ) ->  Type {
+        match t {
+            Type::Generic(g) => {
+                match generics.entry(g.clone()) {
+                    Entry::Occupied(v) => v.get().clone(),
+                    Entry::Vacant(v) => {
+                        let t = create_typevar(type_vars);
+                        v.insert(t.clone());
+                        t
+                    }
+                }
+            }
+
+            Type::App(f, a) => Type::App(
+                Box::new(helper(generics, type_vars, f)),
+                a.iter().map(|t| helper(generics, type_vars, t)).collect()
+            ),
+
+            _ => t.clone(),
+        }
+    }
+
+    helper(&mut HashMap::new(), type_vars, t)
 }
 
 fn verify_type(t: &Type, defined_types: &HashMap<String, TypeData>) -> Result<(), TypeError> {
@@ -324,7 +393,11 @@ fn verify_type(t: &Type, defined_types: &HashMap<String, TypeData>) -> Result<()
     }
 }
 
-fn valid_call<'a>(f: &'a Type, args: &[Type]) -> Result<&'a Type, TypeError> {
+fn valid_call<'a>(
+    type_vars: &mut Vec<Type>,
+    f: &'a Type,
+    args: &[Type],
+) -> Result<&'a Type, TypeError> {
     match f {
         Type::App(fa, v) => {
             let Type::Name(n) = &**fa
@@ -346,7 +419,7 @@ fn valid_call<'a>(f: &'a Type, args: &[Type]) -> Result<&'a Type, TypeError> {
                 })
             }
 
-            unify(&v[0], &Type::App(Box::new(Type::Name("Tuple".to_owned())), args.to_owned()))?;
+            unify(type_vars, &v[0], &Type::App(Box::new(Type::Name("Tuple".to_owned())), args.to_owned()))?;
             Ok(&v[1])
         }
 
@@ -356,14 +429,63 @@ fn valid_call<'a>(f: &'a Type, args: &[Type]) -> Result<&'a Type, TypeError> {
     }
 }
 
+fn get_typevar_index(
+    type_vars: &Vec<Type>,
+    mut i: usize,
+) -> usize {
+    loop {
+        let new_t = &type_vars[i];
+        match new_t {
+            &Type::Typevar(j) if i == j => return i,
+            &Type::Typevar(j) => i = j,
+            _ => return i,
+        }
+    }
+}
+
+fn is_typevar_unset(
+    type_vars: &Vec<Type>,
+    v: usize,
+) -> bool {
+    matches!(type_vars[v], Type::Typevar(i) if i == v)
+}
+
 fn unify(
+    type_vars: &mut Vec<Type>,
     t1: &Type,
     t2: &Type,
 ) -> Result<Type, TypeError> {
     match (t1, t2) {
+        (&Type::Typevar(v1), &Type::Typevar(v2)) => {
+            let v1 = get_typevar_index(type_vars, v1);
+            let v2 = get_typevar_index(type_vars, v2);
+
+            if is_typevar_unset(type_vars, v1) {
+                type_vars[v1] = type_vars[v2].clone();
+                Ok(type_vars[v2].clone())
+            } else if is_typevar_unset(type_vars, v2) {
+                type_vars[v2] = type_vars[v1].clone();
+                Ok(type_vars[v1].clone())
+            } else {
+                unify(type_vars, &type_vars[v1].clone(), &type_vars[v2].clone())
+            }
+        }
+
+        (&Type::Typevar(v), t) | (t, &Type::Typevar(v)) => {
+            let v = get_typevar_index(type_vars, v);
+            if is_typevar_unset(type_vars, v) {
+                type_vars[v] = t.clone();
+                Ok(t.clone())
+            } else {
+                let t = unify(type_vars, &type_vars[v].clone(), t)?;
+                type_vars[v] = t.clone();
+                Ok(t)
+            }
+        }
+
         (Type::Name(n1), Type::Name(n2)) if n1 == n2 => Ok(t1.clone()),
         (Type::App(f1, a1), Type::App(f2, a2)) => {
-            let f = unify(f1, f2)?;
+            let f = unify(type_vars, f1, f2)?;
 
             if a1.len() != a2.len() {
                 return Err(TypeError {
@@ -373,7 +495,7 @@ fn unify(
 
             let mut a = Vec::new();
             for (a1, a2) in a1.iter().zip(a2) {
-                a.push(unify(a1, a2)?);
+                a.push(unify(type_vars, a1, a2)?);
             }
 
             Ok(Type::App(Box::new(f), a))
