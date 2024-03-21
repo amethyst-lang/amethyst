@@ -1,0 +1,10 @@
+type NotIfCompat as
+	A
+	B
+	C
+end
+
+def main() do
+	if A then
+	end
+end

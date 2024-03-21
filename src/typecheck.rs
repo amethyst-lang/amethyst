@@ -69,11 +69,15 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
                         });
                     };
 
-                    v.insert(Type::App(
-                        Box::new(Type::Name("Fn".to_owned())),
-                        vec![
-                            Type::App(Box::new(Type::Name("Tuple".to_owned())), variant.fields.clone()),
-                            self_type.clone()]));
+                    if variant.fields.is_empty() {
+                        v.insert(self_type.clone());
+                    } else {
+                        v.insert(Type::App(
+                            Box::new(Type::Name("Fn".to_owned())),
+                            vec![
+                                Type::App(Box::new(Type::Name("Tuple".to_owned())), variant.fields.clone()),
+                                self_type.clone()]));
+                    }
                 }
 
                 let data = TypeData {
@@ -118,7 +122,7 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
         }
 
         for stat in stats {
-            typecheck_stat(&globals, &mut scopes, stat, &ret)?;
+            typecheck_stat(&defined_types, &globals, &mut scopes, stat, &ret)?;
         }
     }
 
@@ -126,6 +130,7 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
 }
 
 fn typecheck_stat(
+    defined_types: &HashMap<String, TypeData>,
     globals: &HashMap<String, Type>,
     scopes: &mut Vec<HashMap<String, Type>>,
     stat: &Statement,
@@ -169,8 +174,38 @@ fn typecheck_stat(
             Ok(())
         }
 
-        #[allow(unused)]
-        Statement::If { cond, then, elsy } => todo!(),
+        Statement::If { cond, then, elsy } => {
+            let ty = typecheck_expr(globals, scopes, cond)?;
+            match ty.func_of_app() {
+                Type::Name(n) => {
+                    let Some(data) = defined_types.get(n)
+                    else {
+                        return Err(TypeError {
+                            message: format!("type {n} was not exist"),
+                        });
+                    };
+
+                    if data.variants.len() != 2
+                        || !data.variants[0].fields.is_empty()
+                        || !data.variants[1].fields.is_empty()
+                    {
+                        return Err(TypeError {
+                            message: format!("type {n} is incompatible with if"),
+                        });
+                    }
+
+                    for stat in then.iter().chain(elsy.iter()) {
+                        typecheck_stat(defined_types, globals, scopes, stat, expected_ret)?;
+                    }
+
+                    Ok(())
+                }
+
+                _ => Err(TypeError {
+                    message: format!("cannot use if on type {ty}"),
+                })
+            }
+        }
 
         #[allow(unused)]
         Statement::Match { value, branches } => todo!(),
@@ -243,7 +278,7 @@ fn verify_type(t: &Type, defined_types: &HashMap<String, TypeData>) -> Result<()
                 let Some(data) = defined_types.get(n)
                 else {
                     return Err(TypeError {
-                        message: format!("type {} was never defined", t),
+                        message: format!("type {t} was never defined"),
                     });
                 };
 

@@ -1,0 +1,13 @@
+type Bool as
+	True
+	False
+end
+
+def main() do
+	if True then
+	else
+	end
+
+	if False then
+	end
+end
