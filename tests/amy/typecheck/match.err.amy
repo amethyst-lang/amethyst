@@ -1,0 +1,17 @@
+type Option[a] as
+	Some(a)
+	None
+end
+
+type Thing as
+	X(Int, Int)
+	Y(Int)
+	Z
+end
+
+def thing_matching(z: Thing) -> Int do
+	match z
+	as X(x, _) | Y(x) | Some(x) to return x
+	as Z() to return 0
+	end
+end

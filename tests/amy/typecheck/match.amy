@@ -1,0 +1,26 @@
+type Option[a] as
+	Some(a)
+	None
+end
+
+def default[a](x: Option[a], default: a) do
+	match x
+	as Some(x) to
+		return x
+	as None() to
+		return default
+	end
+end
+
+type Thing as
+	X(Int, Int)
+	Y(Int)
+	Z
+end
+
+def thing_matching(z: Thing) -> Int do
+	match z
+	as X(x, _) | Y(x) to return x
+	as Z() to return 0
+	end
+end

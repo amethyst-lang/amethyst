@@ -2,10 +2,16 @@ use std::collections::{HashMap, hash_map::Entry};
 
 use crate::ast::*;
 
+#[derive(Debug)]
 struct TypeData {
     va_params: bool,
     params: Vec<String>,
     variants: Vec<Variant>,
+}
+
+struct GlobalData {
+    type_: Type,
+    variant_of: Option<String>,
 }
 
 pub struct TypeError {
@@ -71,13 +77,19 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
                     };
 
                     if variant.fields.is_empty() {
-                        v.insert(self_type.clone());
+                        v.insert(GlobalData {
+                            type_: self_type.clone(),
+                            variant_of: Some(name.clone()),
+                        });
                     } else {
-                        v.insert(Type::App(
+                        v.insert(GlobalData {
+                            type_: Type::App(
                             Box::new(Type::Name("Fn".to_owned())),
                             vec![
                                 Type::App(Box::new(Type::Name("Tuple".to_owned())), variant.fields.clone()),
-                                self_type.clone()]));
+                                self_type.clone()]),
+                            variant_of: Some(name.clone()),
+                        });
                     }
                 }
 
@@ -98,16 +110,19 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
                 };
 
                 let fn_args: Vec<_> = args.iter().map(|(_, t)| t.clone()).collect();
-                v.insert(Type::App(
+                v.insert(GlobalData {
+                    type_: Type::App(
                     Box::new(Type::Name("Fn".to_owned())),
-                    vec![Type::App(Box::new(Type::Name("Tuple".to_owned())), fn_args), ret.clone()]));
+                    vec![Type::App(Box::new(Type::Name("Tuple".to_owned())), fn_args), ret.clone()]),
+                    variant_of: None,
+                });
             }
         }
     }
 
     // verify types in globals (type variants are globals so this is sufficient)
-    for (_, t) in globals.iter() {
-        verify_type(t, &defined_types)?;
+    for (_, data) in globals.iter() {
+        verify_type(&data.type_, &defined_types)?;
     }
 
     // typecheck statements
@@ -141,7 +156,7 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
 fn typecheck_stat(
     type_vars: &mut Vec<Type>,
     defined_types: &HashMap<String, TypeData>,
-    globals: &HashMap<String, Type>,
+    globals: &HashMap<String, GlobalData>,
     scopes: &mut Vec<HashMap<String, Type>>,
     stat: &Statement,
     expected_ret: &Type,
@@ -243,14 +258,137 @@ fn typecheck_stat(
             }
         }
 
-        #[allow(unused)]
-        Statement::Match { value, branches } => todo!(),
+        Statement::Match { value, branches } => {
+            let t = typecheck_expr(type_vars, globals, scopes, value)?;
+
+            for (pat, stats) in branches {
+                let mut map = HashMap::new();
+                let tp = typecheck_pat(type_vars, globals, defined_types, &mut map, pat)?;
+                unify(type_vars, &t, &tp)?;
+                scopes.push(map);
+
+                for stat in stats {
+                    typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, in_loop)?;
+                }
+
+                scopes.pop();
+            }
+
+            Ok(())
+        }
+    }
+}
+
+fn typecheck_pat(
+    type_vars: &mut Vec<Type>,
+    globals: &HashMap<String, GlobalData>,
+    defined_types: &HashMap<String, TypeData>,
+    map: &mut HashMap<String, Type>,
+    pat: &Pattern
+) -> Result<Type, TypeError> {
+    match pat {
+        Pattern::Wildcard => Ok(create_typevar(type_vars)),
+
+        Pattern::Symbol(x) => {
+            let t = create_typevar(type_vars);
+            map.insert(x.clone(), t.clone());
+            Ok(t)
+        }
+
+        Pattern::Variant { name, args, exhaustive } => {
+            let Some(type_name) = globals.get(name)
+                .and_then(|v| v.variant_of.as_ref())
+            else {
+                return Err(TypeError {
+                    message: format!("{name} is not a variant of a type"),
+                });
+            };
+
+            let Some(type_data) = defined_types.get(type_name)
+            else {
+                unreachable!();
+            };
+
+            let t = if type_data.params.is_empty() {
+                Type::Name(type_name.clone())
+            } else {
+                Type::App(
+                    Box::new(Type::Name(type_name.clone())),
+                    type_data.params.iter().map(|g| Type::Generic(g.clone())).collect(),
+                )
+            };
+
+            let mut generics_map = HashMap::new();
+            let t = instantiate_generics_with_map(&mut generics_map, type_vars, &t);
+
+            let Some(variant) = type_data.variants.iter().find(|v| v.name == *name)
+            else {
+                unreachable!();
+            };
+
+            let exhaustive = *exhaustive;
+            if exhaustive && variant.fields.len() != args.len() {
+                return Err(TypeError {
+                    message: format!("variant {name} from {type_name} is given the incorrect arguments in a pattern"),
+                });
+            }
+
+            if !exhaustive && variant.fields.len() < args.len() {
+                return Err(TypeError {
+                    message: format!("variant {name} from {type_name} is given too many arguments in a pattern"),
+                });
+            }
+
+            for (p, t) in args.iter().zip(variant.fields.iter()) {
+                let t = instantiate_generics_with_map(&mut generics_map.clone(), type_vars, &t);
+                let t_pat = typecheck_pat(type_vars, globals, defined_types, map, p)?;
+                unify(type_vars, &t, &t_pat)?;
+            }
+
+            Ok(t)
+        }
+
+        Pattern::Or(pats) => {
+            let mut t = create_typevar(type_vars);
+            let mut first = true;
+            let mut temp_map = HashMap::new();
+
+            for pat in pats {
+                let mut m = HashMap::new();
+                let tp = typecheck_pat(type_vars, globals, defined_types, &mut m, pat)?;
+                t = unify(type_vars, &t, &tp)?;
+
+                if first {
+                    temp_map = m;
+                    first = false;
+                } else {
+                    if temp_map.len() != m.len() {
+                        return Err(TypeError {
+                            message: format!("environments from patterns in or pattern are different")
+                        });
+                    }
+
+                    for (x, t) in m {
+                        if let Some(t2) = temp_map.get(&x) {
+                            unify(type_vars, &t, t2)?;
+                        } else {
+                            return Err(TypeError {
+                                message: format!("variable {x} found in one pattern but not in another in or pattern"),
+                            });
+                        }
+                    }
+                }
+            }
+
+            map.extend(temp_map);
+            Ok(t)
+        }
     }
 }
 
 fn typecheck_expr(
     type_vars: &mut Vec<Type>,
-    globals: &HashMap<String, Type>,
+    globals: &HashMap<String, GlobalData>,
     scopes: &mut Vec<HashMap<String, Type>>,
     expr: &Expr,
 ) -> Result<Type, TypeError> {
@@ -274,11 +412,11 @@ fn typecheck_expr(
 #[allow(unused)]
 fn lookup_global<'a>(
     type_vars: &mut Vec<Type>,
-    globals: &'a HashMap<String, Type>,
+    globals: &'a HashMap<String, GlobalData>,
     ident: &str,
 ) -> Result<Type, TypeError> {
-    if let Some(t) = globals.get(ident) {
-        Ok(instantiate_generics(type_vars, t))
+    if let Some(data) = globals.get(ident) {
+        Ok(instantiate_generics(type_vars, &data.type_))
     } else {
         Err(TypeError {
             message: format!("global {ident} does not exist"),
@@ -304,7 +442,7 @@ fn lookup_local<'a>(
 
 fn lookup<'a>(
     type_vars: &mut Vec<Type>,
-    globals: &'a HashMap<String, Type>,
+    globals: &'a HashMap<String, GlobalData>,
     scopes: &'a Vec<HashMap<String, Type>>,
     ident: &str,
 ) -> Result<Type, TypeError> {
@@ -314,8 +452,8 @@ fn lookup<'a>(
         }
     }
 
-    if let Some(t) = globals.get(ident) {
-        Ok(instantiate_generics(type_vars, t))
+    if let Some(data) = globals.get(ident) {
+        Ok(instantiate_generics(type_vars, &data.type_))
     } else {
         Err(TypeError {
             message: format!("identifier {ident} was never defined"),
@@ -329,37 +467,37 @@ fn create_typevar(type_vars: &mut Vec<Type>) -> Type {
     Type::Typevar(v)
 }
 
+fn instantiate_generics_with_map(
+    generics: &mut HashMap<String, Type>,
+    type_vars: &mut Vec<Type>,
+    t: &Type,
+) -> Type {
+    match t {
+        Type::Generic(g) => {
+            match generics.entry(g.clone()) {
+                Entry::Occupied(v) => v.get().clone(),
+                Entry::Vacant(v) => {
+                    let t = create_typevar(type_vars);
+                    v.insert(t.clone());
+                    t
+                }
+            }
+        }
+
+        Type::App(f, a) => Type::App(
+            Box::new(instantiate_generics_with_map(generics, type_vars, f)),
+            a.iter().map(|t| instantiate_generics_with_map(generics, type_vars, t)).collect()
+        ),
+
+        _ => t.clone(),
+    }
+}
+
 fn instantiate_generics(
     type_vars: &mut Vec<Type>,
     t: &Type,
 ) -> Type {
-    fn helper(
-        generics: &mut HashMap<String, Type>,
-        type_vars: &mut Vec<Type>,
-        t: &Type,
-    ) ->  Type {
-        match t {
-            Type::Generic(g) => {
-                match generics.entry(g.clone()) {
-                    Entry::Occupied(v) => v.get().clone(),
-                    Entry::Vacant(v) => {
-                        let t = create_typevar(type_vars);
-                        v.insert(t.clone());
-                        t
-                    }
-                }
-            }
-
-            Type::App(f, a) => Type::App(
-                Box::new(helper(generics, type_vars, f)),
-                a.iter().map(|t| helper(generics, type_vars, t)).collect()
-            ),
-
-            _ => t.clone(),
-        }
-    }
-
-    helper(&mut HashMap::new(), type_vars, t)
+    instantiate_generics_with_map(&mut HashMap::new(), type_vars, t)
 }
 
 fn verify_type(t: &Type, defined_types: &HashMap<String, TypeData>) -> Result<(), TypeError> {
