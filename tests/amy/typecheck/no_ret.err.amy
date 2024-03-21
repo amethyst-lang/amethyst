@@ -1,0 +1,7 @@
+type Bool as True False end
+
+def rets_int() -> Int do
+	if False then
+		return 0
+	end
+end

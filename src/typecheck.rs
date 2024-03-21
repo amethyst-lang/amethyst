@@ -137,8 +137,17 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
             scopes[0].insert(name.clone(), ty.clone());
         }
 
+        let mut has_ret = false;
         for stat in stats {
-            typecheck_stat(&mut type_vars, &defined_types, &globals, &mut scopes, stat, &ret, false)?;
+            has_ret |= typecheck_stat(&mut type_vars, &defined_types, &globals, &mut scopes, stat, &ret, false)?;
+        }
+
+        match ret {
+            Type::Name(n) if n == "Unit" => (),
+            _ if !has_ret => return Err(TypeError {
+                message: format!("function {name} must terminate with return")
+            }),
+            _ => (),
         }
 
         for i in 0..type_vars.len() {
@@ -161,7 +170,7 @@ fn typecheck_stat(
     stat: &Statement,
     expected_ret: &Type,
     in_loop: bool,
-) -> Result<(), TypeError> {
+) -> Result<bool, TypeError> {
     match stat {
         Statement::FuncCall { func, args } => {
             let mut a = Vec::new();
@@ -172,20 +181,20 @@ fn typecheck_stat(
             let f = lookup(type_vars, globals, scopes, func)?;
             let ret = valid_call(type_vars, &f, &a)?;
             unify(type_vars, ret, &Type::Name("Unit".to_string()))?;
-            Ok(())
+            Ok(false)
         }
 
         Statement::Let { name, value } => {
             let ty = typecheck_expr(type_vars, globals, scopes, value)?;
             scopes.last_mut().unwrap().insert(name.clone(), ty);
-            Ok(())
+            Ok(false)
         }
 
         Statement::Set { name, value } => {
             let ty = typecheck_expr(type_vars, globals, scopes, value)?;
             let local = &lookup_local(type_vars, scopes, name)?;
             unify(type_vars, local, &ty)?;
-            Ok(())
+            Ok(false)
         }
 
         Statement::Loop { body } => {
@@ -195,12 +204,12 @@ fn typecheck_stat(
             }
 
             scopes.pop();
-            Ok(())
+            Ok(false)
         }
 
         Statement::Break | Statement::Continue => {
             if in_loop {
-                Ok(())
+                Ok(false)
             } else {
                 Err(TypeError {
                     message: "tried to use loop control flow outside of a loop".to_string(),
@@ -214,7 +223,7 @@ fn typecheck_stat(
                 None => Type::Name("Unit".to_owned()),
             };
             unify(type_vars, &ty, expected_ret)?;
-            Ok(())
+            Ok(true)
         }
 
         Statement::If { cond, then, elsy } => {
@@ -238,18 +247,20 @@ fn typecheck_stat(
                     }
 
                     scopes.push(HashMap::new());
+                    let mut then_ret = false;
                     for stat in then.iter() {
-                        typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, in_loop)?;
+                        then_ret |= typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, in_loop)?;
                     }
                     scopes.pop();
 
                     scopes.push(HashMap::new());
+                    let mut else_ret = false;
                     for stat in elsy.iter() {
-                        typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, in_loop)?;
+                        else_ret |= typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, in_loop)?;
                     }
                     scopes.pop();
 
-                    Ok(())
+                    Ok(then_ret && else_ret)
                 }
 
                 _ => Err(TypeError {
@@ -261,20 +272,23 @@ fn typecheck_stat(
         Statement::Match { value, branches } => {
             let t = typecheck_expr(type_vars, globals, scopes, value)?;
 
+            let mut ret = !branches.is_empty();
             for (pat, stats) in branches {
                 let mut map = HashMap::new();
                 let tp = typecheck_pat(type_vars, globals, defined_types, &mut map, pat)?;
                 unify(type_vars, &t, &tp)?;
                 scopes.push(map);
 
+                let mut branch_ret = false;
                 for stat in stats {
-                    typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, in_loop)?;
+                    branch_ret |= typecheck_stat(type_vars, defined_types, globals, scopes, stat, expected_ret, in_loop)?;
                 }
 
+                ret &= branch_ret;
                 scopes.pop();
             }
 
-            Ok(())
+            Ok(ret)
         }
     }
 }
