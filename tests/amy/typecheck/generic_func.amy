@@ -13,6 +13,6 @@ def main() do
 	let _ = id(2)
 	let _ = id(X)
 	let _ = id(Some(2))
-	let x = id(None)
+	let x = id(None())
 	x = Some(X)
 end

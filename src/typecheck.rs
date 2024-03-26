@@ -23,11 +23,6 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
     let mut globals = HashMap::new();
     let mut defined_types = HashMap::new();
     let mut type_vars = Vec::new();
-    defined_types.insert("Fn".to_owned(), TypeData {
-        va_params: false,
-        params: vec!["A".to_owned(), "R".to_owned()],
-        variants: Vec::new(),
-    });
     defined_types.insert("Tuple".to_owned(), TypeData {
         va_params: true,
         params: Vec::new(),
@@ -46,6 +41,11 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
     defined_types.insert("String".to_owned(), TypeData {
         va_params: false,
         params: Vec::new(),
+        variants: Vec::new(),
+    });
+    defined_types.insert("Pointer".to_owned(), TypeData {
+        va_params: false,
+        params: vec!["T".to_string()],
         variants: Vec::new(),
     });
 
@@ -76,21 +76,12 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
                         });
                     };
 
-                    if variant.fields.is_empty() {
-                        v.insert(GlobalData {
-                            type_: self_type.clone(),
-                            variant_of: Some(name.clone()),
-                        });
-                    } else {
-                        v.insert(GlobalData {
-                            type_: Type::App(
-                            Box::new(Type::Name("Fn".to_owned())),
-                            vec![
-                                Type::App(Box::new(Type::Name("Tuple".to_owned())), variant.fields.clone()),
-                                self_type.clone()]),
-                            variant_of: Some(name.clone()),
-                        });
-                    }
+                    v.insert(GlobalData {
+                        type_: Type::Func(
+                            variant.fields.clone(),
+                            Box::new(self_type.clone())),
+                        variant_of: Some(name.clone()),
+                    });
                 }
 
                 let data = TypeData {
@@ -111,9 +102,7 @@ pub fn typecheck(ast: &[TopLevel]) -> Result<(), TypeError> {
 
                 let fn_args: Vec<_> = args.iter().map(|(_, t)| t.clone()).collect();
                 v.insert(GlobalData {
-                    type_: Type::App(
-                    Box::new(Type::Name("Fn".to_owned())),
-                    vec![Type::App(Box::new(Type::Name("Tuple".to_owned())), fn_args), ret.clone()]),
+                    type_: Type::Func(fn_args, Box::new(ret.clone())),
                     variant_of: None,
                 });
             }
@@ -498,6 +487,11 @@ fn instantiate_generics_with_map(
             }
         }
 
+        Type::Func(a, r) => Type::Func(
+            a.iter().map(|t| instantiate_generics_with_map(generics, type_vars, t)).collect(),
+            Box::new(instantiate_generics_with_map(generics, type_vars, r)),
+        ),
+
         Type::App(f, a) => Type::App(
             Box::new(instantiate_generics_with_map(generics, type_vars, f)),
             a.iter().map(|t| instantiate_generics_with_map(generics, type_vars, t)).collect()
@@ -534,14 +528,34 @@ fn verify_type(t: &Type, defined_types: &HashMap<String, TypeData>) -> Result<()
                 }
             }
 
+            Type::Func(args, ret) => {
+                for arg in args {
+                    let (Some(0) | None) = helper(arg, defined_types)?
+                    else {
+                        return Err(TypeError {
+                            message: format!("function parameter {arg} should have 0 expected type parameters"),
+                        });
+                    };
+                }
+
+                let (Some(0) | None) = helper(ret, defined_types)?
+                else {
+                    return Err(TypeError {
+                        message: format!("function return {ret} should have 0 expected type parameters"),
+                    });
+                };
+
+                Ok(Some(0))
+            }
+
             Type::App(f, a) => {
                 for a in a {
-                    if let Some(0) | None = helper(a, defined_types)? { }
+                    let (Some(0) | None) = helper(a, defined_types)?
                     else {
                         return Err(TypeError {
                             message: format!("type parameter {a} should have 0 expected type parameters"),
                         });
-                    }
+                    };
                 }
 
                 let Some(expected_count) = helper(f, defined_types)?
@@ -575,28 +589,17 @@ fn valid_call<'a>(
     args: &[Type],
 ) -> Result<&'a Type, TypeError> {
     match f {
-        Type::App(fa, v) => {
-            let Type::Name(n) = &**fa
-            else {
+        Type::Func(params, ret) => {
+            if args.len() != params.len() {
                 return Err(TypeError {
-                    message: format!("type {f} is not callable"),
-                });
-            };
-
-            if n != "Fn" {
-                return Err(TypeError {
-                    message: format!("type {f} is not callable"),
+                    message: format!("passed in {} arguments when expected {}", args.len(), params.len()),
                 });
             }
 
-            if v.len() != 2 {
-                return Err(TypeError {
-                    message: format!("type {f} is not a valid function type"),
-                })
+            for (a, t) in args.iter().zip(params.iter()) {
+                unify(type_vars, a, t)?;
             }
-
-            unify(type_vars, &v[0], &Type::App(Box::new(Type::Name("Tuple".to_owned())), args.to_owned()))?;
-            Ok(&v[1])
+            Ok(&ret)
         }
 
         _ => Err(TypeError {
@@ -660,6 +663,24 @@ fn unify(
         }
 
         (Type::Name(n1), Type::Name(n2)) if n1 == n2 => Ok(t1.clone()),
+
+        (Type::Func(a1, r1), Type::Func(a2, r2)) => {
+            if a1.len() != a2.len() {
+                return Err(TypeError {
+                    message: format!("types {} and {} cannot be unified", t1, t2),
+                });
+            }
+
+            let mut a = Vec::new();
+            for (a1, a2) in a1.iter().zip(a2.iter()) {
+                a.push(unify(type_vars, a1, a2)?);
+            }
+
+            let r = unify(type_vars, r1, r2)?;
+
+            Ok(Type::Func(a, Box::new(r)))
+        }
+
         (Type::App(f1, a1), Type::App(f2, a2)) => {
             let f = unify(type_vars, f1, f2)?;
 

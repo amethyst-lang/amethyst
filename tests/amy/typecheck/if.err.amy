@@ -5,6 +5,6 @@ type NotIfCompat as
 end
 
 def main() do
-	if A then
+	if A() then
 	end
 end

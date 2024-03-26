@@ -7,5 +7,5 @@ type X as X end
 
 def main() do
 	let x = Some(2)
-	x = Some(X)
+	x = Some(X())
 end

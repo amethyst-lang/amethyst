@@ -54,16 +54,16 @@ impl Parser {
         use OpAssoc::*;
 
         let mut map = HashMap::new();
-        map.insert("::".to_owned(), Infix(0, Right));
+        map.insert("::".to_owned(), Infix(5, Right));
         map.insert("+".to_owned(), Infix(10, Left));
         map.insert("-".to_owned(), Infix(10, Left));
         map.insert("*".to_owned(), Infix(20, Left));
         map.insert("/".to_owned(), Infix(20, Left));
-        map.insert("**".to_owned(), Infix(30, Right));
-        map.insert("?".to_owned(), Postfix);
-        map.insert(".*".to_owned(), Postfix);
+        // map.insert("**".to_owned(), Infix(30, Right));
+        // map.insert("?".to_owned(), Postfix);
+        map.insert("!".to_owned(), Postfix);
+        map.insert(":=".to_owned(), Infix(0, Right));
         map.insert("~".to_owned(), Prefix);
-        map.insert("!".to_owned(), Prefix);
         map
     }
 
@@ -618,7 +618,21 @@ impl Parser {
                 }
             }
             consume_token!(self.lexer, Token::RBrack, "type arguments must terminate in a `]`");
-            Ok(Type::App(Box::new(head), args))
+
+            match head {
+                Type::Name(n) if n == "Fn" => {
+                    let ret = if let (Token::RArrow, ..) = self.lexer.peek() {
+                        self.lexer.lex();
+                        self.parse_type(generics)?
+                    } else {
+                        Type::Name("Unit".to_owned())
+                    };
+
+                    Ok(Type::Func(args, Box::new(ret)))
+                }
+
+                head => Ok(Type::App(Box::new(head), args))
+            }
         } else {
             Ok(head)
         }

@@ -5,6 +5,7 @@ pub enum Type {
     Typevar(usize),
     Name(String),
     Generic(String),
+    Func(Vec<Type>, Box<Type>),
     App(Box<Type>, Vec<Type>),
 }
 
@@ -23,6 +24,22 @@ impl Display for Type {
             Type::Typevar(i) => write!(f, "${}", i),
             Type::Name(n) => write!(f, "{}", n),
             Type::Generic(g) => write!(f, "'{}", g),
+
+            Type::Func(args, ret) => {
+                write!(f, "Fn[")?;
+
+                let mut first = true;
+                for arg in args {
+                    if first {
+                        write!(f, "{}", arg)?;
+                        first = false;
+                    } else {
+                        write!(f, ", {}", arg)?;
+                    }
+                }
+
+                write!(f, "] -> {}", ret)
+            }
 
             Type::App(f_, a) => {
                 write!(f, "{}[", f_)?;

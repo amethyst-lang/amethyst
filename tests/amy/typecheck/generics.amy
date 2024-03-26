@@ -7,7 +7,7 @@ type X as X end
 
 def main() do
 	let x = Some(2)
-	x = None
-	let y = None
+	x = None()
+	let y = None()
 	y = Some(X)
 end
